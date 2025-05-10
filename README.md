@@ -1,63 +1,57 @@
 # Alpaca Assist
 
-Alpaca Assist is a Python-based chat application that provides an interface for interacting with AI language models. It uses a custom API that emulates the Ollama API format but connects to the Claude AI model in the backend.
+A desktop chat application that provides a convenient interface for interacting with LLM APIs.
 
 ## Features
 
-- Multi-tab chat interface
-- Syntax highlighting for chat messages
-- Ability to copy and paste text
-- Code block copying functionality
-- File content expansion in prompts
+- Multi-tab chat interface with syntax highlighting
+- Code block detection and copying
+- File path autocompletion
+- API integration with Ollama (or Claude via the included emulator)
+- Customizable tab summaries
+- Keyboard shortcuts for common operations
 
-## Files in the Repository
-
-1. `main.py`: The main application file containing the GUI implementation using tkinter.
-2. `expansion_language.py`: A module for expanding file references in the input prompts.
-3. `anthropic_ollama_server.py`: A Flask-based API emulator that interfaces with the Claude AI model.
-
-## Setup and Installation
+## Installation
 
 1. Clone the repository:
-   ```
+   ```bash
    git clone https://github.com/yourusername/alpaca-assist.git
    cd alpaca-assist
    ```
 
 2. Install the required dependencies:
-   ```
+   ```bash
    pip install -r requirements.txt
    ```
 
-3. Set up your Anthropic API key:
-   - Either set it as an environment variable:
-     ```
-     export ANTHROPIC_API_KEY=your_api_key_here
-     ```
-   - Or modify the `ClaudeClient` class in `anthropic_ollama_server.py` to include your API key.
-
-## Usage
-
-1. Start the API emulator:
-   ```
-   python anthropic_ollama_server.py
+3. Run the application:
+   ```bash
+   python alpaca_assist.py
    ```
 
-2. In a separate terminal, run the main application:
+## Using the Claude Emulator
+
+The repository includes an Ollama API emulator that routes requests to Claude via the Anthropic API. To use it:
+
+1. Set your Anthropic API key as an environment variable:
+   ```bash
+   export ANTHROPIC_API_KEY=your_api_key_here
    ```
-   python main.py
+
+2. Run the emulator:
+   ```bash
+   python ollama_emulator.py
    ```
 
-3. Use the GUI to interact with the AI model:
-   - Create new chat tabs
-   - Type prompts and submit them
-   - Copy and paste text as needed
-   - Use the "/file:" syntax to expand file contents in your prompts
+3. Start the Alpaca Assist application in another terminal window.
 
-## Contributing
+## File Completions
 
-Contributions to Alpaca Assist are welcome! Please feel free to submit a Pull Request.
+The application supports file path autocompletion. You can:
+
+1. Add files to the completion list via the "Manage File Completions" option in the Edit menu
+2. Trigger completions by typing `/file:` or `/file` in the input field
 
 ## License
 
-This project is open source and available under the [MIT License](LICENSE).
+[MIT License](LICENSE)

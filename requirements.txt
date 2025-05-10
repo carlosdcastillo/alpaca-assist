@@ -1,4 +1,4 @@
-requests==2.26.0
-flask==2.0.1
-anthropic==0.3.0
-pygments==2.10.0
+requests>=2.31.0
+pyperclip>=1.8.2
+pygments>=2.15.1
+typing-extensions>=4.7.1
