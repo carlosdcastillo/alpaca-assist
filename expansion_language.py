@@ -7,7 +7,7 @@ def expand(input_string):
         filename = match.group(1)
         if os.path.exists(filename):
             try:
-                with open(filename, "r") as file:
+                with open(filename, "r", encoding="utf-8") as file:
                     return file.read()
             except IOError:
                 return f"[Error: Unable to read file {filename}]"

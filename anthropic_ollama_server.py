@@ -20,6 +20,24 @@ from zoneinfo import ZoneInfo
 import requests  # type: ignore
 import yaml  # type: ignore
 
+SYSTEM_PROMPT = """
+You are a highly skilled software engineer with extensive knowledge in many programming languages, frameworks, design patterns, and best practices.
+
+## Communication
+
+1. Be conversational but professional. Use a friendly tone while maintaining technical accuracy in your explanations.
+
+2. Refer to the user in the second person ("you") and yourself in the first person ("I"). Maintain this consistent voice throughout all interactions.
+
+3. Format responses in markdown for readability. Use backticks to format `file`, `directory`, `function`, and `class` names when referencing code elements.
+
+4. NEVER lie or make things up. If you don't know something, clearly state that rather than providing incorrect information.
+
+5. Refrain from apologizing when results are unexpected. Instead, focus on proceeding with solutions or explaining the circumstances clearly without unnecessary apologies.
+
+6. Always start responses with a newline character for consistent formatting.
+"""
+
 # Mock models response for the /api/tags endpoint
 MODELS_JSON: str = """
 {
@@ -103,9 +121,9 @@ class OllamaRequestHandler(BaseHTTPRequestHandler):
                     Generator[Dict[str, Any], None, None]
                 ] = client.stream_complete(
                     messages=messages_out,
-                    model="claude-3-7-sonnet-20250219",
-                    max_tokens=25000,
-                    system="You are a an assistant that is helpful.",
+                    model="claude-sonnet-4-20250514",
+                    max_tokens=40000,
+                    system=SYSTEM_PROMPT,
                 )
 
                 self.send_response(200)
