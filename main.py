@@ -1,5 +1,6 @@
 import json
 import os
+import platform
 import queue
 import re
 import threading
@@ -79,66 +80,200 @@ class ChatTab:
         self.content_update_queue: queue.Queue[ContentUpdate] = queue.Queue()
         self.answer_end_positions: dict[int, str] = {}  # Track where each answer ends
 
+        # Thread safety for queue processor
+        self._processor_lock = threading.Lock()
         self._queue_processor_running: bool = False
 
+    def cleanup_resources(self):
+        """Add this method - call when tab is destroyed"""
+        # Stop queue processor
+        with self._processor_lock:
+            self._queue_processor_running = False
+
+        # Clear queues to prevent memory leaks
+        while not self.content_update_queue.empty():
+            try:
+                self.content_update_queue.get_nowait()
+            except queue.Empty:
+                break
+
+        # Clean up autocomplete
+        self.hide_autocomplete_menu()
+
     def process_content_queue(self) -> None:
-        """Process queue with proper lifecycle management."""
+        """Process queue with smart highlighting throttling and proper termination."""
+
+        # Check if we should still be running
+        with self._processor_lock:
+            if not self._queue_processor_running:
+                print("Queue processor stopping - flag is False")
+                return
+
         updates_processed = 0
         streaming_finished = False
+        content_accumulated = 0
+        last_highlight_time = time.time()
+        has_pending_updates = False
 
-        # Process all available updates
-        while True:
-            try:
-                update = self.content_update_queue.get_nowait()
+        # Highlighting thresholds
+        HIGHLIGHT_MIN_INTERVAL = 0.5  # Minimum 500ms between highlights
+        HIGHLIGHT_CONTENT_THRESHOLD = 300  # Or every 300 characters
+        HIGHLIGHT_UPDATE_THRESHOLD = 25  # Or every 25 updates
 
-                # Update ChatState (for data integrity)
-                if update.is_error:
-                    error_content = f"\n\n[Error: {update.content_chunk}]"
-                    self.chat_state.append_to_answer(update.answer_index, error_content)
-                    self.chat_state.finish_streaming()
-                    content_to_insert = error_content
-                    streaming_finished = True
-                else:
-                    self.chat_state.append_to_answer(
-                        update.answer_index,
-                        update.content_chunk,
-                    )
-                    if update.is_done:
+        try:
+            # Process all available updates
+            while True:
+                try:
+                    update = self.content_update_queue.get_nowait()
+                    has_pending_updates = True
+
+                    # Update ChatState (for data integrity)
+                    if update.is_error:
+                        error_content = f"\n\n[Error: {update.content_chunk}]"
+                        self.chat_state.append_to_answer(
+                            update.answer_index,
+                            error_content,
+                        )
                         self.chat_state.finish_streaming()
+                        content_to_insert = error_content
                         streaming_finished = True
-                    content_to_insert = update.content_chunk
+                    else:
+                        self.chat_state.append_to_answer(
+                            update.answer_index,
+                            update.content_chunk,
+                        )
+                        if update.is_done:
+                            self.chat_state.finish_streaming()
+                            streaming_finished = True
+                        content_to_insert = update.content_chunk
 
-                # Directly update the text widget
-                self._insert_content_at_answer(update.answer_index, content_to_insert)
-                updates_processed += 1
+                    # Directly update the text widget
+                    self._insert_content_at_answer(
+                        update.answer_index,
+                        content_to_insert,
+                    )
+                    updates_processed += 1
+                    content_accumulated += len(content_to_insert)
 
-                # Handle summary generation on completion
-                if (
-                    update.is_done
-                    and update.answer_index == 0
-                    and not self.summary_generated
-                ):
-                    self.summary_generated = True
-                    self.parent.master.after(500, self.get_summary)
+                    # Smart highlighting decision
+                    current_time = time.time()
+                    time_since_last_highlight = current_time - last_highlight_time
 
-            except queue.Empty:
-                break  # No more updates to process right now
+                    should_highlight = (
+                        # Time-based: At least 500ms have passed
+                        time_since_last_highlight >= HIGHLIGHT_MIN_INTERVAL
+                        or
+                        # Content-based: Accumulated enough content
+                        content_accumulated >= HIGHLIGHT_CONTENT_THRESHOLD
+                        or
+                        # Update-based: Processed enough updates
+                        updates_processed >= HIGHLIGHT_UPDATE_THRESHOLD
+                        or
+                        # Always highlight when streaming is done
+                        update.is_done
+                    )
 
-        # Highlight syntax after all updates (more efficient than per-chunk)
-        if updates_processed > 0:
+                    if should_highlight:
+                        self.chat_display.highlight_text()
+                        last_highlight_time = current_time
+                        content_accumulated = 0  # Reset accumulator
+
+                    # Handle summary generation on completion
+                    if (
+                        update.is_done
+                        and update.answer_index == 0
+                        and not self.summary_generated
+                    ):
+                        self.summary_generated = True
+                        self.parent.master.after(1000, self.get_summary)
+
+                    # If streaming is finished, we can exit the processing loop
+                    if streaming_finished:
+                        break
+
+                except queue.Empty:
+                    # No more updates to process right now
+                    break
+
+            # Final highlight only if we processed updates and haven't highlighted recently
+            current_time = time.time()
+            if (
+                updates_processed > 0
+                and (current_time - last_highlight_time) >= HIGHLIGHT_MIN_INTERVAL
+            ):
+                self.chat_display.highlight_text()
+
+            # Determine if we should continue processing
+            if streaming_finished:
+                # Streaming is completely done, finish up
+                self._finish_streaming()
+                return
+
+            # Continue processing - we need to keep running until we get the "done" signal
+            # The processor should only stop when:
+            # 1. We receive an update with is_done=True, OR
+            # 2. We receive an error update, OR
+            # 3. The processor is manually stopped
+
+            with self._processor_lock:
+                if self._queue_processor_running:
+                    # Always continue if we're supposed to be running and haven't received "done"
+                    # Use adaptive delay: shorter if we just processed updates, longer if idle
+                    delay = 100 if has_pending_updates else 200
+                    self.parent.master.after(delay, self.process_content_queue)
+                else:
+                    print("Queue processor stopping - manually stopped")
+
+        except Exception as e:
+            print(f"Error in queue processor: {e}")
+            import traceback
+
+            traceback.print_exc()
+            self._finish_streaming()
+
+    def has_pending_api_requests(self) -> bool:
+        """Check if there are pending API requests."""
+        return not self.input_queue.empty()
+
+    def _finish_streaming(self):
+        """Clean finish with single final highlight."""
+        print("Finishing streaming and stopping processor")
+        self._stop_processor()
+        self.chat_display.config(state=tk.NORMAL)
+
+        # Only ONE final comprehensive highlight
+        self.parent.master.after(200, self._final_highlight)
+
+    def _stop_processor(self):
+        """Atomically stop the queue processor."""
+        with self._processor_lock:
+            if self._queue_processor_running:
+                print("Queue processor stopped")
+                self._queue_processor_running = False
+
+    def _start_processor_if_needed(self):
+        """Only start processor if not already running."""
+        with self._processor_lock:
+            if not self._queue_processor_running:
+                self._queue_processor_running = True
+                print(f"Starting queue processor for tab")
+                # Start immediately, don't use after()
+                self.parent.master.after(0, self.process_content_queue)
+                return True
+            else:
+                print("Queue processor already running")
+        return False
+
+    def _final_highlight(self):
+        """Perform final comprehensive highlighting after streaming is complete."""
+        try:
+            # Force a complete re-highlight by resetting the highlighting state
+            self.chat_display.last_highlighted_content = ""
+            self.chat_display.last_highlighted_length = 0
             self.chat_display.highlight_text()
-
-        # Continue processing unless streaming is finished
-        if not streaming_finished:
-            # Schedule next check - keep the processor running
-            self.parent.master.after(50, self.process_content_queue)
-        else:
-            # Stop the processor only when streaming is actually complete
-            self._queue_processor_running = False
-            print(f"Queue processor stopped. Processed {updates_processed} updates.")
-
-            # Re-enable text widget editing when streaming is complete
-            self.chat_display.config(state=tk.NORMAL)
+            print("Final highlighting completed")
+        except Exception as e:
+            print(f"Error in final highlighting: {e}")
 
     def _insert_content_at_answer(self, answer_index: int, content: str) -> None:
         """Directly insert content at the end of a specific answer."""
@@ -227,10 +362,8 @@ class ChatTab:
         self.chat_display.bind("<Control-e>", self.go_to_end_of_line)
         self.chat_display.bind("<Control-a>", self.go_to_start_of_line)
         self.chat_display.bind("<FocusIn>", self.parent.update_last_focused)
-        self.chat_display.bind(
-            "<KeyRelease>",
-            lambda e: self.chat_display.highlight_text(),
-        )
+        self._last_chat_highlight_time = 0.0
+        self.chat_display.bind("<KeyRelease>", self._handle_chat_display_key_release)
 
         # Create frame for input field
         input_frame = ttk.Frame(self.paned_window)
@@ -256,59 +389,124 @@ class ChatTab:
         self.input_field.bind("<Control-e>", self.go_to_end_of_line)
         self.input_field.bind("<Control-a>", self.go_to_start_of_line)
         self.input_field.bind("<FocusIn>", self.parent.update_last_focused)
-        self.input_field.bind("<KeyRelease>", self.check_for_autocomplete)
-        self.input_field.bind(
-            "<KeyRelease>",
-            lambda e: self.input_field.highlight_text(),
-            add=True,
-        )
-        self.input_field.bind("<KeyPress>", self.check_for_autocomplete)
-        self.input_field.bind(
-            "<KeyPress>",
-            lambda e: self.input_field.highlight_text(),
-            add=True,
-        )
+        self._last_input_highlight_time = 0.0
+        self._input_highlight_throttle = 0.15  # 150ms throttle
+
+        # Replace multiple bindings with single throttled handler
+        self.input_field.bind("<KeyRelease>", self._handle_input_key_release)
+        self.input_field.bind("<KeyPress>", self._handle_input_key_press)
+
         self.input_field.bind("<FocusOut>", lambda e: self.hide_autocomplete_menu())
         self.input_field.bind("<Button-1>", lambda e: self.hide_autocomplete_menu())
 
         button_frame = ttk.Frame(input_frame)
         button_frame.pack(side="left", padx=5, fill="y")
 
-        submit_button = ttk.Button(
-            button_frame,
-            text="Submit",
-            command=self.submit_message,
-            style="Custom.TButton",
-        )
-        submit_button.pack(pady=2, fill="x")
-        ToolTip(submit_button, "Submit (Ctrl+Enter)")
+        # Detect platform
+        is_macos = platform.system() == "Darwin"
 
-        paste_button = ttk.Button(
-            button_frame,
-            text="Paste",
-            command=self.parent.paste_text,
-            style="Custom.TButton",
-        )
-        paste_button.pack(pady=2, fill="x")
-        ToolTip(paste_button, "Paste (Ctrl+V)")
+        if is_macos:
+            # Use tk.Button for macOS
+            submit_button = tk.Button(
+                button_frame,
+                text="Submit",
+                command=self.submit_message,
+                height=2,
+            )
+            submit_button.pack(pady=2, fill="x")
+            ToolTip(submit_button, "Submit (Ctrl+Enter)")
 
-        copy_button = ttk.Button(
-            button_frame,
-            text="Copy",
-            command=self.parent.copy_text,
-            style="Custom.TButton",
-        )
-        copy_button.pack(pady=2, fill="x")
-        ToolTip(copy_button, "Copy (Ctrl+C)")
+            paste_button = tk.Button(
+                button_frame,
+                text="Paste",
+                command=self.parent.paste_text,
+                height=2,
+            )
+            paste_button.pack(pady=2, fill="x")
+            ToolTip(paste_button, "Paste (Ctrl+V)")
 
-        copy_code_button = ttk.Button(
-            button_frame,
-            text="Copy Code",
-            command=self.parent.copy_code_block,
-            style="Custom.TButton",
-        )
-        copy_code_button.pack(pady=2, fill="x")
-        ToolTip(copy_code_button, "Copy Code (Ctrl+B)")
+            copy_button = tk.Button(
+                button_frame,
+                text="Copy",
+                command=self.parent.copy_text,
+                height=2,
+            )
+            copy_button.pack(pady=2, fill="x")
+            ToolTip(copy_button, "Copy (Ctrl+C)")
+
+            copy_code_button = tk.Button(
+                button_frame,
+                text="Copy Code",
+                command=self.parent.copy_code_block,
+                height=2,
+            )
+            copy_code_button.pack(pady=2, fill="x")
+            ToolTip(copy_code_button, "Copy Code (Ctrl+B)")
+        else:
+            # Use ttk.Button for Windows and other platforms
+            submit_button = ttk.Button(
+                button_frame,
+                text="Submit",
+                command=self.submit_message,
+                style="Custom.TButton",
+            )
+            submit_button.pack(pady=2, fill="x")
+            ToolTip(submit_button, "Submit (Ctrl+Enter)")
+
+            paste_button = ttk.Button(
+                button_frame,
+                text="Paste",
+                command=self.parent.paste_text,
+                style="Custom.TButton",
+            )
+            paste_button.pack(pady=2, fill="x")
+            ToolTip(paste_button, "Paste (Ctrl+V)")
+
+            copy_button = ttk.Button(
+                button_frame,
+                text="Copy",
+                command=self.parent.copy_text,
+                style="Custom.TButton",
+            )
+            copy_button.pack(pady=2, fill="x")
+            ToolTip(copy_button, "Copy (Ctrl+C)")
+
+            copy_code_button = ttk.Button(
+                button_frame,
+                text="Copy Code",
+                command=self.parent.copy_code_block,
+                style="Custom.TButton",
+            )
+            copy_code_button.pack(pady=2, fill="x")
+            ToolTip(copy_code_button, "Copy Code (Ctrl+B)")
+
+    def _handle_chat_display_key_release(self, event: tk.Event) -> None:
+        current_time = time.time()
+
+        if (
+            current_time - self._last_chat_highlight_time
+            >= self._input_highlight_throttle
+        ):
+            self.chat_display.highlight_text()
+            self._last_chat_highlight_time = current_time
+
+    def _handle_input_key_release(self, event: tk.Event) -> None:
+        """Combined handler with throttling."""
+        # Handle autocomplete
+        self.check_for_autocomplete(event)
+
+        # Throttled highlighting
+        current_time = time.time()
+        if (
+            current_time - self._last_input_highlight_time
+            >= self._input_highlight_throttle
+        ):
+            self.input_field.highlight_text()
+            self._last_input_highlight_time = current_time
+
+    def _handle_input_key_press(self, event: tk.Event) -> None:
+        """Handle key press for autocomplete only."""
+        self.check_for_autocomplete(event)
 
     def submit_message(self) -> str:
         """Submit message and initialize queue-based streaming."""
@@ -335,12 +533,10 @@ class ChatTab:
             # Disable editing during streaming
             self.chat_display.config(state=tk.DISABLED)
 
-            # Start the queue processor if not already running
-            if not self._queue_processor_running:
-                self._queue_processor_running = True
-                self.process_content_queue()
+            # Start the queue processor if needed (replaces the old atomic check)
+            self._start_processor_if_needed()
 
-            # Update legacy lists for compatibility
+            # Update legacy lists for backward compatibility during transition
             self.chat_history_questions = self.chat_state.questions.copy()
             self.chat_history_answers = self.chat_state.answers.copy()
 
@@ -355,12 +551,14 @@ class ChatTab:
                 },
             )
 
+            # Start API request thread
             threading.Thread(
                 target=self.parent.fetch_api_response,
                 args=(self, answer_index),
                 daemon=True,
             ).start()
 
+            # Clear input field
             self.input_field.delete("1.0", tk.END)
 
         return "break"
@@ -417,7 +615,6 @@ class ChatTab:
                 sep = "-" * 80
                 self.chat_display.insert(tk.END, f"\n{sep}\n\n")
 
-        self.chat_display.config(state=tk.DISABLED)
         self.chat_display.highlight_text()
 
     def _save_scroll_position(self) -> dict:
@@ -644,10 +841,8 @@ class ChatTab:
         self.file_completions = new_completions
 
     def show_autocomplete_menu(self, filter_text: str = "") -> None:
-        """
-        Display the autocomplete listbox with file path completions filtered by the typed text.
-        """
-        # Filter completions based on the typed text
+        """Display the autocomplete listbox with file path completions."""
+        # Filter completions
         if filter_text:
             self.filtered_completions = [
                 comp
@@ -657,58 +852,155 @@ class ChatTab:
         else:
             self.filtered_completions = self.file_completions.copy()
 
-        # Don't show menu if no matches
         if not self.filtered_completions:
             self.hide_autocomplete_menu()
             return
 
-        # Hide existing menu if any
+        # Hide existing menu
         self.hide_autocomplete_menu()
 
-        # Get the current cursor position
-        bbox_result = self.input_field.bbox("insert")
-        if bbox_result is None:
+        # Get cursor position
+        try:
+            bbox_result = self.input_field.bbox("insert")
+            if bbox_result is None:
+                return
+            x, y, _, h = bbox_result
+        except tk.TclError:
             return
 
-        x, y, _, h = bbox_result
-
-        # Create autocomplete window
-        self.autocomplete_window = tk.Toplevel(self.input_field)
+        # Create autocomplete window as child of main window (not input field)
+        self.autocomplete_window = tk.Toplevel(self.parent.master)  # Changed this line
         self.autocomplete_window.wm_overrideredirect(True)
-        self.autocomplete_window.configure(bg="white", relief="solid", bd=1)
 
-        # Position the window below the cursor
-        window_x = self.input_field.winfo_rootx() + x
-        window_y = self.input_field.winfo_rooty() + y + h
-        self.autocomplete_window.geometry(f"+{window_x}+{window_y}")
+        # macOS-specific configuration
+        is_macos = self.parent.master.tk.call("tk", "windowingsystem") == "aqua"
 
-        # Create listbox
+        if is_macos:
+            self.autocomplete_window.configure(
+                bg="#FFFFFF",
+                relief="solid",
+                bd=1,
+                highlightthickness=0,
+            )
+            self.autocomplete_window.attributes("-topmost", True)
+        else:
+            self.autocomplete_window.configure(bg="white", relief="solid", bd=1)
+
+        # Position window relative to input field but as child of main window
+        try:
+            # Get absolute position of cursor in input field
+            input_abs_x = self.input_field.winfo_rootx() + x
+            input_abs_y = self.input_field.winfo_rooty() + y + h + 2
+
+            # Get main window position
+            main_abs_x = self.parent.master.winfo_rootx()
+            main_abs_y = self.parent.master.winfo_rooty()
+
+            # Calculate relative position within main window
+            rel_x = input_abs_x - main_abs_x
+            rel_y = input_abs_y - main_abs_y
+
+            # Position relative to main window
+            self.autocomplete_window.geometry(f"+{input_abs_x}+{input_abs_y}")
+
+            if is_macos:
+                self.autocomplete_window.update_idletasks()
+                self.autocomplete_window.lift()
+
+        except tk.TclError as e:
+            print(f"Error positioning autocomplete window: {e}")
+            self.hide_autocomplete_menu()
+            return
+
+        # Rest of the method remains the same...
+        font_family = str(self.preferences["font_family"])
+        font_size = int(str(self.preferences["font_size"]))
+
+        listbox_config = {
+            "height": min(8, len(self.filtered_completions)),
+            "width": 50,
+            "font": (font_family, font_size),
+            "exportselection": False,
+            "activestyle": "none",
+        }
+
+        if is_macos:
+            listbox_config.update(
+                {
+                    "bg": "#FFFFFF",
+                    "fg": "#000000",
+                    "selectbackground": "#007AFF",
+                    "selectforeground": "#FFFFFF",
+                    "highlightthickness": 0,
+                    "borderwidth": 0,
+                    "relief": "flat",
+                },
+            )
+        else:
+            listbox_config.update(
+                {
+                    "bg": "white",
+                    "fg": "black",
+                    "selectbackground": "#0078d4",
+                    "selectforeground": "white",
+                },
+            )
+
         self.autocomplete_listbox = tk.Listbox(
             self.autocomplete_window,
-            height=min(8, len(self.filtered_completions)),
-            width=50,
-            font=("Cascadia Mono", 10),
-            bg="white",
-            fg="black",
-            selectbackground="#0078d4",
-            selectforeground="white",
-            activestyle="none",
+            **listbox_config,
         )
-        self.autocomplete_listbox.pack()
+        self.autocomplete_listbox.pack(padx=2, pady=2, fill="both", expand=True)
 
         # Populate listbox
         for completion in self.filtered_completions:
             display_name = os.path.basename(completion)
             self.autocomplete_listbox.insert(tk.END, display_name)
 
-        # Select first item by default
+        # Select first item
         if self.filtered_completions:
             self.autocomplete_listbox.selection_set(0)
             self.autocomplete_listbox.activate(0)
 
-        # Bind events for listbox interaction
+        # Bind events
         self.autocomplete_listbox.bind("<Double-Button-1>", self.on_autocomplete_select)
         self.autocomplete_listbox.bind("<Return>", self.on_autocomplete_select)
+
+        if is_macos:
+            self.autocomplete_window.update_idletasks()
+            self.autocomplete_listbox.update_idletasks()
+            self.autocomplete_window.lift()
+            self.autocomplete_window.attributes("-topmost", True)
+
+            self.parent.master.after(1, self._force_listbox_redraw)
+            self.parent.master.after(10, self._force_listbox_redraw)
+            self.parent.master.after(50, self._force_listbox_redraw)
+        else:
+            self.autocomplete_window.update_idletasks()
+
+    def _force_listbox_redraw(self) -> None:
+        """Force the listbox to redraw - macOS workaround."""
+        if self.autocomplete_listbox and self.autocomplete_window:
+            try:
+                # Multiple techniques to force redraw
+                self.autocomplete_listbox.update_idletasks()
+                self.autocomplete_listbox.update()
+
+                # Force a selection refresh
+                current_selection = self.autocomplete_listbox.curselection()
+                if current_selection:
+                    idx = current_selection[0]
+                    self.autocomplete_listbox.selection_clear(0, tk.END)
+                    self.autocomplete_listbox.selection_set(idx)
+                    self.autocomplete_listbox.activate(idx)
+                    self.autocomplete_listbox.see(idx)
+
+                # Force window refresh
+                self.autocomplete_window.update_idletasks()
+
+            except tk.TclError:
+                # Widget might be destroyed
+                pass
 
     def hide_autocomplete_menu(self) -> None:
         """Hide the autocomplete window if it's currently shown."""
@@ -962,25 +1254,49 @@ class ChatApp:
             padding=(9, 11),
         )  # Adjust vertical padding to a medium value
 
-        # Create New Tab button with medium-height style
-        self.new_tab_button = ttk.Button(
-            self.button_frame,
-            text="New Tab",
-            command=self.create_tab,
-            style="Medium.TButton",  # Apply medium-height style
-        )
-        self.new_tab_button.pack(side="left", padx=(3, 1))
-        ToolTip(self.new_tab_button, "New Tab (Ctrl+N)")
+        # Detect platform
+        is_macos = platform.system() == "Darwin"
 
-        # Create Delete Tab button with medium-height style
-        self.delete_tab_button = ttk.Button(
-            self.button_frame,
-            text="Delete Tab",
-            command=self.delete_tab,
-            style="Medium.TButton",  # Apply medium-height style
-        )
-        self.delete_tab_button.pack(side="left", padx=(1, 3))
-        ToolTip(self.delete_tab_button, "Delete Tab (Ctrl+W)")
+        if is_macos:
+            # Create New Tab button with tk.Button for macOS
+            self.new_tab_button = tk.Button(
+                self.button_frame,
+                text="New Tab",
+                command=self.create_tab,
+                height=2,
+            )
+            self.new_tab_button.pack(side="left", padx=(3, 1))
+            ToolTip(self.new_tab_button, "New Tab (Ctrl+N)")
+
+            # Create Delete Tab button with tk.Button for macOS
+            self.delete_tab_button = tk.Button(
+                self.button_frame,
+                text="Delete Tab",
+                command=self.delete_tab,
+                height=2,
+            )
+            self.delete_tab_button.pack(side="left", padx=(1, 3))
+            ToolTip(self.delete_tab_button, "Delete Tab (Ctrl+W)")
+        else:
+            # Create New Tab button with ttk.Button for other platforms
+            self.new_tab_button = ttk.Button(
+                self.button_frame,
+                text="New Tab",
+                command=self.create_tab,
+                style="Medium.TButton",  # Apply medium-height style
+            )
+            self.new_tab_button.pack(side="left", padx=(3, 1))
+            ToolTip(self.new_tab_button, "New Tab (Ctrl+N)")
+
+            # Create Delete Tab button with ttk.Button for other platforms
+            self.delete_tab_button = ttk.Button(
+                self.button_frame,
+                text="Delete Tab",
+                command=self.delete_tab,
+                style="Medium.TButton",  # Apply medium-height style
+            )
+            self.delete_tab_button.pack(side="left", padx=(1, 3))
+            ToolTip(self.delete_tab_button, "Delete Tab (Ctrl+W)")
 
         # Create notebook
         self.notebook = ttk.Notebook(self.master)
@@ -1234,7 +1550,7 @@ class ChatApp:
 
     def show_about(self) -> None:
         about_text = (
-            "Alpaca Assist\n\nVersion 0.03\n\nA chat application using the Ollama API."
+            "Alpaca Assist\n\nVersion 0.04\n\nA chat application using the Ollama API."
         )
         tk.messagebox.showinfo("About", about_text)
 
@@ -1273,6 +1589,7 @@ class ChatApp:
         if len(self.tabs) > 1:
             current_tab = self.notebook.select()
             tab_index = self.notebook.index(current_tab)
+            self.tabs[tab_index].cleanup_resources()
             self.notebook.forget(current_tab)
             del self.tabs[tab_index]
 
@@ -1421,96 +1738,116 @@ class ChatApp:
         tab: ChatTab,
         summary_queue: queue.Queue,
     ) -> None:
-        """Fetch a summary of the conversation."""
+        """
+        Fetch a summary of the conversation with retry logic and proper error handling.
+
+        Args:
+            tab: The ChatTab instance containing the conversation
+            summary_queue: Queue to put the generated summary into
+        """
         try:
             # Get current state from ChatState (thread-safe)
             questions, answers, _ = tab.chat_state.get_safe_copy()
 
+            # Add retry logic with delay
+            max_retries = 3
+            retry_delay = 1.0  # seconds
+
+            for retry in range(max_retries):
+                # Check if we have valid content to summarize
+                if (
+                    questions
+                    and answers
+                    and questions[0].strip()
+                    and answers[0].strip()
+                ):
+                    break
+
+                if retry < max_retries - 1:
+                    print(f"Waiting for content to be ready (attempt {retry + 1})")
+                    time.sleep(retry_delay)
+                    # Refresh the state
+                    questions, answers, _ = tab.chat_state.get_safe_copy()
+                else:
+                    print("No valid content available for summary after retries")
+                    summary_queue.put("Chat Summary")
+                    return
+
             # Create a summary prompt from the first question and answer
-            if questions and answers and questions[0].strip() and answers[0].strip():
-                first_q = questions[0]
-                first_a = answers[0][:500]  # Limit answer length for summary
+            first_q = questions[0]
+            first_a = answers[0][:500]  # Limit answer length for summary
 
-                summary_prompt = f"Please provide a very brief summary (3-5 words) of this conversation:\n\nQ: {first_q}\nA: {first_a}"
+            summary_prompt = (
+                f"Please provide a very brief summary (3-5 words) of this conversation:\n\n"
+                f"Q: {first_q}\nA: {first_a}"
+            )
 
-                messages = [{"role": "user", "content": summary_prompt}]
+            messages = [{"role": "user", "content": summary_prompt}]
 
-                payload = {
-                    "model": self.preferences["summary_model"],
-                    "messages": messages,
-                    "stream": True,  # Enable streaming for summaries
-                }
+            payload = {
+                "model": self.preferences["summary_model"],
+                "messages": messages,
+                "stream": True,  # Enable streaming for summaries
+            }
 
-                print(
-                    f"Requesting summary with model: {self.preferences['summary_model']}",
-                )
+            print(f"Requesting summary with model: {self.preferences['summary_model']}")
 
-                # Make the streaming API request
-                with requests.post(
-                    BASE_URL,
-                    json=payload,
-                    stream=True,
-                    timeout=30,
-                ) as response:
+            # Make the streaming API request with timeout
+            with requests.post(
+                BASE_URL,
+                json=payload,
+                stream=True,
+                timeout=30,
+            ) as response:
+                if response.status_code != 200:
+                    error_msg = f"Summary API error: Status {response.status_code}"
+                    print(f"{error_msg}\nResponse: {response.text}")
+                    summary_queue.put("Chat Summary")
+                    return
 
-                    if response.status_code != 200:
-                        print(f"Summary API error: Status {response.status_code}")
-                        print(f"Response: {response.text}")
-                        summary_queue.put("Chat Summary")
-                        return
+                # Process streaming response
+                accumulated_summary = ""
+                done_received = False
 
-                    # Process streaming response
-                    accumulated_summary = ""
+                for line in response.iter_lines(decode_unicode=True):
+                    if not line:
+                        continue
 
-                    for line in response.iter_lines(decode_unicode=True):
-                        if not line:
-                            continue
+                    try:
+                        data = json.loads(line.strip())
 
-                        try:
-                            data = json.loads(line.strip())
+                        # Extract content from the response
+                        if "message" in data and "content" in data["message"]:
+                            content_chunk = data["message"]["content"]
+                            if content_chunk:
+                                accumulated_summary += content_chunk
 
-                            # Extract content from the response
-                            if "message" in data and "content" in data["message"]:
-                                content_chunk = data["message"]["content"]
-                                if content_chunk:
-                                    accumulated_summary += content_chunk
+                        # Check if response is complete
+                        if data.get("done", False):
+                            done_received = True
+                            # Clean and limit summary length
+                            summary = self._clean_summary(accumulated_summary)
+                            print(f"Summary generated: {summary}")
+                            summary_queue.put(summary)
+                            return
 
-                            # Check if response is complete
-                            if data.get("done", False):
-                                # Clean and limit summary length
-                                summary = accumulated_summary.strip().replace(
-                                    "\n",
-                                    " ",
-                                )[:50]
-                                if not summary:
-                                    summary = "Chat Summary"
-                                print(f"Summary generated: {summary}")
-                                summary_queue.put(summary)
-                                return
+                    except json.JSONDecodeError as json_err:
+                        print(
+                            f"Failed to decode JSON line in summary: {line}. Error: {json_err}",
+                        )
+                        continue
+                    except Exception as content_err:
+                        print(f"Error processing summary content chunk: {content_err}")
+                        continue
 
-                        except json.JSONDecodeError as json_err:
-                            print(
-                                f"Failed to decode JSON line in summary: {line}. Error: {json_err}",
-                            )
-                            continue
-                        except Exception as content_err:
-                            print(
-                                f"Error processing summary content chunk: {content_err}",
-                            )
-                            continue
-
-                    # If we get here, the stream ended without a "done" flag
-                    if accumulated_summary:
-                        summary = accumulated_summary.strip().replace("\n", " ")[:50]
-                        print(f"Summary generated (no done flag): {summary}")
-                        summary_queue.put(summary)
-                    else:
-                        print("No summary content received")
-                        summary_queue.put("Chat Summary")
-
-            else:
-                print("No valid question/answer pair for summary")
-                summary_queue.put("Chat Summary")
+                # Handle case where stream ends without done flag
+                if accumulated_summary:
+                    summary = self._clean_summary(accumulated_summary)
+                    print(f"Summary generated (no done flag): {summary}")
+                    summary_queue.put(summary)
+                else:
+                    print("No summary content received")
+                    summary_queue.put("Chat Summary")
 
         except requests.exceptions.Timeout:
             print("Summary request timed out")
@@ -1527,6 +1864,34 @@ class ChatApp:
 
             traceback.print_exc()
             summary_queue.put("Chat Summary")
+
+    def _clean_summary(self, summary: str) -> str:
+        """
+        Clean and format the summary text.
+
+        Args:
+            summary: Raw summary text to clean
+
+        Returns:
+            Cleaned and formatted summary string
+        """
+        # Remove newlines and extra whitespace
+        cleaned = summary.strip().replace("\n", " ")
+
+        # Remove any quotes that might be in the response
+        cleaned = cleaned.replace('"', "").replace("'", "")
+
+        # Limit length
+        cleaned = cleaned[:50]
+
+        # If empty after cleaning, return default
+        if not cleaned:
+            return "Chat Summary"
+
+        # Capitalize first letter
+        cleaned = cleaned[0].upper() + cleaned[1:] if cleaned else cleaned
+
+        return cleaned
 
     def fetch_api_response(self, tab: ChatTab, answer_index: int) -> None:
         """

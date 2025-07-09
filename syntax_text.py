@@ -122,6 +122,24 @@ class SyntaxHighlightedText(scrolledtext.ScrolledText):
         except Exception as e:
             print(f"Error configuring initial theme tags: {e}")
 
+    def configure_selection_colors(self) -> None:
+        """Configure selection colors for better readability."""
+        if self.bg_color == "#000000":  # Dark theme
+            # Light selection background with dark text for contrast
+            selection_bg = "#4A90E2"  # Nice blue
+            selection_fg = "#FFFFFF"  # White text
+        else:  # Light theme
+            # Dark selection background with light text for contrast
+            selection_bg = "#316AC5"  # Darker blue
+            selection_fg = "#FFFFFF"  # White text
+
+        # Configure the selection colors
+        self.configure(
+            selectbackground=selection_bg,
+            selectforeground=selection_fg,
+            inactiveselectbackground=selection_bg,  # Keep same color when widget loses focus
+        )
+
     def update_background_color(self, background_color: str) -> None:
         """Update the background color of the text widget."""
         if background_color == "black":
@@ -139,6 +157,9 @@ class SyntaxHighlightedText(scrolledtext.ScrolledText):
             insertbackground=self.cursor_color,
         )
         self.tag_configure("default", foreground=self.fg_color)
+
+        # Add this line to update selection colors too
+        self.configure_selection_colors()
 
         # Reapply syntax highlighting with new colors
         self.highlight_text()
@@ -369,12 +390,16 @@ class SyntaxHighlightedText(scrolledtext.ScrolledText):
 
     def set_text(self, text: str) -> None:
         """Set text and highlight it."""
+        # Normalize line endings
+        text = text.replace("\r\n", "\n").replace("\r", "\n")
+
         self.delete("1.0", tk.END)
         self.insert("1.0", text)
+
         # Reset tracking variables since we're setting entirely new content
         self.last_highlighted_content = ""
         self.last_highlighted_length = 0
-        self.highlight_text_full()  # Use full highlight for completely new content
+        self.highlight_text_full()
 
     def highlight_text(self) -> None:
         """Main highlighting method - now uses incremental approach."""
@@ -486,7 +511,7 @@ class SyntaxHighlightedText(scrolledtext.ScrolledText):
             # Get content without the automatic trailing newline
             content = self.get("1.0", "end-1c")
             if "\r" in content:
-                print("in content")
+                print("Warning: Found \\r in content")
 
             # Handle boundary cases
             if char_pos < 0:
@@ -494,7 +519,7 @@ class SyntaxHighlightedText(scrolledtext.ScrolledText):
             if char_pos >= len(content):
                 return self.index("end-1c")
 
-            # Split content into lines to handle multiple newlines correctly
+            # Split content into lines using \n only
             lines = content.split("\n")
 
             current_pos = 0
@@ -558,6 +583,7 @@ class SyntaxHighlightedText(scrolledtext.ScrolledText):
 
             # Get text for the region
             region_text = self.get(start_index, end_index)
+            region_text = region_text.replace("\r\n", "\n").replace("\r", "\n")
 
             if not region_text.strip():
                 return
