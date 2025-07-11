@@ -22,6 +22,7 @@ import requests  # type: ignore
 
 from chat_state import ChatState
 from expansion_language import expand
+from find_dialog import FindDialog
 from preferences import DEFAULT_PREFERENCES
 from preferences import PreferencesWindow
 from syntax_text import SyntaxHighlightedText
@@ -1164,6 +1165,19 @@ class ChatApp:
         # Load saved session
         self.load_session()
 
+    def show_find_dialog(self) -> None:
+        """Show find dialog for the currently focused text widget."""
+        if isinstance(self.last_focused_widget, SyntaxHighlightedText):
+            find_dialog = FindDialog(self.master, self.last_focused_widget)
+            find_dialog.show()
+        else:
+            # If no text widget is focused, use the current tab's chat display
+            current_tab_index = self.notebook.index(self.notebook.select())
+            if 0 <= current_tab_index < len(self.tabs):
+                current_tab = self.tabs[current_tab_index]
+                find_dialog = FindDialog(self.master, current_tab.chat_display)
+                find_dialog.show()
+
     def on_tab_changed(self, event: tk.Event) -> None:
         """Handle tab selection changes and update window title."""
         try:
@@ -1412,6 +1426,10 @@ class ChatApp:
         self.master.bind("<Control-a>", self.go_to_start_of_line)
         self.master.bind("<Control-z>", lambda e: self.undo_text())
         self.master.bind("<Control-comma>", lambda e: self.show_preferences())
+        self.master.bind(
+            "<Control-f>",
+            lambda e: self.show_find_dialog(),
+        )  # Add this line
 
     def on_app_focus_in(self, event: tk.Event) -> None:
         """Re-enable UI updates when app gains focus"""
@@ -1470,6 +1488,12 @@ class ChatApp:
             label="Copy Code Block",
             command=self.copy_code_block,
             accelerator="Ctrl+B",
+        )
+        edit_menu.add_separator()
+        edit_menu.add_command(
+            label="Find...",
+            command=self.show_find_dialog,
+            accelerator="Ctrl+F",
         )
         edit_menu.add_separator()
         edit_menu.add_command(
@@ -1550,7 +1574,7 @@ class ChatApp:
 
     def show_about(self) -> None:
         about_text = (
-            "Alpaca Assist\n\nVersion 0.04\n\nA chat application using the Ollama API."
+            "Alpaca Assist\n\nVersion 0.05\n\nA chat application using the Ollama API."
         )
         tk.messagebox.showinfo("About", about_text)
 
