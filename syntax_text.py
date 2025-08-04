@@ -1,3 +1,4 @@
+import sys
 import tkinter as tk
 from tkinter import scrolledtext
 from typing import Optional
@@ -13,6 +14,10 @@ from text_utils import backoff
 from text_utils import count_leading_chars
 from text_utils import parse_code_blocks
 from token_cache import TokenCache
+
+
+def is_macos() -> bool:
+    return sys.platform == "darwin"
 
 
 class SyntaxHighlightedText(scrolledtext.ScrolledText):
@@ -80,6 +85,14 @@ class SyntaxHighlightedText(scrolledtext.ScrolledText):
         self.bind("<Control-z>", self.undo)
         self.config(undo=True, autoseparators=True, maxundo=-1)
         self.highlighting_enabled = True
+        # Add this near the end of __init__, after other bindings:
+        if is_macos():
+            modifier = "Command"
+        else:
+            modifier = "Control"
+
+        # Override the default transpose behavior
+        self.bind(f"<{modifier}-t>", lambda e: "break")
 
     def insert_tab_spaces(self, event: tk.Event) -> str:
         """Insert 4 spaces when Tab is pressed."""
@@ -506,7 +519,7 @@ class SyntaxHighlightedText(scrolledtext.ScrolledText):
             self.highlight_text_full()
 
     def _char_pos_to_tk_index(self, char_pos: int) -> Optional[str]:
-        """Convert character position to Tkinter line.column format."""
+        """Convert character position to Tkinter line.column format, returning start of line."""
         try:
             # Get content without the automatic trailing newline
             content = self.get("1.0", "end-1c")
@@ -517,7 +530,9 @@ class SyntaxHighlightedText(scrolledtext.ScrolledText):
             if char_pos < 0:
                 return "1.0"
             if char_pos >= len(content):
-                return self.index("end-1c")
+                # Return start of last line
+                lines = content.split("\n")
+                return f"{len(lines)}.0"
 
             # Split content into lines using \n only
             lines = content.split("\n")
@@ -527,8 +542,8 @@ class SyntaxHighlightedText(scrolledtext.ScrolledText):
                 line_end = current_pos + len(line)
 
                 if char_pos <= line_end:
-                    col_pos = char_pos - current_pos
-                    tk_index = f"{line_num}.{col_pos}"
+                    # Return start of this line instead of exact position
+                    tk_index = f"{line_num}.0"
 
                     # Validate before returning
                     try:
