@@ -36,7 +36,7 @@ def count_leading_chars(text, char):
     return count
 
 
-def parse_code_blocks(text: str) -> List[Tuple[int, str, int, int]]:
+def parse_code_blocks(text: str) -> list[tuple[int, str, int, int]]:
     """
     Parse code blocks from text, handling nested blocks correctly.
 
@@ -46,9 +46,9 @@ def parse_code_blocks(text: str) -> List[Tuple[int, str, int, int]]:
     Returns:
         List[Tuple[int, str, int, int]]: List of tuples (indentation_level, language, start_line, end_line)
     """
-    lines: List[str] = text.split("\n")
-    blocks: List[Tuple[int, str, int, int]] = []
-    open_blocks: List[dict[str, Union[int, str]]] = []  # Stack of open blocks
+    lines: list[str] = text.split("\n")
+    blocks: list[tuple[int, str, int, int]] = []
+    open_blocks: list[dict[str, int | str]] = []  # Stack of open blocks
 
     for line_idx, line in enumerate(lines):
         line_num: int = line_idx + 1
@@ -61,7 +61,7 @@ def parse_code_blocks(text: str) -> List[Tuple[int, str, int, int]]:
 
                 # Check if it's closing an existing block with the same indentation
                 # Search from most recent to earliest (reverse order)
-                matching_block_idx: Optional[int] = None
+                matching_block_idx: int | None = None
                 for idx in range(len(open_blocks) - 1, -1, -1):
                     if open_blocks[idx]["indent"] == leading_spaces:
                         matching_block_idx = idx
@@ -111,7 +111,7 @@ def export_to_html(
     background_color: str = "white",
     font_family: str = "Cascadia Code",
     font_size: int = 12,
-) -> Optional[str]:
+) -> str | None:
     """
     Export text content to HTML using markdown conversion with app-consistent syntax highlighting.
 

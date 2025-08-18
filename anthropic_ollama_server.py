@@ -7,11 +7,11 @@ import json
 import os
 import random
 import time
+from collections.abc import Generator
 from http.server import BaseHTTPRequestHandler
 from http.server import HTTPServer
 from typing import Any
 from typing import Dict
-from typing import Generator
 from typing import List
 from typing import Optional
 from typing import Union
@@ -76,9 +76,6 @@ MODELS_JSON: str = """
 class OllamaRequestHandler(BaseHTTPRequestHandler):
     """HTTP request handler for the Ollama API emulator."""
 
-    def __init__(self, *args: Any, **kwargs: Any) -> None:
-        super().__init__(*args, **kwargs)
-
     def do_GET(self) -> None:
         """Handle GET requests."""
         if self.path == "/api/tags":
@@ -96,113 +93,36 @@ class OllamaRequestHandler(BaseHTTPRequestHandler):
             post_data: bytes = self.rfile.read(content_length)
 
             try:
-                request_data: Dict[str, Any] = json.loads(post_data.decode("utf-8"))
-                messages: List[Dict[str, str]] = request_data["messages"]
+                request_data: dict[str, Any] = json.loads(post_data.decode("utf-8"))
+                messages: list[dict[str, str]] = request_data["messages"]
+
+                # Extract tools if present in the request
+                tools = request_data.get("tools", [])
+
+                print(f"Received tools: {tools}")
 
                 # Filter and clean messages
-                messages_out: List[Dict[str, str]] = []
+                messages_out: list[dict[str, str]] = []
                 for i, item in enumerate(messages):
-                    if item["content"] == "":
-                        continue
-                    # Ensure alternating user/assistant messages
-                    if i % 2 == 0 and item["role"] != "user":
-                        continue
-                    elif i % 2 == 1 and item["role"] != "assistant":
-                        continue
+                    print(item)
 
-                    # Remove tool_calls if present
-                    if "tool_calls" in item:
-                        del item["tool_calls"]
+                    # Handle tool call responses
+                    # if item.get("role") == "tool":
+                    #     # Convert tool response to assistant message
+                    #     messages_out.append(
+                    #         {
+                    #             "role": "tool",
+                    #             "content": f"Tool result: {item['content']}",
+                    #         },
+                    #     )
 
+                    # Remove tool_calls if present (we'll handle them differently)
+                    # clean_item = {k: v for k, v in item.items() if k != "tool_calls"}
                     messages_out.append(item)
 
-                # Get response from Claude
-                stream: Optional[
-                    Generator[Dict[str, Any], None, None]
-                ] = client.stream_complete(
-                    messages=messages_out,
-                    model="claude-sonnet-4-20250514",
-                    max_tokens=40000,
-                    system=SYSTEM_PROMPT,
-                )
+                # Send to Claude with tools if provided
+                self._handle_request_with_tools(messages_out, tools)
 
-                self.send_response(200)
-                self.send_header("Content-Type", "application/x-ndjson")
-                self.end_headers()
-                response_body: str = ""
-                count: int = 0
-                if stream:
-                    for event in stream:
-                        # print(event)
-                        # print("new event")
-                        val: Dict[str, Any] = event
-                        # print(val)
-                        if "delta" in val["type"] and "text" in val["delta"]:
-
-                            now: datetime.datetime = datetime.datetime.now(
-                                datetime.timezone.utc,
-                            ).astimezone()
-
-                            # Format with microseconds (6 digits)
-                            local_timestamp: str = now.strftime("%Y-%m-%dT%H:%M:%S.%f")
-
-                            # Pad with zeros to get 9 digits for nanoseconds
-                            local_timestamp = local_timestamp[:-3] + "000"
-
-                            # Add timezone offset
-                            local_timestamp += now.strftime("%z")
-
-                            # Insert colon in timezone offset
-                            local_timestamp = (
-                                local_timestamp[:-2] + ":" + local_timestamp[-2:]
-                            )
-                            # print(local_timestamp)
-                            response: Dict[str, Any] = {
-                                "model": "codellama:13b",
-                                "created_at": local_timestamp,
-                                "message": {
-                                    "role": "assistant",
-                                    "content": val["delta"]["text"],
-                                },
-                                "done": False,
-                            }
-                            response_body = response_body + val["delta"]["text"]
-
-                            count = count + 1
-                            # print(json.dumps(response).encode())
-                            self.wfile.write(json.dumps(response).encode())
-                            self.wfile.write("\n".encode())
-                            self.wfile.flush()
-
-                now = datetime.datetime.now(datetime.timezone.utc).astimezone()
-
-                # Format with microseconds (6 digits)
-                local_timestamp = now.strftime("%Y-%m-%dT%H:%M:%S.%f")
-
-                # Pad with zeros to get 9 digits for nanoseconds
-                local_timestamp = local_timestamp[:-3] + "000"
-
-                # Add timezone offset
-                local_timestamp += now.strftime("%z")
-
-                # Insert colon in timezone offset
-                local_timestamp = local_timestamp[:-2] + ":" + local_timestamp[-2:]
-                response = {
-                    "model": "codellama:13b",
-                    "created_at": local_timestamp,
-                    "message": {
-                        "role": "assistant",
-                        "content": "",
-                    },
-                    "done": True,
-                    "done_reason": "stop",
-                    "eval_count": count,
-                }
-
-                # # Send response
-                self.wfile.write(json.dumps(response).encode())
-                self.wfile.write("\n".encode())
-                self.wfile.flush()
             except json.JSONDecodeError:
                 self.send_error(400, "Invalid JSON")
             except Exception as e:
@@ -210,20 +130,135 @@ class OllamaRequestHandler(BaseHTTPRequestHandler):
         else:
             self.send_error(404, "Not Found")
 
+    def _handle_request_with_tools(
+        self,
+        messages: list[dict[str, str]],
+        tools: list[dict],
+    ):
+        """Handle requests with optional tools."""
+
+        # Create enhanced system prompt if tools are available
+        if tools:
+            tools_description = "You have access to the following tools:\n"
+            for tool in tools:
+                func = tool.get("function", {})
+                tools_description += (
+                    f"- {func.get('name', 'unknown')}: {func.get('description', '')}\n"
+                )
+
+            tools_description += (
+                "\nTo use a tool, respond with a JSON object in this format:\n"
+            )
+            tools_description += """
+                {
+                   "tool_call": {
+                      "name": "tool_name",
+                      "arguments": {
+                         ...
+                      }
+                   }
+                }
+                """
+            tools_description += "If you don't need to use tools, respond normally. Don't do both at the same time."
+
+            enhanced_system = f"{SYSTEM_PROMPT}\n\n{tools_description}"
+        else:
+            enhanced_system = SYSTEM_PROMPT
+
+        # Get response from Claude
+        stream = client.stream_complete(
+            messages=messages,
+            model="claude-sonnet-4-20250514",
+            max_tokens=40000,
+            system=enhanced_system,
+        )
+
+        self._process_stream(stream)
+
+    def _process_stream(self, stream):
+        """Process streaming response."""
+        self.send_response(200)
+        self.send_header("Content-Type", "application/x-ndjson")
+        self.end_headers()
+
+        response_body = ""
+        count = 0
+
+        if stream:
+            for event in stream:
+                print(event)
+                val: dict[str, Any] = event
+                if "delta" in val["type"] and "text" in val["delta"]:
+                    text_chunk = val["delta"]["text"]
+                    response_body += text_chunk
+
+                    # Send the chunk immediately
+                    self._send_text_chunk(text_chunk, count)
+                    count += 1
+
+        self._send_completion_chunk(count)
+
+    def _send_text_chunk(self, text: str, count: int):
+        """Send a regular text chunk."""
+        now = datetime.datetime.now(datetime.UTC).astimezone()
+        local_timestamp = self._format_timestamp(now)
+
+        response = {
+            "model": "codellama:13b",
+            "created_at": local_timestamp,
+            "message": {
+                "role": "assistant",
+                "content": text,
+            },
+            "done": False,
+        }
+
+        self.wfile.write(json.dumps(response).encode())
+        self.wfile.write(b"\n")
+        self.wfile.flush()
+
+    def _send_completion_chunk(self, count: int):
+        """Send the final completion chunk."""
+        now = datetime.datetime.now(datetime.UTC).astimezone()
+        local_timestamp = self._format_timestamp(now)
+
+        response = {
+            "model": "codellama:13b",
+            "created_at": local_timestamp,
+            "message": {
+                "role": "assistant",
+                "content": "",
+            },
+            "done": True,
+            "done_reason": "stop",
+            "eval_count": count,
+        }
+
+        self.wfile.write(json.dumps(response).encode())
+        self.wfile.write(b"\n")
+        self.wfile.flush()
+
+    def _format_timestamp(self, dt: datetime.datetime) -> str:
+        """Format timestamp in the expected format."""
+        local_timestamp = dt.strftime("%Y-%m-%dT%H:%M:%S.%f")
+        local_timestamp = local_timestamp[:-3] + "000"
+        local_timestamp += dt.strftime("%z")
+        return local_timestamp[:-2] + ":" + local_timestamp[-2:]
+
 
 class ClaudeClient:
     """Client for interacting with Anthropic's Claude API"""
 
-    def __init__(self, api_key: Optional[str] = None) -> None:
+    def __init__(self, api_key: str | None = None) -> None:
         """Initialize the Claude client with your API key"""
-        self.api_key: Optional[str] = api_key or os.environ.get("ANTHROPIC_API_KEY")
+        self.api_key: str | None = api_key or os.environ.get("ANTHROPIC_API_KEY")
         if not self.api_key:
             raise ValueError(
                 "Anthropic API key is required. Set it directly or via ANTHROPIC_API_KEY environment variable.",
             )
 
         self.base_url: str = "https://api.anthropic.com/v1"
-        self.headers: Dict[str, str] = {
+        self.headers: dict[str, str] = {
             "x-api-key": self.api_key,
             "anthropic-version": "2023-06-01",
             "content-type": "application/json",
@@ -235,8 +270,8 @@ class ClaudeClient:
         model: str = "claude-3-5-sonnet-20240620",
         max_tokens: int = 8192,
         temperature: float = 0.7,
-        system: Optional[str] = None,
-    ) -> Dict[str, Any]:
+        system: str | None = None,
+    ) -> dict[str, Any]:
         """
         Send a completion request to Claude 3.7 Sonnet
 
@@ -253,9 +288,9 @@ class ClaudeClient:
         url: str = f"{self.base_url}/messages"
 
         # Prepare the messages format
-        messages: List[Dict[str, str]] = [{"role": "user", "content": prompt}]
+        messages: list[dict[str, str]] = [{"role": "user", "content": prompt}]
 
-        payload: Dict[str, Any] = {
+        payload: dict[str, Any] = {
             "model": model,
             "messages": messages,
             "max_tokens": max_tokens,
@@ -281,17 +316,17 @@ class ClaudeClient:
 
     def stream_complete(
         self,
-        messages: List[Dict[str, str]] = [],
+        messages: list[dict[str, str]] = [],
         model: str = "claude-3-5-sonnet-20240620",
         max_tokens: int = 8192,
         temperature: float = 0.7,
-        system: Optional[str] = None,
-    ) -> Generator[Dict[str, Any], None, None]:
+        system: str | None = None,
+    ) -> Generator[dict[str, Any], None, None]:
         """
         Send a streaming completion request to Claude 3.7 Sonnet
 
         Args:
-            prompt: The user prompt to send to Claude
+            messages: The messages to send to Claude
             model: The Claude model to use (default is claude-3-5-sonnet-20240620)
             max_tokens: Maximum tokens to generate in the response
             temperature: The sampling temperature (0-1)
@@ -302,7 +337,7 @@ class ClaudeClient:
         """
         url: str = f"{self.base_url}/messages"
 
-        payload: Dict[str, Any] = {
+        payload: dict[str, Any] = {
             "model": model,
             "messages": messages,
             "max_tokens": max_tokens,
@@ -330,7 +365,6 @@ class ClaudeClient:
         # Process the streaming response
         for line in response.iter_lines():
             if line:
-                # print(line)
                 # Remove "data: " prefix and parse JSON
                 line_text: str = line.decode("utf-8")
                 if line_text.startswith("data: "):
@@ -338,8 +372,7 @@ class ClaudeClient:
                     if json_str.strip() == "[DONE]":
                         break
                     try:
-                        chunk: Dict[str, Any] = json.loads(json_str)
-                        # print(chunk)
+                        chunk: dict[str, Any] = json.loads(json_str)
                         yield chunk
                     except json.JSONDecodeError:
                         print(f"Failed to decode JSON: {json_str}")
@@ -350,7 +383,8 @@ def run_server(port: int = 11434) -> None:
     server_address: tuple[str, int] = ("", port)
     httpd: HTTPServer = HTTPServer(server_address, OllamaRequestHandler)
     print(f"Ollama emulator server running on port {port}")
-    print(f"Routing requests to Claude the Anthropic API")
+    print(f"Routing requests to Claude via Anthropic API")
+
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:

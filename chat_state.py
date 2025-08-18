@@ -6,9 +6,9 @@ from typing import Optional
 
 @dataclass
 class ChatState:
-    questions: List[str]
-    answers: List[str]
-    current_streaming_index: Optional[int] = None
+    questions: list[str]
+    answers: list[str]
+    current_streaming_index: int | None = None
 
     def add_question(self, question: str) -> int:
         """Add question and return answer index."""
@@ -33,7 +33,7 @@ class ChatState:
         """Check if any answers are currently being streamed."""
         return self.current_streaming_index is not None
 
-    def get_safe_copy(self) -> tuple[List[str], List[str], Optional[int]]:
+    def get_safe_copy(self) -> tuple[list[str], list[str], int | None]:
         """Get a thread-safe copy of the current state."""
         return (
             self.questions.copy(),

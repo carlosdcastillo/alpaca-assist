@@ -2,4 +2,5 @@ requests>=2.31.0
 pyperclip>=1.8.2
 pygments>=2.15.1
 typing-extensions>=4.7.1
-markdown>=3.8.2
+Markdown>=3.8.2
+mcp>=1.12.4

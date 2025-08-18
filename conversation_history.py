@@ -1,8 +1,8 @@
 import tkinter as tk
+from collections.abc import Callable
 from datetime import datetime
 from tkinter import messagebox
 from tkinter import ttk
-from typing import Callable
 from typing import List
 from typing import Optional
 from typing import Tuple
@@ -192,7 +192,7 @@ class ConversationHistoryWindow:
         # Update status
         self.status_label.config(text=f"Found {len(conversations)} conversations")
 
-    def get_selected_conversation_id(self) -> Optional[int]:
+    def get_selected_conversation_id(self) -> int | None:
         """Get the ID of the selected conversation."""
         selection = self.tree.selection()
         if not selection:

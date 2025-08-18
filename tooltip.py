@@ -7,12 +7,12 @@ class ToolTip:
     def __init__(self, widget: tk.Widget, text: str) -> None:
         self.widget = widget
         self.text = text
-        self.tooltip: Optional[tk.Toplevel] = None
+        self.tooltip: tk.Toplevel | None = None
         self.widget.bind("<Enter>", self.show_tooltip)
         self.widget.bind("<Leave>", self.hide_tooltip)
         self.is_macos = platform.system() == "Darwin"
 
-    def show_tooltip(self, event: Optional[tk.Event] = None) -> None:
+    def show_tooltip(self, event: tk.Event | None = None) -> None:
         """Show the tooltip at the current cursor position."""
         x = self.widget.winfo_rootx() + self.widget.winfo_width() // 2
         y = self.widget.winfo_rooty() + self.widget.winfo_height() + 5
@@ -48,7 +48,7 @@ class ToolTip:
             self.tooltip.bind("<Enter>", self.hide_tooltip)
             label.bind("<Enter>", self.hide_tooltip)
 
-    def click_through(self, event: Optional[tk.Event] = None) -> None:
+    def click_through(self, event: tk.Event | None = None) -> None:
         """Pass the click through to the underlying widget."""
         if self.tooltip:
             self.tooltip.destroy()
@@ -56,7 +56,7 @@ class ToolTip:
             # Schedule the click event slightly after hiding the tooltip
             self.widget.after(10, lambda: self.widget.event_generate("<Button-1>"))
 
-    def hide_tooltip(self, event: Optional[tk.Event] = None) -> None:
+    def hide_tooltip(self, event: tk.Event | None = None) -> None:
         if self.tooltip:
             self.tooltip.destroy()
             self.tooltip = None

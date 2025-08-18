@@ -33,7 +33,7 @@ class ConversationDatabase:
             )
             conn.commit()
 
-    def store_conversation(self, title: str, chat_data: Dict[str, Any]) -> int:
+    def store_conversation(self, title: str, chat_data: dict[str, Any]) -> int:
         """Store a conversation in the database."""
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.cursor()
@@ -91,7 +91,7 @@ class ConversationDatabase:
             conn.commit()
             return conversation_id
 
-    def get_conversations(self) -> List[Tuple[int, str, str, str, bool]]:
+    def get_conversations(self) -> list[tuple[int, str, str, str, bool]]:
         """Get all conversations ordered by closed_date descending."""
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.cursor()
@@ -104,7 +104,7 @@ class ConversationDatabase:
             )
             return cursor.fetchall()
 
-    def get_conversation(self, conversation_id: int) -> Optional[Dict[str, Any]]:
+    def get_conversation(self, conversation_id: int) -> dict[str, Any] | None:
         """Get a specific conversation by ID."""
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.cursor()
@@ -135,7 +135,7 @@ class ConversationDatabase:
     def search_conversations(
         self,
         search_term: str,
-    ) -> List[Tuple[int, str, str, str, bool]]:
+    ) -> list[tuple[int, str, str, str, bool]]:
         """Search conversations by title."""
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.cursor()

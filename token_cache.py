@@ -5,11 +5,11 @@ from typing import Tuple
 
 class TokenCache:
     def __init__(self, max_size: int = 100):
-        self.cache: dict[str, List[Tuple[Any, str]]] = {}
-        self.access_order: List[str] = []
+        self.cache: dict[str, list[tuple[Any, str]]] = {}
+        self.access_order: list[str] = []
         self.max_size = max_size
 
-    def get_tokens(self, text: str, lexer) -> List[Tuple[Any, str]]:
+    def get_tokens(self, text: str, lexer) -> list[tuple[Any, str]]:
         # Create a hash of the text for cache key
         text_hash = hash(text)
         cache_key = f"{text_hash}_{type(lexer).__name__}"

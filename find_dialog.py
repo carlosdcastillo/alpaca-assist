@@ -12,12 +12,12 @@ class FindDialog:
     def __init__(self, parent: tk.Tk, text_widget: tk.Text):
         self.parent = parent
         self.text_widget = text_widget
-        self.dialog: Optional[tk.Toplevel] = None
+        self.dialog: tk.Toplevel | None = None
         self.search_var = tk.StringVar()
         self.case_sensitive_var = tk.BooleanVar()
         self.whole_word_var = tk.BooleanVar()
         self.current_match_index = 0
-        self.matches: List[Tuple[str, str]] = []
+        self.matches: list[tuple[str, str]] = []
         self.highlight_tag = "find_highlight"
         self.current_tag = "find_current"
 
@@ -58,7 +58,7 @@ class FindDialog:
         """Mark cache as invalid (call when text might have changed)."""
         self._cache_valid = False
 
-    def char_to_tk_index_fast(self, char_pos: int) -> Optional[str]:
+    def char_to_tk_index_fast(self, char_pos: int) -> str | None:
         """Fast character position to Tkinter index conversion using cached data."""
         if char_pos < 0 or char_pos > len(self._cached_content):
             return None

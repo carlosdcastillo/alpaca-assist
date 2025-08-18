@@ -168,7 +168,7 @@ class PreferencesWindow:
 
         frame.columnconfigure(1, weight=1)
 
-    def get_available_fonts(self) -> List[str]:
+    def get_available_fonts(self) -> list[str]:
         """Get list of available monospace fonts on the system."""
         import tkinter.font as tkfont
 
