@@ -19,9 +19,25 @@ from mcp.types import Resource
 from mcp.types import TextContent
 from mcp.types import Tool
 
+import python_analyzer
+
 
 # Create server instance
 server = Server("simple-tools")
+
+
+def get_filepath_argument(arguments: dict[str, Any], required: bool = True) -> str:
+    """Helper function to get filepath from arguments, trying both 'filepath' and 'file_path'."""
+    filepath = arguments.get("filepath")
+    if filepath is None:
+        filepath = arguments.get("file_path")
+
+    if required and filepath is None:
+        raise ValueError(
+            "Missing required argument: 'filepath' or 'file_path' must be provided",
+        )
+
+    return filepath or ""
 
 
 @server.list_tools()
@@ -76,13 +92,69 @@ async def handle_list_tools() -> list[Tool]:
                         "type": "string",
                         "description": "Path to the file to read",
                     },
+                    "file_path": {
+                        "type": "string",
+                        "description": "Alternative parameter name for file path",
+                    },
                 },
-                "required": ["filepath"],
+                "required": [],
+                "oneOf": [
+                    {"required": ["filepath"]},
+                    {"required": ["file_path"]},
+                ],
+            },
+        ),
+        Tool(
+            name="summarize_python_file",
+            description="Read contents of a python file and print classes, methods and functions",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "filepath": {
+                        "type": "string",
+                        "description": "Path to the python file to read",
+                    },
+                    "file_path": {
+                        "type": "string",
+                        "description": "Alternative parameter name for file path",
+                    },
+                },
+                "required": [],
+                "oneOf": [
+                    {"required": ["filepath"]},
+                    {"required": ["file_path"]},
+                ],
+            },
+        ),
+        Tool(
+            name="modify_python_file",
+            description="Modify contents of a python method or function, observe parameters: file_path and new_content",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "filepath": {
+                        "type": "string",
+                        "description": "Path to the python file to modify",
+                    },
+                    "file_path": {
+                        "type": "string",
+                        "description": "Alternative parameter name for file path",
+                    },
+                    "new_content": {
+                        "type": "string",
+                        "description": "Full code of the method or function",
+                    },
+                },
+                "required": ["new_content"],
+                "oneOf": [
+                    {"required": ["filepath"]},
+                    {"required": ["file_path"]},
+                ],
             },
         ),
         Tool(
             name="write_file",
-            description="Write text content to a file",
+            description="Write text content to a file, observe parameters file_path and content",
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -90,12 +162,20 @@ async def handle_list_tools() -> list[Tool]:
                         "type": "string",
                         "description": "Path to the file to write",
                     },
+                    "file_path": {
+                        "type": "string",
+                        "description": "Alternative parameter name for file path",
+                    },
                     "content": {
                         "type": "string",
                         "description": "Content to write to the file",
                     },
                 },
-                "required": ["filepath", "content"],
+                "required": ["content"],
+                "oneOf": [
+                    {"required": ["filepath", "content"]},
+                    {"required": ["file_path", "content"]},
+                ],
             },
         ),
     ]
@@ -151,7 +231,11 @@ async def handle_call_tool(name: str, arguments: dict[str, Any]) -> list[TextCon
             return [TextContent(type="text", text=f"Error listing files: {str(e)}")]
 
     elif name == "read_file":
-        filepath = arguments.get("filepath", "")
+        try:
+            filepath = get_filepath_argument(arguments, required=True)
+        except ValueError as e:
+            return [TextContent(type="text", text=f"Error: {str(e)}")]
+
         try:
             if not os.path.exists(filepath):
                 return [
@@ -193,8 +277,121 @@ async def handle_call_tool(name: str, arguments: dict[str, Any]) -> list[TextCon
         except Exception as e:
             return [TextContent(type="text", text=f"Error reading file: {str(e)}")]
 
+    elif name == "summarize_python_file":
+        try:
+            filepath = get_filepath_argument(arguments, required=True)
+        except ValueError as e:
+            return [TextContent(type="text", text=f"Error: {str(e)}")]
+
+        try:
+            if not os.path.exists(filepath):
+                return [
+                    TextContent(
+                        type="text",
+                        text=f"Error: File '{filepath}' does not exist",
+                    ),
+                ]
+
+            if not os.path.isfile(filepath):
+                return [
+                    TextContent(type="text", text=f"Error: '{filepath}' is not a file"),
+                ]
+
+            # Check file size to avoid reading huge files
+            file_size = os.path.getsize(filepath)
+            if file_size > 1024 * 1024:  # 1MB limit
+                return [
+                    TextContent(
+                        type="text",
+                        text=f"Error: File '{filepath}' is too large ({file_size} bytes). Maximum size is 1MB.",
+                    ),
+                ]
+
+            results = python_analyzer.analyze_python_file(filepath)
+
+            return [
+                TextContent(type="text", text=f"Summary of '{filepath}':\n\n{results}"),
+            ]
+
+        except UnicodeDecodeError:
+            return [
+                TextContent(
+                    type="text",
+                    text=f"Error: File '{filepath}' is not a text file or uses unsupported encoding",
+                ),
+            ]
+        except Exception as e:
+            return [TextContent(type="text", text=f"Error reading file: {str(e)}")]
+
+    elif name == "modify_python_file":
+        try:
+            filepath = get_filepath_argument(arguments, required=True)
+        except ValueError as e:
+            return [TextContent(type="text", text=f"Error: {str(e)}")]
+
+        code = arguments.get("new_content", "")
+
+        try:
+            if not os.path.exists(filepath):
+                return [
+                    TextContent(
+                        type="text",
+                        text=f"Error: File '{filepath}' does not exist",
+                    ),
+                ]
+
+            if not os.path.isfile(filepath):
+                return [
+                    TextContent(type="text", text=f"Error: '{filepath}' is not a file"),
+                ]
+
+            # Check file size to avoid reading huge files
+            file_size = os.path.getsize(filepath)
+            if file_size > 1024 * 1024:  # 1MB limit
+                return [
+                    TextContent(
+                        type="text",
+                        text=f"Error: File '{filepath}' is too large ({file_size} bytes). Maximum size is 1MB.",
+                    ),
+                ]
+
+            with open(filepath, encoding="utf-8") as f:
+                content = f.read()
+
+            import how_to_merge
+
+            location = how_to_merge.determine_merge_location(content, code)
+
+            import code_merging_tool
+
+            merger = code_merging_tool.ASTMerger()
+            result = merger.merge_ast(content, code, target=location)
+
+            with open(filepath, "w", encoding="utf-8") as f:
+                f.write(result)
+
+            return [
+                TextContent(
+                    type="text",
+                    text=f"Modified location: {location} of '{filepath}' successfully':\n\n",
+                ),
+            ]
+
+        except UnicodeDecodeError:
+            return [
+                TextContent(
+                    type="text",
+                    text=f"Error: File '{filepath}' is not a text file or uses unsupported encoding",
+                ),
+            ]
+        except Exception as e:
+            return [TextContent(type="text", text=f"Error reading file: {str(e)}")]
     elif name == "write_file":
-        filepath = arguments.get("filepath", "")
+        try:
+            filepath = get_filepath_argument(arguments, required=True)
+        except ValueError as e:
+            return [TextContent(type="text", text=f"Error: {str(e)}")]
+
         content = arguments.get("content", "")
 
         try:

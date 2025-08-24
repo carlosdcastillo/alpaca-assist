@@ -678,224 +678,12 @@ class ChatTabStreaming:
             print(f"Starting API request for answer index {answer_index}")
             print(f"Tools included: {len(available_tools)} tools")
 
-            # Initialize content accumulator for tool call detection
-            accumulated_content = ""
-
-            # Make the streaming API request
-            with requests.post(
-                BASE_URL,
-                json=ollama_payload,
-                stream=True,
-                timeout=30,
-            ) as response:
-
-                if response.status_code != 200:
-                    error_msg = f"API Error: Status code {response.status_code}"
-                    print(error_msg)
-                    # Queue error update
-                    self.content_update_queue.put(
-                        ContentUpdate(
-                            answer_index=answer_index,
-                            content_chunk=error_msg,
-                            is_done=True,
-                            is_error=True,
-                        ),
-                    )
-                    return
-
-                for line in response.iter_lines(decode_unicode=True):
-                    # Check for stop flag during streaming
-                    if self.stop_streaming_flag.is_set():
-                        print(
-                            f"Streaming stopped during API response for answer {answer_index}",
-                        )
-                        return
-
-                    if not line:
-                        continue
-
-                    try:
-                        data = json.loads(line.strip())
-
-                        # print(data)
-                        if "message" in data and "content" in data["message"]:
-                            content_chunk = data["message"]["content"]
-                            if content_chunk:
-                                # Check stop flag before queuing content
-                                if self.stop_streaming_flag.is_set():
-                                    print(
-                                        f"Streaming stopped while processing content for answer {answer_index}",
-                                    )
-                                    return
-
-                                # Accumulate content for tool call detection
-                                accumulated_content += content_chunk
-
-                                # Queue content update
-                                self.content_update_queue.put(
-                                    ContentUpdate(
-                                        answer_index=answer_index,
-                                        content_chunk=content_chunk,
-                                        is_done=False,
-                                        is_error=False,
-                                    ),
-                                )
-
-                        if data.get("done", False):
-                            # Check stop flag before marking as done
-                            if self.stop_streaming_flag.is_set():
-                                print(
-                                    f"Streaming stopped before completion for answer {answer_index}",
-                                )
-                                return
-
-                            # Check for tool calls in accumulated content
-                            tool_calls = self._find_tool_calls(accumulated_content)
-                            if tool_calls:
-                                print(
-                                    f"Found {len(tool_calls)} tool call(s) in response for answer {answer_index}",
-                                )
-
-                                try:
-                                    # Execute all tool calls
-                                    tool_results = self._execute_all_tool_calls(
-                                        accumulated_content,
-                                    )
-
-                                    # Add all tool results to the response
-                                    for i, tool_result in enumerate(tool_results):
-                                        if tool_result:
-                                            try:
-                                                # Try to parse as JSON first
-                                                data_result = json.loads(tool_result)
-                                                if (
-                                                    isinstance(data_result, dict)
-                                                    and "content" in data_result
-                                                ):
-                                                    if (
-                                                        isinstance(
-                                                            data_result["content"],
-                                                            list,
-                                                        )
-                                                        and len(data_result["content"])
-                                                        > 0
-                                                    ):
-                                                        value = data_result["content"][
-                                                            0
-                                                        ].get("text", str(data_result))
-                                                    else:
-                                                        value = str(
-                                                            data_result["content"],
-                                                        )
-                                                else:
-                                                    value = json.dumps(
-                                                        data_result,
-                                                        indent=2,
-                                                    )
-                                            except (
-                                                json.JSONDecodeError,
-                                                KeyError,
-                                                TypeError,
-                                            ):
-                                                # If not valid JSON or doesn't have expected structure, use as-is
-                                                value = str(tool_result)
-
-                                            result_text = f"\n\n**Tool {i + 1} Result:**\n```\n{value}\n```"
-
-                                            # Queue the tool result
-                                            self.content_update_queue.put(
-                                                ContentUpdate(
-                                                    answer_index=answer_index,
-                                                    content_chunk=result_text,
-                                                    is_done=False,
-                                                    is_error=False,
-                                                ),
-                                            )
-
-                                    print(
-                                        f"All {len(tool_results)} tool results added for answer {answer_index}",
-                                    )
-
-                                    # Automatically continue the conversation after tool calls
-                                    self._continue_after_tool_calls(
-                                        answer_index,
-                                        tool_results,
-                                    )
-                                    return  # Don't mark as done yet, we're continuing
-
-                                except Exception as tool_error:
-                                    print(f"Error executing tool calls: {tool_error}")
-                                    import traceback
-
-                                    traceback.print_exc()
-
-                                    # Queue error message
-                                    error_text = f"\n\n**Tool Execution Error:** {str(tool_error)}"
-                                    self.content_update_queue.put(
-                                        ContentUpdate(
-                                            answer_index=answer_index,
-                                            content_chunk=error_text,
-                                            is_done=False,
-                                            is_error=False,
-                                        ),
-                                    )
-
-                            # Queue completion update (only if no tool calls were processed)
-                            self.content_update_queue.put(
-                                ContentUpdate(
-                                    answer_index=answer_index,
-                                    content_chunk="",
-                                    is_done=True,
-                                    is_error=False,
-                                ),
-                            )
-                            break
-
-                    except json.JSONDecodeError:
-                        # Skip malformed JSON lines
-                        continue
-                    except Exception as content_err:
-                        print(f"Error processing content chunk: {content_err}")
-                        continue
-
-        except requests.exceptions.Timeout:
-            error_msg = "Request timed out"
-            print(f"API request timeout for answer index {answer_index}")
-            if not self.stop_streaming_flag.is_set():
-                self.content_update_queue.put(
-                    ContentUpdate(
-                        answer_index=answer_index,
-                        content_chunk=error_msg,
-                        is_done=True,
-                        is_error=True,
-                    ),
-                )
-
-        except requests.exceptions.ConnectionError:
-            error_msg = "Connection error - is Ollama running?"
-            print(f"Connection error for answer index {answer_index}")
-            if not self.stop_streaming_flag.is_set():
-                self.content_update_queue.put(
-                    ContentUpdate(
-                        answer_index=answer_index,
-                        content_chunk=error_msg,
-                        is_done=True,
-                        is_error=True,
-                    ),
-                )
-
-        except requests.exceptions.RequestException as req_err:
-            error_msg = f"Request error: {str(req_err)}"
-            print(f"Request exception for answer index {answer_index}: {req_err}")
-            if not self.stop_streaming_flag.is_set():
-                self.content_update_queue.put(
-                    ContentUpdate(
-                        answer_index=answer_index,
-                        content_chunk=error_msg,
-                        is_done=True,
-                        is_error=True,
-                    ),
-                )
+            # **FIXED: Use the shared streaming response processor**
+            self._process_streaming_response(
+                ollama_payload,
+                answer_index,
+                is_continuation=False,
+            )
 
         except queue.Empty:
             print(f"No data payload available for answer index {answer_index}")
@@ -924,6 +712,267 @@ class ChatTabStreaming:
             self.is_streaming = False
             self.current_request_thread = None
 
+    def _process_streaming_response(
+        self,
+        payload: dict,
+        answer_index: int,
+        is_continuation: bool = False,
+    ) -> None:
+        """Process streaming response for both initial and continuation requests."""
+        try:
+            request_type = "continuation" if is_continuation else "initial"
+            print(
+                f"Starting {request_type} API request for answer index {answer_index}",
+            )
+
+            # Initialize content accumulator for tool call detection
+            accumulated_content = ""
+
+            # Make the streaming API request
+            with requests.post(
+                BASE_URL,
+                json=payload,
+                stream=True,
+                timeout=30,
+            ) as response:
+
+                if response.status_code != 200:
+                    error_msg = f"{request_type.capitalize()} API Error: Status code {response.status_code}"
+                    print(error_msg)
+                    self.content_update_queue.put(
+                        ContentUpdate(
+                            answer_index=answer_index,
+                            content_chunk=error_msg,
+                            is_done=True,
+                            is_error=True,
+                        ),
+                    )
+                    return
+
+                for line in response.iter_lines(decode_unicode=True):
+                    # Check for stop flag during streaming
+                    if self.stop_streaming_flag.is_set():
+                        print(
+                            f"Streaming stopped during {request_type} response for answer {answer_index}",
+                        )
+                        return
+
+                    if not line:
+                        continue
+
+                    try:
+                        data = json.loads(line.strip())
+
+                        if "message" in data and "content" in data["message"]:
+                            content_chunk = data["message"]["content"]
+                            if content_chunk:
+                                # Check stop flag before queuing content
+                                if self.stop_streaming_flag.is_set():
+                                    print(
+                                        f"Streaming stopped while processing {request_type} content for answer {answer_index}",
+                                    )
+                                    return
+
+                                # Accumulate content for tool call detection
+                                accumulated_content += content_chunk
+
+                                # **FIXED: Check for complete tool calls after each chunk**
+                                tool_calls = self._find_tool_calls(accumulated_content)
+                                if tool_calls:
+                                    print(
+                                        f"Complete tool call detected in {request_type}! Executing {len(tool_calls)} tool(s)",
+                                    )
+
+                                    # Queue the content we have so far (including the tool call)
+                                    self.content_update_queue.put(
+                                        ContentUpdate(
+                                            answer_index=answer_index,
+                                            content_chunk=content_chunk,
+                                            is_done=False,
+                                            is_error=False,
+                                        ),
+                                    )
+
+                                    # Execute tool calls and start continuation
+                                    self._handle_tool_calls_and_continue(
+                                        accumulated_content,
+                                        answer_index,
+                                    )
+                                    return  # **EXIT IMMEDIATELY after starting tool execution**
+
+                                # If no tool call detected, queue content normally
+                                self.content_update_queue.put(
+                                    ContentUpdate(
+                                        answer_index=answer_index,
+                                        content_chunk=content_chunk,
+                                        is_done=False,
+                                        is_error=False,
+                                    ),
+                                )
+
+                        if data.get("done", False):
+                            # Check stop flag before marking as done
+                            if self.stop_streaming_flag.is_set():
+                                print(
+                                    f"Streaming stopped before {request_type} completion for answer {answer_index}",
+                                )
+                                return
+
+                            # Final check for tool calls (fallback)
+                            tool_calls = self._find_tool_calls(accumulated_content)
+                            if tool_calls:
+                                print(
+                                    f"Tool calls found at end of {request_type} stream (fallback detection)",
+                                )
+                                self._handle_tool_calls_and_continue(
+                                    accumulated_content,
+                                    answer_index,
+                                )
+                                return
+
+                            # No tool calls found, mark as done
+                            self.content_update_queue.put(
+                                ContentUpdate(
+                                    answer_index=answer_index,
+                                    content_chunk="",
+                                    is_done=True,
+                                    is_error=False,
+                                ),
+                            )
+                            break
+
+                    except json.JSONDecodeError:
+                        continue
+                    except Exception as content_err:
+                        print(
+                            f"Error processing {request_type} content chunk: {content_err}",
+                        )
+                        continue
+
+        except requests.exceptions.Timeout:
+            error_msg = f"{request_type.capitalize()} request timed out"
+            print(error_msg)
+            if not self.stop_streaming_flag.is_set():
+                self.content_update_queue.put(
+                    ContentUpdate(
+                        answer_index=answer_index,
+                        content_chunk=error_msg,
+                        is_done=True,
+                        is_error=True,
+                    ),
+                )
+        except requests.exceptions.ConnectionError:
+            error_msg = (
+                f"{request_type.capitalize()} connection error - is Ollama running?"
+            )
+            print(error_msg)
+            if not self.stop_streaming_flag.is_set():
+                self.content_update_queue.put(
+                    ContentUpdate(
+                        answer_index=answer_index,
+                        content_chunk=error_msg,
+                        is_done=True,
+                        is_error=True,
+                    ),
+                )
+        except requests.exceptions.RequestException as req_err:
+            error_msg = f"{request_type.capitalize()} request error: {str(req_err)}"
+            print(error_msg)
+            if not self.stop_streaming_flag.is_set():
+                self.content_update_queue.put(
+                    ContentUpdate(
+                        answer_index=answer_index,
+                        content_chunk=error_msg,
+                        is_done=True,
+                        is_error=True,
+                    ),
+                )
+        except Exception as e:
+            error_msg = f"Unexpected error in {request_type}: {str(e)}"
+            print(error_msg)
+            import traceback
+
+            traceback.print_exc()
+            if not self.stop_streaming_flag.is_set():
+                self.content_update_queue.put(
+                    ContentUpdate(
+                        answer_index=answer_index,
+                        content_chunk=error_msg,
+                        is_done=True,
+                        is_error=True,
+                    ),
+                )
+
+    def _handle_tool_calls_and_continue(
+        self,
+        accumulated_content: str,
+        answer_index: int,
+    ) -> None:
+        """Execute tool calls and start continuation request."""
+        try:
+            # Execute all tool calls
+            tool_results = self._execute_all_tool_calls(accumulated_content)
+
+            # Add tool results to the response
+            for i, tool_result in enumerate(tool_results):
+                if tool_result:
+                    try:
+                        data_result = json.loads(tool_result)
+                        if isinstance(data_result, dict) and "content" in data_result:
+                            if (
+                                isinstance(data_result["content"], list)
+                                and len(data_result["content"]) > 0
+                            ):
+                                value = data_result["content"][0].get(
+                                    "text",
+                                    str(data_result),
+                                )
+                            else:
+                                value = str(data_result["content"])
+                        else:
+                            value = json.dumps(data_result, indent=2)
+                    except (json.JSONDecodeError, KeyError, TypeError):
+                        value = str(tool_result)
+
+                    result_text = f"\n\n**Tool {i + 1} Result:**\n```\n{value}\n```"
+
+                    self.content_update_queue.put(
+                        ContentUpdate(
+                            answer_index=answer_index,
+                            content_chunk=result_text,
+                            is_done=False,
+                            is_error=False,
+                        ),
+                    )
+
+            print(
+                f"Tool execution completed for answer {answer_index}, starting continuation...",
+            )
+
+            # **FIXED: Start continuation in a separate thread**
+            continuation_thread = threading.Thread(
+                target=self._continue_after_tool_calls,
+                args=(answer_index, tool_results),
+                daemon=True,
+            )
+            continuation_thread.start()
+
+        except Exception as tool_error:
+            print(f"Error executing tool calls: {tool_error}")
+            import traceback
+
+            traceback.print_exc()
+
+            error_text = f"\n\n**Tool Execution Error:** {str(tool_error)}"
+            self.content_update_queue.put(
+                ContentUpdate(
+                    answer_index=answer_index,
+                    content_chunk=error_text,
+                    is_done=True,
+                    is_error=True,
+                ),
+            )
+
     def _continue_after_tool_calls(
         self,
         answer_index: int,
@@ -934,7 +983,7 @@ class ChatTabStreaming:
             print(f"Starting continuation after tool calls for answer {answer_index}")
 
             # Add a brief pause to let tool results display
-            time.sleep(0.3)
+            time.sleep(0.5)
 
             # Check if we should stop
             if self.stop_streaming_flag.is_set():
@@ -942,7 +991,9 @@ class ChatTabStreaming:
                 return
 
             # Add a visual separator and continuation prompt
-            continuation_separator = "\n\n---\n\nBased on the tool results above:\n\n"
+            continuation_separator = (
+                "\n\n---\n\n**Continuing response based on tool results:**\n\n"
+            )
             self.content_update_queue.put(
                 ContentUpdate(
                     answer_index=answer_index,
@@ -952,7 +1003,7 @@ class ChatTabStreaming:
                 ),
             )
 
-            # Make the continuation request
+            # **FIXED: Make the continuation request**
             self._make_continuation_request(answer_index)
 
         except Exception as e:
@@ -1030,248 +1081,11 @@ class ChatTabStreaming:
                 continuation_payload["tools"] = available_tools
                 print(f"Added {len(available_tools)} tools to continuation request")
 
-            # Make the continuation API request
-            print("Starting continuation API request...")
-
-            # Initialize content accumulator for tool call detection
-            continuation_accumulated_content = ""
-
-            with requests.post(
-                BASE_URL,
-                json=continuation_payload,
-                stream=True,
-                timeout=30,
-            ) as response:
-
-                if response.status_code != 200:
-                    error_msg = (
-                        f"Continuation API Error: Status code {response.status_code}"
-                    )
-                    print(f"{error_msg}: {response.text}")
-                    self.content_update_queue.put(
-                        ContentUpdate(
-                            answer_index=answer_index,
-                            content_chunk=f"\n\n[{error_msg}]",
-                            is_done=True,
-                            is_error=True,
-                        ),
-                    )
-                    return
-
-                print("Processing continuation response stream...")
-                continuation_content_received = False
-
-                for line in response.iter_lines(decode_unicode=True):
-                    # Check for stop flag during continuation
-                    if self.stop_streaming_flag.is_set():
-                        print("Continuation stopped by user")
-                        return
-
-                    if not line:
-                        continue
-
-                    try:
-                        data = json.loads(line.strip())
-
-                        # Process message content
-                        if "message" in data and "content" in data["message"]:
-                            content_chunk = data["message"]["content"]
-                            if content_chunk:
-                                continuation_content_received = True
-                                print(
-                                    f"Continuation content: {repr(content_chunk[:50])}...",
-                                )
-
-                                # Accumulate content for tool call detection
-                                continuation_accumulated_content += content_chunk
-
-                                # Queue continuation content
-                                self.content_update_queue.put(
-                                    ContentUpdate(
-                                        answer_index=answer_index,
-                                        content_chunk=content_chunk,
-                                        is_done=False,
-                                        is_error=False,
-                                    ),
-                                )
-
-                        # Check for completion
-                        if data.get("done", False):
-                            print("Continuation request completed")
-
-                            # Check for tool calls in the continuation response
-                            tool_calls = self._find_tool_calls(
-                                continuation_accumulated_content,
-                            )
-                            if tool_calls:
-                                print(
-                                    f"Found {len(tool_calls)} tool call(s) in continuation response",
-                                )
-
-                                try:
-                                    # Execute all tool calls found in continuation
-                                    tool_results = self._execute_all_tool_calls(
-                                        continuation_accumulated_content,
-                                    )
-
-                                    # Add all tool results to the response
-                                    for i, tool_result in enumerate(tool_results):
-                                        if tool_result:
-                                            try:
-                                                # Try to parse as JSON first
-                                                data_result = json.loads(tool_result)
-                                                if (
-                                                    isinstance(data_result, dict)
-                                                    and "content" in data_result
-                                                ):
-                                                    if (
-                                                        isinstance(
-                                                            data_result["content"],
-                                                            list,
-                                                        )
-                                                        and len(data_result["content"])
-                                                        > 0
-                                                    ):
-                                                        value = data_result["content"][
-                                                            0
-                                                        ].get("text", str(data_result))
-                                                    else:
-                                                        value = str(
-                                                            data_result["content"],
-                                                        )
-                                                else:
-                                                    value = json.dumps(
-                                                        data_result,
-                                                        indent=2,
-                                                    )
-                                            except (
-                                                json.JSONDecodeError,
-                                                KeyError,
-                                                TypeError,
-                                            ):
-                                                # If not valid JSON or doesn't have expected structure, use as-is
-                                                value = str(tool_result)
-
-                                            result_text = f"\n\n**Continuation Tool {i + 1} Result:**\n```\n{value}\n```"
-
-                                            # Queue the tool result
-                                            self.content_update_queue.put(
-                                                ContentUpdate(
-                                                    answer_index=answer_index,
-                                                    content_chunk=result_text,
-                                                    is_done=False,
-                                                    is_error=False,
-                                                ),
-                                            )
-
-                                    print(
-                                        f"All {len(tool_results)} continuation tool results added",
-                                    )
-
-                                    # Recursively continue after these tool calls
-                                    self._continue_after_tool_calls(
-                                        answer_index,
-                                        tool_results,
-                                    )
-                                    return  # Don't mark as done yet, we're continuing again
-
-                                except Exception as tool_error:
-                                    print(
-                                        f"Error executing continuation tool calls: {tool_error}",
-                                    )
-                                    import traceback
-
-                                    traceback.print_exc()
-
-                                    # Queue error message
-                                    error_text = f"\n\n**Continuation Tool Execution Error:** {str(tool_error)}"
-                                    self.content_update_queue.put(
-                                        ContentUpdate(
-                                            answer_index=answer_index,
-                                            content_chunk=error_text,
-                                            is_done=False,
-                                            is_error=False,
-                                        ),
-                                    )
-
-                            # If no continuation was received, add a fallback message
-                            if not continuation_content_received:
-                                fallback_msg = "\n\n[Tool execution completed]"
-                                self.content_update_queue.put(
-                                    ContentUpdate(
-                                        answer_index=answer_index,
-                                        content_chunk=fallback_msg,
-                                        is_done=False,
-                                        is_error=False,
-                                    ),
-                                )
-
-                            # Mark as truly done (only if no tool calls were found)
-                            self.content_update_queue.put(
-                                ContentUpdate(
-                                    answer_index=answer_index,
-                                    content_chunk="",
-                                    is_done=True,
-                                    is_error=False,
-                                ),
-                            )
-                            print(
-                                f"Continuation fully completed for answer {answer_index}",
-                            )
-                            return
-
-                    except json.JSONDecodeError as json_err:
-                        print(f"JSON decode error in continuation: {json_err}")
-                        continue
-                    except Exception as content_err:
-                        print(f"Error processing continuation content: {content_err}")
-                        continue
-
-                # If we exit the loop without getting 'done', still mark as complete
-                print("Continuation stream ended without 'done' flag")
-                self.content_update_queue.put(
-                    ContentUpdate(
-                        answer_index=answer_index,
-                        content_chunk="",
-                        is_done=True,
-                        is_error=False,
-                    ),
-                )
-
-        except requests.exceptions.Timeout:
-            error_msg = "Continuation request timed out"
-            print(error_msg)
-            self.content_update_queue.put(
-                ContentUpdate(
-                    answer_index=answer_index,
-                    content_chunk=f"\n\n[{error_msg}]",
-                    is_done=True,
-                    is_error=True,
-                ),
-            )
-
-        except requests.exceptions.ConnectionError:
-            error_msg = "Continuation connection error - is Ollama running?"
-            print(error_msg)
-            self.content_update_queue.put(
-                ContentUpdate(
-                    answer_index=answer_index,
-                    content_chunk=f"\n\n[{error_msg}]",
-                    is_done=True,
-                    is_error=True,
-                ),
-            )
-
-        except requests.exceptions.RequestException as req_err:
-            error_msg = f"Continuation request error: {str(req_err)}"
-            print(error_msg)
-            self.content_update_queue.put(
-                ContentUpdate(
-                    answer_index=answer_index,
-                    content_chunk=f"\n\n[{error_msg}]",
-                    is_done=True,
-                    is_error=True,
-                ),
+            # **FIXED: Use the shared streaming logic**
+            self._process_streaming_response(
+                continuation_payload,
+                answer_index,
+                is_continuation=True,
             )
 
         except Exception as e:

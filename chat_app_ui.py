@@ -564,7 +564,7 @@ class ChatApp(ChatAppCore):
 
     def show_about(self) -> None:
         about_text = (
-            "Alpaca Assist\n\nVersion 0.07\n\nA chat application using the Ollama API."
+            "Alpaca Assist\n\nVersion 0.08\n\nA chat application using the Ollama API."
         )
         tk.messagebox.showinfo("About", about_text)
 
