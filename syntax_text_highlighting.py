@@ -15,31 +15,7 @@ class SyntaxHighlightingMixin:
     """Mixin class containing all syntax highlighting functionality."""
 
     def configure_initial_theme_tags(self) -> None:
-        """Configure initial theme tags safely."""
-        try:
-            cache: dict[str, str] = {}
-            # Configure tags for syntax highlighting
-            for token, style in self.style.styles.items():
-                try:
-                    if style != "":
-                        cache[str(token)] = style
-
-                    if style == "":
-                        b = backoff(str(token))
-                        if b in cache:
-                            style = cache[b]
-
-                    fg, bg = self.parse_style(style)
-                    if fg and "#" in fg:
-                        if bg and "#" in bg:
-                            self.tag_configure(str(token), foreground=fg, background=bg)
-                        else:
-                            self.tag_configure(str(token), foreground=fg)
-                except Exception as token_error:
-                    # Skip problematic tokens
-                    continue
-        except Exception as e:
-            print(f"Error configuring initial theme tags: {e}")
+        self.configure_theme_tags()
 
     def configure_theme_tags(self) -> None:
         """Configure tags for the current theme."""
@@ -74,6 +50,27 @@ class SyntaxHighlightingMixin:
             successful_configs = 0
             failed_configs = 0
 
+            # Track normal text color for comparison with bold
+            normal_text_color = None
+
+            # First pass: identify normal text color
+            for token, style in styles_dict.items():
+                if style != "":
+                    cache[str(token)] = style
+
+                if style == "":
+                    b = backoff(str(token))
+                    if b in cache:
+                        style = cache[b]
+
+                fg, bg = self.parse_style(style)
+
+                # Track normal text color (Token.Text or Token)
+                token_name = str(token)
+                if token_name in ["Token.Text", "Token"] and fg:
+                    normal_text_color = fg
+                    break
+
             # Configure tags for syntax highlighting
             for token, style in styles_dict.items():
                 try:
@@ -86,6 +83,28 @@ class SyntaxHighlightingMixin:
                             style = cache[b]
 
                     fg, bg = self.parse_style(style)
+
+                    # Check if this is a bold token that needs blue enhancement
+                    token_name = str(token)
+                    is_bold_token = (
+                        "Strong" in token_name
+                        or "Bold" in token_name
+                        or token_name == "Token.Generic.Strong"
+                        or token_name == "Token.Generic.Heading"
+                        or token_name == "Token.Generic.Subheading"
+                    )
+
+                    # print(f"{token_name}: {is_bold_token}")
+                    # If this is a bold token and its color matches normal text, make it more blue
+                    if (
+                        is_bold_token
+                        and fg
+                        and normal_text_color
+                        and fg == normal_text_color
+                    ):
+                        # if is_bold_token:
+                        fg = self._make_color_more_blue(fg)
+                        # print(f"-----> {token_name}, {fg}")
 
                     # Only configure tags with valid colors
                     if fg and fg.startswith("#"):
@@ -122,6 +141,41 @@ class SyntaxHighlightingMixin:
             import traceback
 
             traceback.print_exc()
+
+    def _make_color_more_blue(self, color: str) -> str:
+        """Make a color more blue-ish by increasing the blue component."""
+        try:
+            if color.lower() == "#000000":
+                return "#4444dd"
+            # Parse hex color
+            if color.startswith("#"):
+                hex_color = color[1:]
+
+                # Handle both 3 and 6 character hex codes
+                if len(hex_color) == 3:
+                    r = int(hex_color[0] * 2, 16)
+                    g = int(hex_color[1] * 2, 16)
+                    b = int(hex_color[2] * 2, 16)
+                elif len(hex_color) == 6:
+                    r = int(hex_color[0:2], 16)
+                    g = int(hex_color[2:4], 16)
+                    b = int(hex_color[4:6], 16)
+                else:
+                    return color
+
+                # Increase blue component and slightly decrease red/green
+                # This creates a more noticeable blue tint
+                r = max(0, int(r * 0.7))  # Reduce red by 30%
+                g = max(0, int(g * 0.7))  # Reduce green by 30%
+                b = min(255, int(b * 1.5) + 80)  # Increase blue by 50% and add 80
+
+                # Return new color
+                return f"#{r:02x}{g:02x}{b:02x}"
+
+        except Exception as e:
+            print(f"Error making color more blue: {e}")
+
+        return color
 
     def parse_style(
         self,
@@ -360,11 +414,11 @@ class SyntaxHighlightingMixin:
                 return
 
             should_skip, reason = self._should_skip_highlighting(region_text)
-            if should_skip:
-                print(f"Skipping regional highlighting: {reason}")
-                # Just apply default formatting to the region
-                self.tag_add("default", start_index, end_index)
-                return
+            # if should_skip:
+            #     print(f"Skipping regional highlighting: {reason}")
+            #     # Just apply default formatting to the region
+            #     self.tag_add("default", start_index, end_index)
+            #     return
 
             # Save selection if it exists
             has_selection = False
@@ -435,13 +489,13 @@ class SyntaxHighlightingMixin:
             if not text.strip():
                 return
 
-            should_skip, reason = self._should_skip_highlighting(text)
-            if should_skip:
-                self.skip_highlighting_reason = reason
-                print(f"Skipping highlighting: {reason}")
-                # Just apply default formatting
-                self.tag_add("default", "1.0", "end")
-                return
+            # should_skip, reason = self._should_skip_highlighting(text)
+            # if should_skip:
+            #     self.skip_highlighting_reason = reason
+            #     print(f"Skipping highlighting: {reason}")
+            #     # Just apply default formatting
+            #     self.tag_add("default", "1.0", "end")
+            #     return
 
             self.skip_highlighting_reason = None
 

@@ -1,7 +1,5 @@
 import os
 
-from anthropic_ollama_server import ClaudeClient
-
 
 def determine_merge_location(python_file_content, code_block):
     """
@@ -16,22 +14,62 @@ def determine_merge_location(python_file_content, code_block):
         str: The location where the code should be inserted
     """
 
-    # Get API key from environment variable
-    api_key = os.environ.get("ANTHROPIC_API_KEY")
-    if not api_key:
-        # Try loading from .env file as fallback
+    client = None
+    model = None
+    errors_tried = []
+
+    # Try 1: Environment variable API_KEY with anthropic_ollama_server
+    try:
+        api_key = os.environ.get("ANTHROPIC_API_KEY")
+        if api_key:
+            from anthropic_ollama_server import ClaudeClient
+
+            client = ClaudeClient(api_key=api_key)
+            model = "claude-sonnet-4-20250514"
+        else:
+            errors_tried.append("ANTHROPIC_API_KEY environment variable not found")
+    except Exception as e:
+        errors_tried.append(
+            f"Failed to initialize anthropic_ollama_server with API_KEY: {str(e)}",
+        )
+
+    # Try 2: Load from .env file for API_KEY with anthropic_ollama_server
+    if client is None:
         try:
             from dotenv import load_dotenv
 
             load_dotenv()
             api_key = os.environ.get("ANTHROPIC_API_KEY")
-        except ImportError:
-            pass
+            if api_key:
+                from anthropic_ollama_server import ClaudeClient
 
-    if not api_key:
-        raise ValueError("ANTHROPIC_API_KEY environment variable not found")
-    # Initialize Claude client
-    client = ClaudeClient(api_key=api_key)
+                client = ClaudeClient(api_key=api_key)
+                model = "claude-sonnet-4-20250514"
+            else:
+                errors_tried.append("ANTHROPIC_API_KEY not found in .env file")
+        except ImportError:
+            errors_tried.append("dotenv package not available")
+        except Exception as e:
+            errors_tried.append(
+                f"Failed to load .env or initialize anthropic_ollama_server: {str(e)}",
+            )
+
+    # Try 3: Fall back to bedrock_server
+    if client is None:
+        try:
+            from bedrock_server import ClaudeClient
+
+            client = ClaudeClient()
+            model = "us.anthropic.claude-sonnet-4-20250514-v1:0"
+        except Exception as e:
+            errors_tried.append(f"Failed to initialize bedrock_server: {str(e)}")
+
+    # If all attempts failed, raise error with details
+    if client is None:
+        error_msg = "Failed to initialize any ClaudeClient. Attempts made:\n"
+        for i, error in enumerate(errors_tried, 1):
+            error_msg += f"{i}. {error}\n"
+        raise ValueError(error_msg)
 
     # Construct the prompt
     prompt = f"""You are a helpful coding assistant. Follow these instructions precisely:
@@ -43,9 +81,8 @@ def determine_merge_location(python_file_content, code_block):
 2. Your task: Determine where the small block of code should be inserted into the python file so that the resulting merged code will compile successfully.
 
 3. Response format: Answer with ONLY one of the following:
-   - "toplevel" - if the small block should be inserted at the top level (not inside any class, function, or other structure)
+   - "toplevel" - if the small block should be inserted at the module top level
    - The exact class name - if the small block should be inserted inside a specific class
-   - The exact function name - if the small block should be inserted inside a specific function
 
 4. Constraints:
    - Provide ONLY the location answer
@@ -68,7 +105,7 @@ Small block of code:
         # Make API call using ClaudeClient
         response = client.complete(
             prompt=prompt,
-            model="claude-sonnet-4-20250514",
+            model=model,
             max_tokens=100,
             temperature=0.1,  # Low temperature for consistent responses
         )

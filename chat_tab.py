@@ -5,7 +5,7 @@ from typing import List
 from typing import Optional
 
 from chat_tab_core import ChatTabCore
-from chat_tab_streaming import ChatTabStreaming
+from chat_tab_streaming_advanced import ChatTabStreaming
 
 
 class ChatTab(ChatTabCore, ChatTabStreaming):
@@ -20,5 +20,5 @@ class ChatTab(ChatTabCore, ChatTabStreaming):
     ) -> None:
         # Initialize the core functionality
         ChatTabCore.__init__(self, parent, notebook, file_completions, preferences)
+        ChatTabStreaming.__init__(self)
         # Streaming functionality is mixed in via multiple inheritance
-        # No additional initialization needed for ChatTabStreaming

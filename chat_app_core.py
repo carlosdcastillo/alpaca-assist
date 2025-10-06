@@ -37,28 +37,17 @@ class ChatAppCore:
     def __init__(self, master: tk.Tk) -> None:
         self.master = master
         master.title("Alpaca Assist")
-
-        # Initialize database
         self.db = ConversationDatabase()
-
-        # Initialize and load preferences FIRST
         self.preferences = DEFAULT_PREFERENCES.copy()
         self.load_preferences()
-
-        # Set window geometry from preferences
         master.geometry(str(self.preferences["window_geometry"]))
-
-        # Initialize other attributes
         self.style = ttk.Style()
         self.style.configure("Custom.TButton", padding=(10, 10), width=15)
         self.style.configure("TNotebook.Tab", padding=(4, 4))
-
         self.file_completions: list[str] = []
         self.last_focused_widget: SyntaxHighlightedText | None = None
         self.tabs: list[ChatTab] = []
         self.load_file_completions()
-
-        # Initialize MCP Manager
         self.mcp_manager = MCPManager()
         self.event_loop = None
         self.mcp_thread = None
@@ -83,8 +72,6 @@ class ChatAppCore:
                 with open("mcp_servers.json") as f:
                     configs = json.load(f)
                     self.mcp_manager.server_configs = configs
-
-                    # Connect to servers in background
                     for name, config in configs.items():
                         if self.event_loop:
                             asyncio.run_coroutine_threadsafe(
@@ -104,22 +91,17 @@ class ChatAppCore:
             print("No MCP servers connected, waiting briefly...")
             import time
 
-            time.sleep(1.0)  # Wait 1 second for connections
-
-            # Try to reconnect if still no servers
+            time.sleep(1.0)
             if not self.mcp_manager.get_available_tools():
                 print("Attempting to reconnect MCP servers...")
-                self.load_mcp_servers()  # Try to reload/reconnect
-                time.sleep(1.0)  # Give it another moment
-
+                self.load_mcp_servers()
+                time.sleep(1.0)
         available_tools = []
         mcp_tools = self.mcp_manager.get_available_tools()
         print(f"Debug: MCP Manager has {len(mcp_tools)} servers")
         print(f"Debug: Server names: {list(mcp_tools.keys())}")
-
         for server_name, tools in mcp_tools.items():
             for tool in tools:
-                # Convert MCP tool format to Ollama/OpenAI tool format
                 available_tools.append(
                     {
                         "type": "function",
@@ -139,10 +121,8 @@ class ChatAppCore:
         print(f"MCP Manager exists: {self.mcp_manager is not None}")
         print(f"Event loop exists: {self.event_loop is not None}")
         print(f"Server configs: {getattr(self.mcp_manager, 'server_configs', {})}")
-
         if hasattr(self.mcp_manager, "servers"):
             print(f"Connected servers: {list(self.mcp_manager.servers.keys())}")
-
         tools = self.get_available_mcp_tools()
         print(f"Available tools: {len(tools)}")
         print("========================")
@@ -167,21 +147,16 @@ class ChatAppCore:
 
     def on_closing(self) -> None:
         """Handle application closing by saving session and quitting."""
-        # Save current window geometry
         self.preferences["window_geometry"] = self.master.geometry()
         self.save_preferences()
-
         if self.preferences["auto_save"]:
             self.save_session()
-
-        # Shutdown MCP connections
         if self.event_loop and self.mcp_manager:
             asyncio.run_coroutine_threadsafe(
                 self.mcp_manager.shutdown(),
                 self.event_loop,
             )
             self.event_loop.call_soon_threadsafe(self.event_loop.stop)
-
         self.master.destroy()
 
     def load_preferences(self) -> None:
@@ -208,46 +183,33 @@ class ChatAppCore:
 
     def apply_appearance_preferences(self, prefs: dict[str, Any]) -> None:
         """Apply appearance-related preferences."""
-        # Update all text widgets with new font, theme, and background
         for i, tab in enumerate(self.tabs):
-            # Apply in specific order: font first, then background, then theme
             tab.chat_display.update_font(prefs["font_family"], prefs["font_size"])
             tab.input_field.update_font(prefs["font_family"], prefs["font_size"])
-
             tab.chat_display.update_background_color(prefs["background_color"])
             tab.input_field.update_background_color(prefs["background_color"])
-
-            # Apply theme last so it can override background-specific colors
             tab.chat_display.update_theme(prefs["theme"])
             tab.input_field.update_theme(prefs["theme"])
-
-            # Update undo settings
             tab.chat_display.config(maxundo=prefs["max_undo_levels"])
             tab.input_field.config(maxundo=prefs["max_undo_levels"])
 
     def save_session(self) -> None:
         """Save all tabs and their contents to disk."""
-        # Get the currently selected tab index
         current_tab_index = (
             self.notebook.index(self.notebook.select()) if self.tabs else 0
         )
-
         session_data: dict[str, Any] = {
             "tabs": [],
-            "window": {
-                "geometry": self.master.geometry(),
-            },
+            "window": {"geometry": self.master.geometry()},
             "selected_tab_index": current_tab_index,
-            "version": "1.1",  # Add version for future compatibility
+            "version": "1.1",
         }
-
         for tab in self.tabs:
             tab_data: dict[str, Any] = {
                 "name": self.notebook.tab(self.tabs.index(tab), "text"),
-                **tab.get_serializable_data(),  # Use the new serialization method
+                **tab.get_serializable_data(),
             }
             session_data["tabs"].append(tab_data)
-
         try:
             with open("chat_session.json", "w") as f:
                 json.dump(session_data, f, indent=2)
@@ -260,51 +222,31 @@ class ChatAppCore:
         if not os.path.exists("chat_session.json"):
             self.create_tab()
             return
-
         try:
             with open("chat_session.json") as f:
                 session_data: dict[str, Any] = json.load(f)
-
-            # Restore window geometry if available
             if "window" in session_data and "geometry" in session_data["window"]:
                 self.master.geometry(
                     cast(dict[str, str], session_data["window"])["geometry"],
                 )
-
-            # Clear any default tabs
             if self.tabs:
                 for tab in self.tabs:
                     self.notebook.forget(tab.frame)
                 self.tabs = []
-
             for tab_data in cast(list[dict[str, Any]], session_data.get("tabs", [])):
                 new_tab: ChatTab = ChatTab(self, self.notebook, self.file_completions)
-
-                # Use the new loading method
                 new_tab.load_from_data(tab_data)
-
-                # Add the tab to the list
                 self.tabs.append(new_tab)
-
-                # Update the tab's display
                 new_tab.rebuild_display_from_state()
-
-                # Set the tab name
                 tab_name: str = tab_data.get("name", f"Tab {len(self.tabs)}")
                 self.notebook.tab(self.tabs.index(new_tab), text=tab_name)
-
-            # If no tabs were loaded, create a default one
             if not self.tabs:
                 self.create_tab()
-
-            # Select the previously selected tab if available
             selected_tab_index = session_data.get("selected_tab_index", 0)
             if 0 <= selected_tab_index < len(self.tabs):
                 self.notebook.select(selected_tab_index)
-                # Update window title with selected tab name
                 tab_name = self.notebook.tab(selected_tab_index, "text")
                 self.master.title(f"Alpaca Assist - {tab_name}")
-
             print("Session loaded successfully")
         except Exception as e:
             print(f"Error loading session: {e}")
@@ -322,7 +264,48 @@ class ChatAppCore:
     def update_tabs_file_completions(self) -> None:
         for tab in self.tabs:
             tab.update_file_completions(self.file_completions)
-        self.save_file_completions()  # Save file completions after updating
+        self.save_file_completions()
+
+    def handle_ctrl_return(self, tab) -> str:
+        """Handle Ctrl+Return event for a specific tab."""
+        tab.submit_message()
+        return "break"
+
+    def store_tab_in_database(self, tab: ChatTab) -> None:
+        """Store a tab's conversation in the database before closing it."""
+        tab_data = tab.get_serializable_data()
+        if not tab_data.get("chat_state", {}).get("questions") or not tab_data.get(
+            "chat_state",
+            {},
+        ).get("answers"):
+            return
+        tab_index = self.tabs.index(tab)
+        tab_title = self.notebook.tab(tab_index, "text")
+        if "created_date" not in tab_data:
+            tab_data["created_date"] = datetime.now().isoformat()
+        try:
+            conv_id = self.db.store_conversation(tab_title, tab_data)
+            if tab_data.get("original_conversation_id"):
+                print(f"Updated conversation '{tab_title}' with ID {conv_id}")
+            else:
+                print(f"Stored new conversation '{tab_title}' with ID {conv_id}")
+        except Exception as e:
+            print(f"Error storing conversation: {e}")
+            messagebox.showerror("Database Error", f"Failed to store conversation: {e}")
+
+    def update_tab_name(self, tab: ChatTab, summary: str) -> None:
+        tab_index = self.tabs.index(tab)
+        self.notebook.tab(tab_index, text=summary)
+        current_tab_index = self.notebook.index(self.notebook.select())
+        if tab_index == current_tab_index:
+            self.master.title(f"Alpaca Assist - {summary}")
+
+    def update_last_focused(self, event: tk.Event) -> None:
+        self.last_focused_widget = cast(SyntaxHighlightedText, event.widget)
+        for tab in self.tabs:
+            if event.widget == tab.chat_display:
+                self.master.after_idle(tab.update_status_bar)
+                break
 
     def create_tab(self, tab_name: str | None = None) -> None:
         """Create a new tab."""
@@ -332,84 +315,32 @@ class ChatAppCore:
             tab_name = f"Chat {len(self.tabs)}"
         self.notebook.add(tab.frame, text=tab_name)
         self.notebook.select(len(self.tabs) - 1)
-
-        # Update window title with the new tab name
         self.master.title(f"Alpaca Assist - {tab_name}")
-
-    def handle_ctrl_return(self, tab) -> str:
-        """Handle Ctrl+Return event for a specific tab."""
-        tab.submit_message()
-        return "break"
-
-    def store_tab_in_database(self, tab: ChatTab) -> None:
-        """Store a tab's conversation in the database before closing it."""
-        # Get tab data
-        tab_data = tab.get_serializable_data()
-
-        # Skip empty conversations
-        if not tab_data.get("chat_state", {}).get("questions") or not tab_data.get(
-            "chat_state",
-            {},
-        ).get("answers"):
-            return
-
-        # Get tab title
-        tab_index = self.tabs.index(tab)
-        tab_title = self.notebook.tab(tab_index, "text")
-
-        # Add creation timestamp if not present
-        if "created_date" not in tab_data:
-            tab_data["created_date"] = datetime.now().isoformat()
-
-        # Store in database
-        try:
-            conv_id = self.db.store_conversation(tab_title, tab_data)
-
-            # Check if this was an update or new conversation
-            if tab_data.get("original_conversation_id"):
-                print(f"Updated conversation '{tab_title}' with ID {conv_id}")
-            else:
-                print(f"Stored new conversation '{tab_title}' with ID {conv_id}")
-
-        except Exception as e:
-            print(f"Error storing conversation: {e}")
-            messagebox.showerror("Database Error", f"Failed to store conversation: {e}")
+        if hasattr(self, "bind_tab_shortcuts"):
+            modifier = "Command" if is_macos() else "Control"
+            self.bind_tab_shortcuts(tab, modifier)
 
     def delete_tab(self) -> None:
         """Delete tab and automatically store in database if it has content."""
         if len(self.tabs) <= 1:
             return
-
         current_tab = self.notebook.select()
         tab_index = self.notebook.index(current_tab)
         tab = self.tabs[tab_index]
-
-        # Check if conversation has content and automatically store it
         tab_data = tab.get_serializable_data()
-        has_content = (
-            tab_data.get("chat_state", {}).get("questions")
-            and tab_data.get("chat_state", {}).get("answers")
-            and any(q.strip() for q in tab_data["chat_state"]["questions"])
-            and any(a.strip() for a in tab_data["chat_state"]["answers"])
+        has_questions = tab_data.get("chat_state", {}).get("questions") and any(
+            q.strip() for q in tab_data["chat_state"]["questions"]
         )
-
+        has_answers = tab_data.get("chat_state", {}).get("answers") and any(
+            a.strip() for a in tab_data["chat_state"]["answers"]
+        )
+        has_unsaved_input = False
+        if hasattr(tab, "input_field"):
+            input_text = tab.input_field.get("1.0", tk.END).strip()
+            has_unsaved_input = bool(input_text)
+        has_content = has_questions or has_answers or has_unsaved_input
         if has_content:
-            # Automatically save the conversation without asking
             self.store_tab_in_database(tab)
-
-        # Clean up and remove tab
         tab.cleanup_resources()
         self.notebook.forget(current_tab)
         del self.tabs[tab_index]
-
-    def update_last_focused(self, event: tk.Event) -> None:
-        self.last_focused_widget = cast(SyntaxHighlightedText, event.widget)
-
-    def update_tab_name(self, tab: ChatTab, summary: str) -> None:
-        tab_index = self.tabs.index(tab)
-        self.notebook.tab(tab_index, text=summary)
-
-        # Update window title if this is the currently selected tab
-        current_tab_index = self.notebook.index(self.notebook.select())
-        if tab_index == current_tab_index:
-            self.master.title(f"Alpaca Assist - {summary}")
