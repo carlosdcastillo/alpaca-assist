@@ -1,9 +1,10 @@
 import os
 import re
+from re import Match
 
 
-def expand(input_string):
-    def replace_file_content(match):
+def expand(input_string: str) -> str:
+    def replace_file_content(match: Match[str]) -> str:
         filename = match.group(1)
         if os.path.exists(filename):
             try:
@@ -21,8 +22,8 @@ def expand(input_string):
 
 # Example usage
 if __name__ == "__main__":
-    test_string = (
+    test_string: str = (
         "This is a test. /file:example.txt And this is after the file content."
     )
-    result = expand(test_string)
+    result: str = expand(test_string)
     print(result)

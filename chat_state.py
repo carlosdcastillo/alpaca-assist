@@ -1,3 +1,4 @@
+import json
 from dataclasses import dataclass
 from typing import Any
 from typing import List
@@ -48,7 +49,8 @@ class FullAnswer:
 
     def add_tool_result(self, content: str, tool_id: str) -> None:
         """Add a tool result to the answer."""
-        self.components.append(ToolResult(content=content, id=tool_id))
+        formatted_content = self._format_json_if_parseable(content)
+        self.components.append(ToolResult(content=formatted_content, id=tool_id))
 
     def get_text_content(self) -> str:
         """Get all text content as a single string (for backward compatibility)."""
@@ -118,6 +120,30 @@ class FullAnswer:
     def from_string(cls, text: str) -> "FullAnswer":
         """Create FullAnswer from a simple string (for backward compatibility)."""
         return cls([text] if text else [])
+
+    def _format_json_if_parseable(self, content: str) -> str:
+        """Format content as JSON with indentation if it's valid JSON."""
+        stripped_content = content.strip()
+        is_code_block = stripped_content.startswith(
+            "```",
+        ) and stripped_content.endswith("```")
+        if is_code_block:
+            lines = stripped_content.split("\n")
+            if len(lines) > 2:
+                inner_content = "\n".join(lines[1:-1])
+                try:
+                    parsed = json.loads(inner_content)
+                    formatted_json = json.dumps(parsed, indent=2, ensure_ascii=False)
+                    return f"```json\n{formatted_json}\n```"
+                except (json.JSONDecodeError, TypeError):
+                    return content
+        else:
+            try:
+                parsed = json.loads(content)
+                return json.dumps(parsed, indent=2, ensure_ascii=False)
+            except (json.JSONDecodeError, TypeError):
+                return content
+        return content
 
 
 @dataclass

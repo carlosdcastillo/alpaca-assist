@@ -43,7 +43,7 @@ class FindDialog:
     def _update_cache(self):
         """Update cached content and line positions if needed."""
         if not self._cache_valid:
-            # Get content once and cache it
+            # Get content once and cache it - use the displayed content, not markdown
             self._cached_content = self.text_widget.get("1.0", "end-1c")
 
             # Pre-calculate line start positions for fast index conversion

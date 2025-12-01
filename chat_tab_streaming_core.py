@@ -49,100 +49,81 @@ class ChatTabStreamingCore:
         return False
 
     def _stop_processor(self):
-        """Atomically stop the queue processor."""
+        """Atomically stop the queue processor with proper synchronization."""
         with self._processor_lock:
-            if self._queue_processor_running:
+            was_running = self._queue_processor_running
+            self._queue_processor_running = False
+            if was_running:
                 print("Queue processor stopped")
-                self._queue_processor_running = False
+            return was_running
 
     def _start_processor_if_needed(self):
-        """Start processor with proper synchronization."""
+        """Start processor with proper synchronization to prevent race conditions."""
         with self._processor_lock:
-            if not self._queue_processor_running:
-                self._queue_processor_running = True
-                print("Starting queue processor")
+            if self._queue_processor_running:
+                print("Queue processor already running")
+                return False
+            if not hasattr(self, "process_content_queue"):
+                print(
+                    "ERROR: process_content_queue method not found - cannot start processor",
+                )
+                return False
+            self._queue_processor_running = True
+            print("Starting queue processor")
+            try:
                 self.parent.master.after_idle(self.process_content_queue)
                 return True
+            except Exception as e:
+                print(f"Error scheduling queue processor: {e}")
+                self._queue_processor_running = False
+                return False
+
+    def process_content_queue(self):
+        """Basic content queue processor for the core class."""
+        with self._processor_lock:
+            if not self._queue_processor_running:
+                print("Queue processor stopping - flag is False")
+                return
+        try:
+            update = self.content_update_queue.get(timeout=0.001)
+            if update.is_error:
+                error_content = f"\n\n[Error: {update.content_chunk}]"
+                self.chat_state.append_to_answer(update.answer_index, error_content)
+                self.chat_state.finish_streaming()
+                print(f"Processed error update for answer {update.answer_index}")
             else:
-                print("Queue processor already running")
-        return False
+                self.chat_state.append_to_answer(
+                    update.answer_index,
+                    update.content_chunk,
+                )
+                if update.is_done:
+                    self.chat_state.finish_streaming()
+                    print(f"Processed final update for answer {update.answer_index}")
+                else:
+                    print(f"Processed content update for answer {update.answer_index}")
+            with self._processor_lock:
+                if self._queue_processor_running:
+                    self.parent.master.after(50, self.process_content_queue)
+                else:
+                    print("Queue processor stopping - manually stopped")
+        except queue.Empty:
+            with self._processor_lock:
+                if self._queue_processor_running:
+                    self.parent.master.after(200, self.process_content_queue)
+                else:
+                    print("Queue processor stopping - manually stopped")
+        except Exception as e:
+            print(f"Error in queue processor: {e}")
+            import traceback
+
+            traceback.print_exc()
+            with self._processor_lock:
+                self._queue_processor_running = False
 
     def _contains_tool_call(self, text: str) -> bool:
         """Check if text contains any complete tool calls."""
         positions, _ = self._find_tool_calls(text)
         return len(positions) > 0
-
-    def _execute_all_tool_calls(self, text: str) -> list[str]:
-        """Execute all tool calls found in the text and return their results."""
-        with self._tool_execution_lock:
-            self._pending_tool_executions += 1
-        try:
-            tool_call_positions, modified_text = self._find_tool_calls(text)
-            results = []
-            print(f"Found {len(tool_call_positions)} tool call(s) to execute")
-
-            def execute_single_tool(i, start_pos, end_pos):
-                """Execute a single tool in a separate thread."""
-                print(f"Executing tool call {i + 1} at positions {start_pos}-{end_pos}")
-                result = self._execute_tool_call(modified_text, start_pos, end_pos)
-                return (i, result if result else f"Tool call {i + 1} execution failed")
-
-            max_workers = min(len(tool_call_positions), 3)
-            if tool_call_positions:
-                try:
-                    with concurrent.futures.ThreadPoolExecutor(
-                        max_workers=max_workers,
-                    ) as executor:
-                        futures = []
-                        for i, (start_pos, end_pos) in enumerate(tool_call_positions):
-                            future = executor.submit(
-                                execute_single_tool,
-                                i,
-                                start_pos,
-                                end_pos,
-                            )
-                            futures.append(future)
-                        results_dict = {}
-                        for future in concurrent.futures.as_completed(
-                            futures,
-                            timeout=60,
-                        ):
-                            try:
-                                i, result = future.result(timeout=10)
-                                results_dict[i] = result
-                            except Exception as e:
-                                print(f"Tool execution failed: {e}")
-                                for idx, f in enumerate(futures):
-                                    if f == future:
-                                        results_dict[
-                                            idx
-                                        ] = f"Tool execution error: {str(e)}"
-                                        break
-                        for i in sorted(results_dict.keys()):
-                            results.append(results_dict[i])
-                except concurrent.futures.TimeoutError:
-                    print("Tool execution timed out")
-                    results.append("Tool execution timed out")
-                except Exception as e:
-                    print(f"Error in parallel tool execution: {e}")
-                    for i, (start_pos, end_pos) in enumerate(tool_call_positions):
-                        print(f"Fallback: executing tool call {i + 1} sequentially")
-                        result = self._execute_tool_call(
-                            modified_text,
-                            start_pos,
-                            end_pos,
-                        )
-                        if result:
-                            results.append(result)
-                        else:
-                            results.append(f"Tool call {i + 1} execution failed")
-            return results
-        finally:
-            with self._tool_execution_lock:
-                self._pending_tool_executions = max(
-                    0,
-                    self._pending_tool_executions - 1,
-                )
 
     def _graceful_connection_close(self, response) -> None:
         """Gracefully close the HTTP connection."""
@@ -891,6 +872,103 @@ class ChatTabStreamingCore:
                 entry.event.set()
             return "end"
 
+    def _compute_answer_position_impl(self, answer_index: int) -> str:
+        """
+        Thread-safe implementation of answer position computation.
+
+        This method performs the actual computation of where to insert content
+        for a specific answer index in the chat display.
+
+        Args:
+            answer_index: The index of the answer to find position for
+
+        Returns:
+            Tkinter text widget position string (e.g., "5.0", "end")
+        """
+        try:
+            if threading.current_thread() != threading.main_thread():
+                result_queue = queue.Queue()
+
+                def compute_on_main_thread():
+                    try:
+                        position = self._compute_answer_position_main_thread(
+                            answer_index,
+                        )
+                        result_queue.put(("success", position))
+                    except Exception as e:
+                        result_queue.put(("error", str(e)))
+
+                self.parent.master.after_idle(compute_on_main_thread)
+                try:
+                    status, result = result_queue.get(timeout=5)
+                    if status == "error":
+                        print(f"Error computing position on main thread: {result}")
+                        return "end"
+                    return result
+                except queue.Empty:
+                    print("Timeout computing answer position")
+                    return "end"
+            else:
+                return self._compute_answer_position_main_thread(answer_index)
+        except Exception as e:
+            print(f"Error in _compute_answer_position_impl: {e}")
+            return "end"
+
+    def _compute_answer_position_main_thread(self, answer_index: int) -> str:
+        """
+        Main thread implementation of answer position computation.
+
+        This method must only be called from the main thread as it performs
+        Tkinter text widget operations.
+
+        Args:
+            answer_index: The index of the answer to find position for
+
+        Returns:
+            Tkinter text widget position string
+        """
+        try:
+            full_content = self.chat_display.get("1.0", tk.END)
+            lines = full_content.split("\n")
+            answer_count = 0
+            target_line = None
+            for i, line in enumerate(lines):
+                if line.startswith("A:") or line.strip() == "A:":
+                    if answer_count == answer_index:
+                        target_line = i
+                        break
+                    answer_count += 1
+            if target_line is None:
+                print(f"Answer {answer_index} not found in display, using end position")
+                return tk.END
+            end_line = len(lines)
+            for i in range(target_line + 1, len(lines)):
+                line = lines[i]
+                if (
+                    line.startswith("Q:")
+                    or line.strip().startswith("---")
+                    or (line.strip() and all(c == "-" for c in line.strip()))
+                ):
+                    end_line = i
+                    break
+            content_start_line = target_line + 1
+            last_content_line = content_start_line
+            for i in range(content_start_line, end_line):
+                if i < len(lines) and lines[i].strip():
+                    last_content_line = i
+            if last_content_line < len(lines):
+                line_content = lines[last_content_line]
+                position = f"{last_content_line + 1}.{len(line_content)}"
+            else:
+                position = tk.END
+            return position
+        except tk.TclError as e:
+            print(f"Tkinter error computing answer position: {e}")
+            return tk.END
+        except Exception as e:
+            print(f"Error in _compute_answer_position_main_thread: {e}")
+            return tk.END
+
     def _continue_after_tool_calls(
         self,
         answer_index: int,
@@ -931,53 +1009,6 @@ class ChatTabStreamingCore:
                 is_error=True,
             )
             self._put_content_update_with_retry(error_update)
-
-    def get_summary(self) -> None:
-        """Get a summary of the conversation with improved error handling and timing."""
-        if getattr(self, "summary_generated", False):
-            print("Summary already generated, skipping")
-            return
-        self.summary_generated = True
-
-        def start_summary_generation():
-            """Start summary generation with proper timing and coordination."""
-            try:
-                time.sleep(3)
-                questions, answers, _ = self.chat_state.get_safe_copy()
-                if not (
-                    questions
-                    and answers
-                    and questions[0].strip()
-                    and answers[0].strip()
-                ):
-                    print("No valid content available for summary generation")
-                    self.parent.master.after(
-                        0,
-                        lambda: self.parent.update_tab_name(self, "Chat Summary"),
-                    )
-                    return
-                summary_queue = queue.Queue()
-                fetch_thread = threading.Thread(
-                    target=self.fetch_summary_response,
-                    args=(summary_queue,),
-                    daemon=True,
-                )
-                fetch_thread.start()
-                time.sleep(0.1)
-                handler_thread = threading.Thread(
-                    target=self._handle_summary_response,
-                    args=(summary_queue,),
-                    daemon=True,
-                )
-                handler_thread.start()
-            except Exception as e:
-                print(f"Error starting summary generation: {e}")
-                self.parent.master.after(
-                    0,
-                    lambda: self.parent.update_tab_name(self, "Chat Summary"),
-                )
-
-        threading.Thread(target=start_summary_generation, daemon=True).start()
 
     def _extract_tool_results_from_content(
         self,
@@ -1037,35 +1068,6 @@ class ChatTabStreamingCore:
         MULTIPLE_NEWLINES_PATTERN = re.compile("\\n{3,}")
         clean_content = MULTIPLE_NEWLINES_PATTERN.sub("\\n\\n", clean_content).strip()
         return (clean_content, tool_results, tool_call_jsons)
-
-    def __init__(self):
-        """Initialize ChatTabStreamingPart1 with all required attributes."""
-        self.content_update_queue = queue.Queue()
-        self.input_queue = queue.Queue()
-        self.answer_end_positions = {}
-        self.stop_streaming_flag = threading.Event()
-        self.is_streaming = False
-        self.current_request_thread = None
-        self.summary_generated = False
-        self.chat_history_questions = []
-        self.chat_history_answers = []
-        self._queue_processor_running = False
-        self.stream_completion_lock = threading.Lock()
-        self._processor_lock = threading.Lock()
-        self._pending_tool_executions = 0
-        self._tool_execution_lock = threading.Lock()
-        self._continuation_states = {}
-        self._continuation_lock = threading.Lock()
-        self._chars_since_last_newline = 0
-        self._init_position_manager()
-        self.renderer = None
-        try:
-            from enhanced_tool_progress_manager import StreamingConnectionManager
-
-            self.connection_manager = StreamingConnectionManager()
-        except ImportError:
-            print("Warning: Enhanced connection management not available")
-            self.connection_manager = None
 
     def _handle_tool_calls_and_continue(
         self,
@@ -1194,3 +1196,153 @@ class ChatTabStreamingCore:
                 is_error=True,
             )
             self._put_content_update_with_retry(error_update)
+
+    def _execute_all_tool_calls(self, text: str) -> list[str]:
+        """Execute all tool calls found in the text and return their results."""
+        with self._tool_execution_lock:
+            self._pending_tool_executions += 1
+        try:
+            tool_call_positions, modified_text = self._find_tool_calls(text)
+            results = []
+            print(f"Found {len(tool_call_positions)} tool call(s) to execute")
+
+            def execute_single_tool(i, start_pos, end_pos):
+                """Execute a single tool in a separate thread."""
+                print(f"Executing tool call {i + 1} at positions {start_pos}-{end_pos}")
+                result = self._execute_tool_call(modified_text, start_pos, end_pos)
+                return (i, result if result else f"Tool call {i + 1} execution failed")
+
+            max_workers = min(len(tool_call_positions), 3)
+            if tool_call_positions:
+                try:
+                    with concurrent.futures.ThreadPoolExecutor(
+                        max_workers=max_workers,
+                    ) as executor:
+                        futures = []
+                        for i, (start_pos, end_pos) in enumerate(tool_call_positions):
+                            future = executor.submit(
+                                execute_single_tool,
+                                i,
+                                start_pos,
+                                end_pos,
+                            )
+                            futures.append(future)
+                        results_dict = {}
+                        for future in concurrent.futures.as_completed(
+                            futures,
+                            timeout=60,
+                        ):
+                            try:
+                                i, result = future.result(timeout=10)
+                                results_dict[i] = result
+                            except Exception as e:
+                                print(f"Tool execution failed: {e}")
+                                for idx, f in enumerate(futures):
+                                    if f == future:
+                                        results_dict[
+                                            idx
+                                        ] = f"Tool execution error: {str(e)}"
+                                        break
+                        for i in sorted(results_dict.keys()):
+                            results.append(results_dict[i])
+                except concurrent.futures.TimeoutError:
+                    print("Tool execution timed out")
+                    results.append("Tool execution timed out")
+                except Exception as e:
+                    print(f"Error in parallel tool execution: {e}")
+                    for i, (start_pos, end_pos) in enumerate(tool_call_positions):
+                        print(f"Fallback: executing tool call {i + 1} sequentially")
+                        result = self._execute_tool_call(
+                            modified_text,
+                            start_pos,
+                            end_pos,
+                        )
+                        if result:
+                            results.append(result)
+                        else:
+                            results.append(f"Tool call {i + 1} execution failed")
+            return results
+        finally:
+            with self._tool_execution_lock:
+                if self._pending_tool_executions > 0:
+                    self._pending_tool_executions -= 1
+
+    def __init__(self):
+        """Initialize ChatTabStreamingPart1 with all required attributes."""
+        self.content_update_queue = queue.Queue()
+        self.input_queue = queue.Queue()
+        self.answer_end_positions = {}
+        self.stop_streaming_flag = threading.Event()
+        self.is_streaming = False
+        self.current_request_thread = None
+        self.summary_generated = False
+        self.chat_history_questions = []
+        self.chat_history_answers = []
+        self._queue_processor_running = False
+        self.stream_completion_lock = threading.Lock()
+        self._processor_lock = threading.Lock()
+        self._pending_tool_executions = 0
+        self._tool_execution_lock = threading.Lock()
+        self._continuation_states = {}
+        self._continuation_lock = threading.Lock()
+        self._chars_since_last_newline = 0
+        self._executed_tool_calls = set()
+        self._tool_call_lock = threading.Lock()
+        self._summary_lock = threading.Lock()
+        self._init_position_manager()
+        self.renderer = None
+        try:
+            from enhanced_tool_progress_manager import StreamingConnectionManager
+
+            self.connection_manager = StreamingConnectionManager()
+        except ImportError:
+            print("Warning: Enhanced connection management not available")
+            self.connection_manager = None
+
+    def get_summary(self) -> None:
+        """Get a summary of the conversation with improved error handling and timing."""
+        with self._summary_lock:
+            if self.summary_generated:
+                print("Summary already generated, skipping")
+                return
+            self.summary_generated = True
+
+        def start_summary_generation():
+            """Start summary generation with proper timing and coordination."""
+            try:
+                time.sleep(3)
+                questions, answers, _ = self.chat_state.get_safe_copy()
+                if not (
+                    questions
+                    and answers
+                    and questions[0].strip()
+                    and answers[0].strip()
+                ):
+                    print("No valid content available for summary generation")
+                    self.parent.master.after(
+                        0,
+                        lambda: self.parent.update_tab_name(self, "Chat Summary"),
+                    )
+                    return
+                summary_queue = queue.Queue()
+                fetch_thread = threading.Thread(
+                    target=self.fetch_summary_response,
+                    args=(summary_queue,),
+                    daemon=True,
+                )
+                fetch_thread.start()
+                time.sleep(0.1)
+                handler_thread = threading.Thread(
+                    target=self._handle_summary_response,
+                    args=(summary_queue,),
+                    daemon=True,
+                )
+                handler_thread.start()
+            except Exception as e:
+                print(f"Error starting summary generation: {e}")
+                self.parent.master.after(
+                    0,
+                    lambda: self.parent.update_tab_name(self, "Chat Summary"),
+                )
+
+        threading.Thread(target=start_summary_generation, daemon=True).start()

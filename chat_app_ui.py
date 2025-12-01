@@ -29,12 +29,13 @@ class ChatApp(ChatAppCore):
         """Show the conversation history window."""
         ConversationHistoryWindow(self, self.master)
 
-    def export_to_html(self) -> None:
-        """Export the content of the currently focused text widget to HTML."""
+    def _get_export_content_and_title(self):
+        """Get content and title for export based on focused widget."""
         if isinstance(self.last_focused_widget, SyntaxHighlightedText):
             content = self.last_focused_widget.get("1.0", tk.END).strip()
             if not content:
-                return
+                return None, None
+
             current_tab_index = self.notebook.index(self.notebook.select())
             if 0 <= current_tab_index < len(self.tabs):
                 current_tab = self.tabs[current_tab_index]
@@ -45,31 +46,37 @@ class ChatApp(ChatAppCore):
                     title = "Input Field Export"
             else:
                 title = "Exported Content"
-            export_and_open(
-                content,
-                title,
-                theme_name=str(self.preferences["theme"]),
-                background_color=str(self.preferences["background_color"]),
-                font_family=str(self.preferences["font_family"]),
-                font_size=int(str(self.preferences["font_size"])),
-            )
+            return content, title
         else:
-            current_tab_index = self.notebook.index(self.notebook.select())
-            if 0 <= current_tab_index < len(self.tabs):
-                current_tab = self.tabs[current_tab_index]
-                content = current_tab.chat_display.get("1.0", tk.END).strip()
-                if not content:
-                    return
-                tab_name = self.notebook.tab(current_tab_index, "text")
-                title = f"Chat Export - {tab_name}"
-                export_and_open(
-                    content,
-                    title,
-                    theme_name=str(self.preferences["theme"]),
-                    background_color=str(self.preferences["background_color"]),
-                    font_family=str(self.preferences["font_family"]),
-                    font_size=int(str(self.preferences["font_size"])),
-                )
+            return self._get_default_export_content()
+
+    def _get_default_export_content(self):
+        """Get default export content from current tab."""
+        current_tab_index = self.notebook.index(self.notebook.select())
+        if 0 <= current_tab_index < len(self.tabs):
+            current_tab = self.tabs[current_tab_index]
+            content = current_tab.chat_display.get("1.0", tk.END).strip()
+            if not content:
+                return None, None
+            tab_name = self.notebook.tab(current_tab_index, "text")
+            title = f"Chat Export - {tab_name}"
+            return content, title
+        return None, None
+
+    def export_to_html(self) -> None:
+        """Export the content of the currently focused text widget to HTML."""
+        content, title = self._get_export_content_and_title()
+        if content is None:
+            return
+
+        export_and_open(
+            content,
+            title,
+            theme_name=str(self.preferences["theme"]),
+            background_color=str(self.preferences["background_color"]),
+            font_family=str(self.preferences["font_family"]),
+            font_size=int(str(self.preferences["font_size"])),
+        )
 
     def show_find_dialog(self) -> None:
         """Show find dialog for the currently focused text widget."""
@@ -95,49 +102,6 @@ class ChatApp(ChatAppCore):
     def on_app_focus_out(self, event: tk.Event) -> None:
         """Reduce UI updates when app loses focus"""
         self.update_enabled = False
-
-    def show_available_tools(self):
-        """Show a window with all available MCP tools."""
-        tools_window = tk.Toplevel(self.master)
-        tools_window.title("Available MCP Tools")
-        tools_window.geometry("700x500")
-        tree = ttk.Treeview(tools_window, columns=("Server", "Tool", "Description"))
-        tree.heading("#0", text="Name")
-        tree.heading("Server", text="Server")
-        tree.heading("Tool", text="Tool")
-        tree.heading("Description", text="Description")
-        tools = self.get_available_mcp_tools()
-        for tool in tools:
-            function_name = tool["function"]["name"]
-            if "_" in function_name:
-                server_name = function_name.split("_")[0]
-                tool_name = "_".join(function_name.split("_")[1:])
-            else:
-                server_name = "Unknown"
-                tool_name = function_name
-            tree.insert(
-                "",
-                "end",
-                text=tool_name,
-                values=(
-                    server_name,
-                    tool_name,
-                    tool["function"].get("description", ""),
-                ),
-            )
-        tree.pack(fill="both", expand=True, padx=10, pady=10)
-
-        def call_selected_tool():
-            selection = tree.selection()
-            if selection:
-                item = tree.item(selection[0])
-                server_name = item["values"][0]
-                tool_name = item["values"][1]
-                self.show_tool_call_dialog(server_name, tool_name)
-
-        ttk.Button(tools_window, text="Call Tool", command=call_selected_tool).pack(
-            pady=5,
-        )
 
     def show_tool_call_dialog(self, server_name: str, tool_name: str):
         """Show dialog to input arguments and call MCP tool."""
@@ -244,7 +208,7 @@ class ChatApp(ChatAppCore):
 
     def show_about(self) -> None:
         about_text = (
-            "Alpaca Assist\n\nVersion 0.09\n\nA chat application using the Ollama API."
+            "Alpaca Assist\n\nVersion 0.10\n\nA chat application using the Ollama API."
         )
         tk.messagebox.showinfo("About", about_text)
 
@@ -268,49 +232,60 @@ class ChatApp(ChatAppCore):
             pyperclip.copy(text)
             self.last_focused_widget.focus_set()
 
-    def copy_code_block(self) -> None:
-        if isinstance(self.last_focused_widget, SyntaxHighlightedText):
-            current_cursor_pos = self.last_focused_widget.index(tk.INSERT)
-            text = self.last_focused_widget.get("1.0", tk.END)
-            cursor_pos = self.last_focused_widget.index(tk.INSERT)
-            line, col = map(int, cursor_pos.split("."))
-            code_blocks = parse_code_blocks(text)
-            containing_blocks = []
-            for indent_level, language, start_line, end_line in code_blocks:
-                if start_line <= line <= end_line:
-                    containing_blocks.append(
-                        (indent_level, language, start_line, end_line),
-                    )
-            if containing_blocks:
-                containing_blocks.sort(key=lambda block: block[3] - block[2])
-                indent_level, language, start_line, end_line = containing_blocks[0]
-                start_index = f"{start_line}.0"
-                end_index = f"{end_line}.end"
-                code_content = self.last_focused_widget.get(start_index, end_index)
-                lines = code_content.split("\n")
-                if lines and lines[0].strip().startswith("```"):
-                    lines = lines[1:]
-                if lines and lines[-1].strip() == "```":
-                    lines = lines[:-1]
-                if lines:
-                    non_empty_lines = [line for line in lines if line.strip()]
-                    if non_empty_lines:
-                        min_indent = min(
-                            len(line) - len(line.lstrip()) for line in non_empty_lines
-                        )
-                        lines = [
-                            line[min_indent:] if line.strip() else line
-                            for line in lines
-                        ]
-                cleaned_code = "\n".join(lines)
-                pyperclip.copy(cleaned_code)
-                print(f"Code block copied to clipboard! Language: {language}")
-                self.last_focused_widget.highlight_code_block(start_index, end_index)
-                self.last_focused_widget.mark_set(tk.INSERT, current_cursor_pos)
-                self.last_focused_widget.see(current_cursor_pos)
-                self.last_focused_widget.focus_set()
-                return
-            print("No code block found at the current cursor position.")
+    def _find_containing_code_blocks(self, text, line):
+        """Find code blocks containing the current line."""
+        code_blocks = parse_code_blocks(text)
+        containing_blocks = []
+        for indent_level, language, start_line, end_line in code_blocks:
+            if start_line <= line <= end_line:
+                containing_blocks.append(
+                    (indent_level, language, start_line, end_line),
+                )
+        return containing_blocks
+
+    def _extract_code_content(self, target_widget, start_line, end_line):
+        """Extract and clean code content from the text widget."""
+        start_index = f"{start_line}.0"
+        end_index = f"{end_line}.end"
+        code_content = target_widget.get(start_index, end_index)
+        lines = code_content.split("\n")
+
+        # Remove markdown code block markers
+        if lines and lines[0].strip().startswith("```"):
+            lines = lines[1:]
+        if lines and lines[-1].strip() == "```":
+            lines = lines[:-1]
+
+        return lines, start_index, end_index
+
+    def _clean_code_indentation(self, lines):
+        """Remove common indentation from code lines."""
+        if not lines:
+            return lines
+
+        non_empty_lines = [line for line in lines if line.strip()]
+        if not non_empty_lines:
+            return lines
+
+        min_indent = min(len(line) - len(line.lstrip()) for line in non_empty_lines)
+        return [line[min_indent:] if line.strip() else line for line in lines]
+
+    def _copy_code_and_highlight(
+        self,
+        cleaned_code,
+        language,
+        start_index,
+        end_index,
+        current_cursor_pos,
+        target_widget,
+    ):
+        """Copy code to clipboard and highlight the block."""
+        pyperclip.copy(cleaned_code)
+        print(f"Code block copied to clipboard! Language: {language}")
+        target_widget.highlight_code_block(start_index, end_index)
+        target_widget.mark_set(tk.INSERT, current_cursor_pos)
+        target_widget.see(current_cursor_pos)
+        target_widget.focus_set()
 
     def go_to_end_of_line(self, event: tk.Event) -> str | None:
         if isinstance(event.widget, SyntaxHighlightedText):
@@ -332,44 +307,6 @@ class ChatApp(ChatAppCore):
         """Get the currently selected model from the combo box."""
         return self.selected_model.get()
 
-    def get_question_lines(self) -> list[int]:
-        """Get all line numbers that start with 'Q:'.
-
-        Returns:
-            List of line numbers (1-indexed) that start with 'Q:'
-        """
-        current_tab_index = self.notebook.index(self.notebook.select())
-        if 0 <= current_tab_index < len(self.tabs):
-            current_tab = self.tabs[current_tab_index]
-            chat_display = current_tab.chat_display
-            content = chat_display.get("1.0", tk.END)
-            lines = content.split("\n")
-            question_lines = []
-            for i, line in enumerate(lines, 1):
-                if line.startswith("Q: "):
-                    question_lines.append(i)
-            return question_lines
-        return []
-
-    def get_answer_lines(self) -> list[int]:
-        """Get all line numbers that start with 'A:'.
-
-        Returns:
-            List of line numbers (1-indexed) that start with 'A:'
-        """
-        current_tab_index = self.notebook.index(self.notebook.select())
-        if 0 <= current_tab_index < len(self.tabs):
-            current_tab = self.tabs[current_tab_index]
-            chat_display = current_tab.chat_display
-            content = chat_display.get("1.0", tk.END)
-            lines = content.split("\n")
-            answer_lines = []
-            for i, line in enumerate(lines, 1):
-                if line.startswith("A: "):
-                    answer_lines.append(i)
-            return answer_lines
-        return []
-
     def go_to_next_qa(self) -> None:
         """Go to next question/answer (wrapper for menu)."""
         self.navigate_next_qa()
@@ -378,65 +315,131 @@ class ChatApp(ChatAppCore):
         """Go to previous question/answer (wrapper for menu)."""
         self.navigate_previous_qa()
 
+    def _navigate_to_line(self, line_num):
+        """Navigate to a specific line in the chat display."""
+        current_tab_index = self.notebook.index(self.notebook.select())
+        if 0 <= current_tab_index < len(self.tabs):
+            current_tab = self.tabs[current_tab_index]
+            chat_display = current_tab.chat_display
+            target_pos = f"{line_num}.0"
+            chat_display.mark_set(tk.INSERT, target_pos)
+            chat_display.see(target_pos)
+            chat_display.focus_set()
+
+    def _find_next_line_after_current(self, lines, current_line_num):
+        """Find the next line number after the current position."""
+        for line_num in lines:
+            if line_num > current_line_num:
+                return line_num
+        return None
+
+    def _find_previous_line_before_current(self, lines, current_line_num):
+        """Find the previous line number before the current position."""
+        for line_num in reversed(lines):
+            if line_num < current_line_num:
+                return line_num
+        return None
+
     def navigate_next_qa(self) -> None:
         """Navigate to next question/answer.
         - If on question: go to immediate next A:
         - If on answer: go to immediate next Q:
         """
+        # Prevent navigation during streaming
+        if getattr(self, "is_streaming", False):
+            print("Cannot navigate during streaming")
+            return
+
         current_tab_index = self.notebook.index(self.notebook.select())
         if 0 <= current_tab_index < len(self.tabs):
             current_tab = self.tabs[current_tab_index]
             chat_display = current_tab.chat_display
             current_pos = chat_display.index(tk.INSERT)
             current_line_num = int(current_pos.split(".")[0])
+
             if self.is_on_question():
                 answer_lines = self.get_answer_lines()
-                for line_num in answer_lines:
-                    if line_num > current_line_num:
-                        target_pos = f"{line_num}.0"
-                        chat_display.mark_set(tk.INSERT, target_pos)
-                        chat_display.see(target_pos)
-                        chat_display.focus_set()
-                        return
+                next_line = self._find_next_line_after_current(
+                    answer_lines,
+                    current_line_num,
+                )
+                if next_line:
+                    self._navigate_to_line(next_line)
             elif self.is_on_answer():
                 question_lines = self.get_question_lines()
-                for line_num in question_lines:
-                    if line_num > current_line_num:
-                        target_pos = f"{line_num}.0"
-                        chat_display.mark_set(tk.INSERT, target_pos)
-                        chat_display.see(target_pos)
-                        chat_display.focus_set()
-                        return
+                next_line = self._find_next_line_after_current(
+                    question_lines,
+                    current_line_num,
+                )
+                if next_line:
+                    self._navigate_to_line(next_line)
 
     def navigate_previous_qa(self) -> None:
         """Navigate to previous question/answer.
         - If on question: go to immediate previous A:
         - If on answer: go to immediate previous Q:
         """
+        # Prevent navigation during streaming
+        if getattr(self, "is_streaming", False):
+            print("Cannot navigate during streaming")
+            return
+
         current_tab_index = self.notebook.index(self.notebook.select())
         if 0 <= current_tab_index < len(self.tabs):
             current_tab = self.tabs[current_tab_index]
             chat_display = current_tab.chat_display
             current_pos = chat_display.index(tk.INSERT)
             current_line_num = int(current_pos.split(".")[0])
+
             if self.is_on_question():
                 answer_lines = self.get_answer_lines()
-                for line_num in reversed(answer_lines):
-                    if line_num < current_line_num:
-                        target_pos = f"{line_num}.0"
-                        chat_display.mark_set(tk.INSERT, target_pos)
-                        chat_display.see(target_pos)
-                        chat_display.focus_set()
-                        return
+                prev_line = self._find_previous_line_before_current(
+                    answer_lines,
+                    current_line_num,
+                )
+                if prev_line:
+                    self._navigate_to_line(prev_line)
             elif self.is_on_answer():
                 question_lines = self.get_question_lines()
-                for line_num in reversed(question_lines):
-                    if line_num < current_line_num:
-                        target_pos = f"{line_num}.0"
-                        chat_display.mark_set(tk.INSERT, target_pos)
-                        chat_display.see(target_pos)
-                        chat_display.focus_set()
-                        return
+                prev_line = self._find_previous_line_before_current(
+                    question_lines,
+                    current_line_num,
+                )
+                if prev_line:
+                    self._navigate_to_line(prev_line)
+
+    def _get_current_line_content(self):
+        """Get the content of the current line."""
+        current_tab_index = self.notebook.index(self.notebook.select())
+        if 0 <= current_tab_index < len(self.tabs):
+            current_tab = self.tabs[current_tab_index]
+            chat_display = current_tab.chat_display
+            current_pos = chat_display.index(tk.INSERT)
+            current_line_num = int(current_pos.split(".")[0])
+            line_content = chat_display.get(
+                f"{current_line_num}.0",
+                f"{current_line_num}.end",
+            )
+            return line_content, current_line_num
+        return None, None
+
+    def _get_last_qa_lines_before_current(self, current_line_num):
+        """Get the last Q and A line numbers before the current position."""
+        question_lines = self.get_question_lines()
+        answer_lines = self.get_answer_lines()
+
+        last_q_line = None
+        last_a_line = None
+
+        for q_line in question_lines:
+            if q_line < current_line_num:
+                last_q_line = q_line
+
+        for a_line in answer_lines:
+            if a_line < current_line_num:
+                last_a_line = a_line
+
+        return last_q_line, last_a_line
 
     def is_on_answer(self) -> bool:
         """Check if cursor is currently on an answer or any of its subsequent lines.
@@ -444,39 +447,27 @@ class ChatApp(ChatAppCore):
         Returns:
             True if cursor is on an A: line or any subsequent lines until next Q: line
         """
-        current_tab_index = self.notebook.index(self.notebook.select())
-        if 0 <= current_tab_index < len(self.tabs):
-            current_tab = self.tabs[current_tab_index]
-            chat_display = current_tab.chat_display
-            current_pos = chat_display.index(tk.INSERT)
-            current_line_num = int(current_pos.split(".")[0])
-            line_content = chat_display.get(
-                f"{current_line_num}.0",
-                f"{current_line_num}.end",
-            )
-            if line_content.startswith("A: "):
-                return True
-            if line_content.startswith("Q: "):
-                return False
-            question_lines = self.get_question_lines()
-            answer_lines = self.get_answer_lines()
-            last_q_line = None
-            last_a_line = None
-            for q_line in question_lines:
-                if q_line < current_line_num:
-                    last_q_line = q_line
-            for a_line in answer_lines:
-                if a_line < current_line_num:
-                    last_a_line = a_line
-            if last_q_line is None and last_a_line is None:
-                return False
-            if last_a_line is None:
-                return False
-            elif last_q_line is None:
-                return True
-            else:
-                return last_a_line > last_q_line
-        return False
+        line_content, current_line_num = self._get_current_line_content()
+        if line_content is None:
+            return False
+
+        if line_content.startswith("A: "):
+            return True
+        if line_content.startswith("Q: "):
+            return False
+
+        last_q_line, last_a_line = self._get_last_qa_lines_before_current(
+            current_line_num,
+        )
+
+        if last_q_line is None and last_a_line is None:
+            return False
+        if last_a_line is None:
+            return False
+        elif last_q_line is None:
+            return True
+        else:
+            return last_a_line > last_q_line
 
     def is_on_question(self) -> bool:
         """Check if cursor is currently on a question or any of its subsequent lines.
@@ -484,41 +475,27 @@ class ChatApp(ChatAppCore):
         Returns:
             True if cursor is on a Q: line or any subsequent lines until next A: line
         """
-        current_tab_index = self.notebook.index(self.notebook.select())
-        if 0 <= current_tab_index < len(self.tabs):
-            current_tab = self.tabs[current_tab_index]
-            chat_display = current_tab.chat_display
-            current_pos = chat_display.index(tk.INSERT)
-            current_line_num = int(current_pos.split(".")[0])
-            current_col = int(current_pos.split(".")[1])
-            line_content = chat_display.get(
-                f"{current_line_num}.0",
-                f"{current_line_num}.end",
-            )
-            if line_content.startswith("Q: "):
-                return True
-            if line_content.startswith("A: "):
-                return False
-            question_lines = self.get_question_lines()
-            answer_lines = self.get_answer_lines()
-            last_q_line = None
-            last_a_line = None
-            for q_line in question_lines:
-                if q_line < current_line_num:
-                    last_q_line = q_line
-            for a_line in answer_lines:
-                if a_line < current_line_num:
-                    last_a_line = a_line
-            if last_q_line is None and last_a_line is None:
-                return False
-            if last_q_line is None:
-                return False
-            elif last_a_line is None:
-                return True
-            else:
-                result = last_q_line > last_a_line
-                return result
-        return False
+        line_content, current_line_num = self._get_current_line_content()
+        if line_content is None:
+            return False
+
+        if line_content.startswith("Q: "):
+            return True
+        if line_content.startswith("A: "):
+            return False
+
+        last_q_line, last_a_line = self._get_last_qa_lines_before_current(
+            current_line_num,
+        )
+
+        if last_q_line is None and last_a_line is None:
+            return False
+        if last_q_line is None:
+            return False
+        elif last_a_line is None:
+            return True
+        else:
+            return last_q_line > last_a_line
 
     def set_selected_model(self, model: str) -> None:
         """Set the selected model in the combo box."""
@@ -537,75 +514,47 @@ class ChatApp(ChatAppCore):
         print(f"Model selection changed to: {selected_model}")
 
     def create_widgets(self) -> None:
+        """Create widgets with improved cross-platform styling."""
+        self._configure_cross_platform_styles()
         self.button_frame = ttk.Frame(self.master)
         self.button_frame.pack(fill="x", padx=5, pady=(4, 2))
-        self.style.configure("Medium.TButton", padding=(9, 11))
-        is_macos_system = platform.system() == "Darwin"
-        modifier_key = "Cmd" if is_macos_system else "Ctrl"
-        if is_macos_system:
-            button_width = 12
-            self.new_tab_button = tk.Button(
-                self.button_frame,
-                text="New Tab",
-                command=self.create_tab,
-                height=2,
-                width=button_width,
-            )
-            self.new_tab_button.pack(side="left", padx=(3, 1))
-            ToolTip(self.new_tab_button, f"New Tab ({modifier_key}+N)")
-            self.delete_tab_button = tk.Button(
-                self.button_frame,
-                text="Close Tab",
-                command=self.delete_tab,
-                height=2,
-                width=button_width,
-            )
-            self.delete_tab_button.pack(side="left", padx=(1, 1))
-            ToolTip(self.delete_tab_button, f"Close Tab ({modifier_key}+W)")
-            self.history_button = tk.Button(
-                self.button_frame,
-                text="Conversation History",
-                command=self.show_conversation_history,
-                height=2,
-                width=button_width,
-            )
-            self.history_button.pack(side="left", padx=(1, 10))
-            ToolTip(self.history_button, f"Conversation History ({modifier_key}+Y)")
-        else:
-            button_width = 12
-            self.style.configure(
-                "FixedWidth.TButton",
-                padding=(9, 11),
-                width=button_width,
-            )
-            self.new_tab_button = ttk.Button(
-                self.button_frame,
-                text="New Tab",
-                command=self.create_tab,
-                style="FixedWidth.TButton",
-            )
-            self.new_tab_button.pack(side="left", padx=(3, 1))
-            ToolTip(self.new_tab_button, f"New Tab ({modifier_key}+N)")
-            self.delete_tab_button = ttk.Button(
-                self.button_frame,
-                text="Close Tab",
-                command=self.delete_tab,
-                style="FixedWidth.TButton",
-            )
-            self.delete_tab_button.pack(side="left", padx=(1, 1))
-            ToolTip(self.delete_tab_button, f"Close Tab ({modifier_key}+W)")
-            self.history_button = ttk.Button(
-                self.button_frame,
-                text="History",
-                command=self.show_conversation_history,
-                style="FixedWidth.TButton",
-            )
-            self.history_button.pack(side="left", padx=(1, 10))
-            ToolTip(self.history_button, f"Conversation History ({modifier_key}+Y)")
+        self.new_tab_button = ttk.Button(
+            self.button_frame,
+            text="New Tab",
+            command=self.create_tab,
+            style="App.TButton",
+        )
+        self.new_tab_button.pack(side="left", padx=(3, 1))
+        modifier_key = "Cmd" if platform.system() == "Darwin" else "Ctrl"
+        ToolTip(self.new_tab_button, f"New Tab ({modifier_key}+N)")
+        self.delete_tab_button = ttk.Button(
+            self.button_frame,
+            text="Close Tab",
+            command=self.delete_tab,
+            style="App.TButton",
+        )
+        self.delete_tab_button.pack(side="left", padx=(1, 1))
+        ToolTip(self.delete_tab_button, f"Close Tab ({modifier_key}+W)")
+        history_text = (
+            "History" if platform.system() != "Darwin" else "Conversation History"
+        )
+        self.history_button = ttk.Button(
+            self.button_frame,
+            text=history_text,
+            command=self.show_conversation_history,
+            style="App.TButton",
+        )
+        self.history_button.pack(side="left", padx=(1, 10))
+        ToolTip(self.history_button, f"Conversation History ({modifier_key}+Y)")
         self.model_frame = ttk.Frame(self.button_frame)
         self.model_frame.pack(side="left", padx=(0, 3))
-        ttk.Label(self.model_frame, text="Model:").pack(side="left", padx=(0, 5))
+        ttk.Label(self.model_frame, text="Model:", style="App.TLabel").pack(
+            side="left",
+            padx=(0, 5),
+        )
         self.available_models = [
+            "us.anthropic.claude-sonnet-4-5-20250929-v1:0",
+            "us.anthropic.claude-haiku-4-5-20251001-v1:0",
             "us.anthropic.claude-opus-4-1-20250805-v1:0",
             "us.anthropic.claude-sonnet-4-20250514-v1:0",
             "us.anthropic.claude-3-7-sonnet-20250219-v1:0",
@@ -628,11 +577,12 @@ class ChatApp(ChatAppCore):
             values=self.available_models,
             state="readonly",
             width=35,
+            style="App.TCombobox",
         )
         self.model_combo.pack(side="left")
         self.model_combo.bind("<<ComboboxSelected>>", self.on_model_selection_changed)
         ToolTip(self.model_combo, "Select the AI model to use for chat")
-        self.notebook = ttk.Notebook(self.master)
+        self.notebook = ttk.Notebook(self.master, style="App.TNotebook")
         self.notebook.pack(expand=True, fill="both", padx=10, pady=(5, 10))
         self.notebook.bind("<<NotebookTabChanged>>", self.on_tab_changed)
         self.master.bind("<FocusIn>", self.on_app_focus_in)
@@ -686,160 +636,45 @@ class ChatApp(ChatAppCore):
                 return "break"
         return "break"
 
-    def bind_tab_shortcuts(self, tab, modifier: str) -> None:
-        """Bind shortcuts to a specific tab's widgets."""
+    def _check_streaming_status(self):
+        """Check if any tab is currently streaming."""
+        for tab in self.tabs:
+            if hasattr(tab, "is_streaming") and tab.is_streaming:
+                return True
+        return False
 
-        def navigate_next_handler(e):
-            self.navigate_next_qa()
-            return "break"
-
-        def navigate_previous_handler(e):
-            self.navigate_previous_qa()
-            return "break"
-
-        tab.chat_display.bind(f"<{modifier}-v>", self.paste_text)
-        tab.input_field.bind(f"<{modifier}-v>", self.paste_text)
-        tab.chat_display.bind(f"<{modifier}-d>", navigate_next_handler)
-        tab.chat_display.bind(f"<{modifier}-u>", navigate_previous_handler)
-        tab.input_field.bind(f"<{modifier}-d>", navigate_next_handler)
-        tab.input_field.bind(f"<{modifier}-u>", navigate_previous_handler)
-
-    def on_window_configure(self, event: tk.Event) -> None:
-        """Handle window configuration changes (resize, etc.)."""
-        try:
-            if event.widget == self.master:
-                for tab in self.tabs:
-                    if hasattr(tab, "chat_display"):
-                        self.intelligent_wrapper.handle_window_resize(tab.chat_display)
-        except Exception as e:
-            print(f"Error handling window resize: {e}")
-
-    def _process_intelligent_wrap_toggle(self, target_widget, content_before):
-        """Process the intelligent wrap toggle with the given content."""
-        lines_before = content_before.split("\n")
-        q_count_before = sum(1 for line in lines_before if line.startswith("Q: "))
-        a_count_before = sum(1 for line in lines_before if line.startswith("A: "))
-        print(
-            f"DEBUG BEFORE WRAP: Found {q_count_before} questions and {a_count_before} answers",
-        )
-        print(f"DEBUG BEFORE WRAP: Total content length: {len(content_before)} chars")
-        if hasattr(self, "intelligent_wrapper"):
-            tab_id = self.intelligent_wrapper.get_tab_id(target_widget)
-            current_wrap_state = self.intelligent_wrapper.is_wrapped.get(tab_id, False)
-            if not current_wrap_state:
-                current_text = content_before
-                if current_text.endswith("\n") and (not current_text.endswith("\n\n")):
-                    current_text = current_text[:-1]
-                existing_original = self.intelligent_wrapper.get_original_text(tab_id)
-                if existing_original:
-                    existing_lines = existing_original.split("\n")
-                    existing_q_count = sum(
-                        1 for line in existing_lines if line.startswith("Q: ")
-                    )
-                    existing_a_count = sum(
-                        1 for line in existing_lines if line.startswith("A: ")
-                    )
-                    if (
-                        q_count_before > existing_q_count
-                        or a_count_before > existing_a_count
-                    ):
-                        self.intelligent_wrapper.set_original_text(
-                            tab_id,
-                            current_text,
-                            "toggle_wrap_more_content",
-                        )
-                        print(
-                            f"DEBUG: Updated original text for tab {tab_id} (current has more content)",
-                        )
-                    else:
-                        print(
-                            f"DEBUG: Keeping existing original text for tab {tab_id} (existing: Q={existing_q_count}, A={existing_a_count} vs current: Q={q_count_before}, A={a_count_before})",
-                        )
-                else:
-                    self.intelligent_wrapper.set_original_text(
-                        tab_id,
-                        current_text,
-                        "toggle_wrap_initial",
-                    )
-                    print(f"DEBUG: Set original text for tab {tab_id}")
-                final_original = self.intelligent_wrapper.get_original_text(tab_id)
-                if final_original:
-                    print(f"DEBUG: Original text length: {len(final_original)} chars")
-                    orig_lines = final_original.split("\n")
-                    orig_q_count = sum(
-                        1 for line in orig_lines if line.startswith("Q: ")
-                    )
-                    orig_a_count = sum(
-                        1 for line in orig_lines if line.startswith("A: ")
-                    )
-                    print(
-                        f"DEBUG: Set original has {orig_q_count} questions and {orig_a_count} answers",
-                    )
-            else:
-                print(
-                    f"DEBUG: Deactivating wrap - not updating original text for tab {tab_id}",
-                )
-        is_wrapped = self.intelligent_wrapper.toggle_intelligent_wrap(target_widget)
-        status = "enabled" if is_wrapped else "disabled"
-        print(f"Intelligent wrap {status} for current tab")
-        target_widget.update_idletasks()
-        content_after_wrapper = target_widget.get("1.0", tk.END)
-        lines_after_wrapper = content_after_wrapper.split("\n")
-        q_count_after_wrapper = sum(
-            1 for line in lines_after_wrapper if line.startswith("Q: ")
-        )
-        a_count_after_wrapper = sum(
-            1 for line in lines_after_wrapper if line.startswith("A: ")
-        )
-        print(
-            f"DEBUG IMMEDIATELY AFTER WRAPPER: Found {q_count_after_wrapper} questions and {a_count_after_wrapper} answers",
-        )
-        content_after = target_widget.get("1.0", tk.END)
-        lines_after = content_after.split("\n")
-        q_count_after = sum(1 for line in lines_after if line.startswith("Q: "))
-        a_count_after = sum(1 for line in lines_after if line.startswith("A: "))
-        print(
-            f"DEBUG AFTER WRAP: Found {q_count_after} questions and {a_count_after} answers",
-        )
-        print(f"DEBUG AFTER WRAP: Total content length: {len(content_after)} chars")
-        if q_count_before != q_count_after or a_count_before != a_count_after:
-            print(
-                f"DEBUG WARNING: Q&A count changed! Before: Q={q_count_before}, A={a_count_before} | After: Q={q_count_after}, A={a_count_after}",
+    def _show_compaction_result(self, success):
+        """Show the result of the compaction operation."""
+        if success:
+            print("Compaction completed successfully")
+            messagebox.showinfo(
+                "Compaction Complete",
+                "Tool call execution details have been permanently removed from the conversation.",
             )
         else:
-            print(
-                f"DEBUG OK: Q&A count preserved: Q={q_count_after}, A={a_count_after}",
+            print("No tool calls found to compact")
+            messagebox.showinfo(
+                "Nothing to Compact",
+                "No tool call execution details found in the conversation.",
             )
 
     def compact_conversation(self) -> None:
         """Compact the current tab's conversation by removing tool call execution details."""
         try:
-            for tab in self.tabs:
-                if hasattr(tab, "is_streaming") and tab.is_streaming:
-                    print("Cannot compact while streaming is active")
-                    messagebox.showwarning(
-                        "Cannot Compact",
-                        "Cannot compact conversation while streaming is active.",
-                    )
-                    return
+            if self._check_streaming_status():
+                print("Cannot compact while streaming is active")
+                messagebox.showwarning(
+                    "Cannot Compact",
+                    "Cannot compact conversation while streaming is active.",
+                )
+                return
+
             current_tab_index = self.notebook.index(self.notebook.select())
             if 0 <= current_tab_index < len(self.tabs):
                 current_tab = self.tabs[current_tab_index]
-                if not hasattr(self, "compactor"):
-                    print("Compactor not initialized")
-                    return
-                if self.compactor.compact_tab(current_tab):
-                    print("Compaction completed successfully")
-                    messagebox.showinfo(
-                        "Compaction Complete",
-                        "Tool call execution details have been permanently removed from the conversation.",
-                    )
-                else:
-                    print("No tool calls found to compact")
-                    messagebox.showinfo(
-                        "Nothing to Compact",
-                        "No tool call execution details found in the conversation.",
-                    )
+                success = self._perform_compaction(current_tab)
+                self._show_compaction_result(success)
+
         except Exception as e:
             print(f"Error during compaction: {e}")
             messagebox.showerror(
@@ -850,17 +685,14 @@ class ChatApp(ChatAppCore):
     def __init__(self, master: tk.Tk) -> None:
         super().__init__(master)
         from prompt_manager import PromptManager
-        from intelligent_wrap import IntelligentWrapper
         from compaction import Compactor
 
         self.prompt_manager = PromptManager()
-        self.intelligent_wrapper = IntelligentWrapper()
         self.compactor = Compactor()
         self.create_widgets()
         self.create_menu()
         self.bind_shortcuts()
         self.master.protocol("WM_DELETE_WINDOW", self.on_closing)
-        self.master.bind("<Configure>", self.on_window_configure)
         self.load_session()
         self.check_mcp_status()
         self.master.after(5000, self.check_mcp_status)
@@ -934,17 +766,6 @@ class ChatApp(ChatAppCore):
             accelerator=f"{modifier}+F",
         )
         edit_menu.add_separator()
-
-        def debug_menu_toggle_wrap():
-            print("DEBUG: Intelligent wrap menu command triggered!")
-            self.toggle_intelligent_wrap()
-
-        edit_menu.add_command(
-            label="Intelligent Wrap",
-            command=debug_menu_toggle_wrap,
-            accelerator=f"{modifier}+I",
-        )
-        edit_menu.add_separator()
         edit_menu.add_command(
             label="Manage File Completions...",
             command=self.manage_file_completions,
@@ -965,12 +786,12 @@ class ChatApp(ChatAppCore):
         chat_menu.add_command(
             label="Next Question/Answer",
             command=self.go_to_next_qa,
-            accelerator=f"{modifier}+d",
+            accelerator="Ctrl+Page Down",
         )
         chat_menu.add_command(
             label="Previous Question/Answer",
             command=self.go_to_previous_qa,
-            accelerator=f"{modifier}+u",
+            accelerator="Ctrl+Page Up",
         )
         chat_menu.add_separator()
         chat_menu.add_command(
@@ -992,6 +813,150 @@ class ChatApp(ChatAppCore):
         menubar.add_cascade(label="Help", menu=help_menu)
         help_menu.add_command(label="About", command=self.show_about)
 
+    def on_window_configure(self, event: tk.Event) -> None:
+        """Handle window configuration changes (resize, etc.)."""
+        pass
+
+    def _check_tab_content(self, tab_data):
+        """Check if tab has content worth saving."""
+        has_questions = tab_data.get("chat_state", {}).get("questions") and any(
+            q.strip() for q in tab_data["chat_state"]["questions"]
+        )
+        has_answers = tab_data.get("chat_state", {}).get("answers") and any(
+            a.strip() if isinstance(a, str) else a
+            for a in tab_data.get("chat_history_answers", [])
+        )
+        return has_questions, has_answers
+
+    def _check_unsaved_input(self, current_tab):
+        """Check if tab has unsaved input."""
+        if hasattr(current_tab, "input_field"):
+            input_text = current_tab.input_field.get("1.0", tk.END).strip()
+            return bool(input_text)
+        return False
+
+    def _handle_tab_cleanup(self, current_tab_index, current_tab):
+        """Handle cleanup and removal of tab."""
+        current_tab.cleanup_resources()
+        self.notebook.forget(current_tab_index)
+        self.tabs.pop(current_tab_index)
+
+    def _handle_remaining_tabs(self, current_tab_index):
+        """Handle focus and title updates for remaining tabs."""
+        if len(self.tabs) > 0:
+            new_index = min(current_tab_index, len(self.tabs) - 1)
+            if new_index >= 0:
+                self.notebook.select(new_index)
+                tab_name = self.notebook.tab(new_index, "text")
+                self.master.title(f"Alpaca Assist - {tab_name}")
+        else:
+            self.master.title("Alpaca Assist")
+            self.create_tab()
+
+    def delete_tab(self) -> None:
+        """Delete the currently selected tab."""
+        current_tab_index = self.notebook.index(self.notebook.select())
+        if 0 <= current_tab_index < len(self.tabs):
+            current_tab = self.tabs[current_tab_index]
+            tab_data = current_tab.get_serializable_data()
+
+            has_questions, has_answers = self._check_tab_content(tab_data)
+            has_unsaved_input = self._check_unsaved_input(current_tab)
+            has_content = has_questions or has_answers or has_unsaved_input
+
+            if has_content:
+                print(
+                    f"DEBUG: Saving tab to history before closing (Q:{len(tab_data.get('chat_state', {}).get('questions', []))}, A:{len(tab_data.get('chat_history_answers', []))})",
+                )
+                self.store_tab_in_database(current_tab)
+            else:
+                print("DEBUG: Tab has no content, not saving to history")
+
+            self._handle_tab_cleanup(current_tab_index, current_tab)
+            self._handle_remaining_tabs(current_tab_index)
+
+    def _configure_button_styles(self):
+        """Configure button styles for different platforms."""
+        bg_color = self.master.cget("bg")
+        if platform.system() == "Darwin":
+            sz = 12
+        else:
+            sz = 9
+        self.style.configure(
+            "App.TButton",
+            padding=(12, 8),
+            font=("TkDefaultFont", sz),
+            focuscolor="none",
+        )
+        if platform.system() == "Darwin":
+            self.style.configure("App.TButton", padding=(10, 6), borderwidth=1)
+        elif platform.system() == "Linux":
+            self.style.configure("App.TButton", padding=(8, 6), relief="raised")
+
+    def _configure_label_styles(self):
+        """Configure label styles for different platforms."""
+        if platform.system() == "Darwin":
+            label_font_size = 12
+        else:
+            label_font_size = 9
+        self.style.configure("App.TLabel", font=("TkDefaultFont", label_font_size))
+
+    def _configure_combobox_styles(self):
+        """Configure combobox styles."""
+        self.style.configure(
+            "App.TCombobox",
+            fieldbackground="white",
+            selectbackground="#0078d4",
+        )
+
+    def _configure_notebook_styles(self):
+        """Configure notebook styles for different platforms."""
+        self.style.configure("App.TNotebook", tabposition="n")
+        if platform.system() == "Darwin":
+            tab_font_size = 12
+        else:
+            tab_font_size = 9
+        self.style.configure(
+            "App.TNotebook.Tab",
+            padding=(12, 8),
+            font=("TkDefaultFont", tab_font_size),
+        )
+
+    def _configure_cross_platform_styles(self) -> None:
+        """Configure consistent TTK styles across all platforms."""
+        self._configure_button_styles()
+        self._configure_label_styles()
+        self._configure_combobox_styles()
+        self._configure_notebook_styles()
+
+    def _perform_compaction(self, current_tab):
+        """Perform the actual compaction operation."""
+        if not hasattr(self, "compactor"):
+            print("Compactor not initialized")
+            return False
+
+        success = self.compactor.compact_tab(current_tab)
+
+        # Finalize rendering if the chat display is a MarkdownViewerAdapter
+        if success and hasattr(current_tab.chat_display, "finalize_rendering"):
+            current_tab.chat_display.finalize_rendering()
+
+        return success
+
+    def bind_tab_shortcuts(self, tab, modifier: str) -> None:
+        """Bind shortcuts to a specific tab's widgets."""
+
+        def navigate_next_handler(e):
+            self.navigate_next_qa()
+            return "break"
+
+        def navigate_previous_handler(e):
+            self.navigate_previous_qa()
+            return "break"
+
+        tab.chat_display.bind(f"<{modifier}-v>", self.paste_text)
+        tab.input_field.bind(f"<{modifier}-v>", self.paste_text)
+
     def bind_shortcuts(self) -> None:
         if is_macos():
             modifier = "Command"
@@ -1011,13 +976,6 @@ class ChatApp(ChatAppCore):
         self.master.bind(f"<{modifier}-t>", lambda e: self.export_to_html())
         self.master.bind(f"<{modifier}-p>", lambda e: self.compact_conversation())
 
-        def debug_toggle_wrap(e):
-            print("DEBUG: Intelligent wrap shortcut triggered!")
-            self.toggle_intelligent_wrap()
-            return "break"
-
-        self.master.bind(f"<{modifier}-i>", debug_toggle_wrap)
-
         def navigate_next_handler(e):
             self.navigate_next_qa()
             return "break"
@@ -1026,82 +984,180 @@ class ChatApp(ChatAppCore):
             self.navigate_previous_qa()
             return "break"
 
-        self.master.bind(f"<{modifier}-d>", navigate_next_handler)
-        self.master.bind(f"<{modifier}-u>", navigate_previous_handler)
+        # Use Ctrl+Page_Down and Ctrl+Page_Up for navigation
+        self.master.bind("<Control-Page_Down>", navigate_next_handler)
+        self.master.bind("<Control-Page_Up>", navigate_previous_handler)
+
         for tab in self.tabs:
             self.bind_tab_shortcuts(tab, modifier)
 
-    def delete_tab(self) -> None:
-        """Delete the currently selected tab."""
-        current_tab_index = self.notebook.index(self.notebook.select())
-        if 0 <= current_tab_index < len(self.tabs):
-            current_tab = self.tabs[current_tab_index]
-            tab_data = current_tab.get_serializable_data()
-            has_questions = tab_data.get("chat_state", {}).get("questions") and any(
-                q.strip() for q in tab_data["chat_state"]["questions"]
-            )
-            has_answers = tab_data.get("chat_state", {}).get("answers") and any(
-                a.strip() if isinstance(a, str) else a
-                for a in tab_data.get("chat_history_answers", [])
-            )
-            has_unsaved_input = False
-            if hasattr(current_tab, "input_field"):
-                input_text = current_tab.input_field.get("1.0", tk.END).strip()
-                has_unsaved_input = bool(input_text)
-            has_content = has_questions or has_answers or has_unsaved_input
-            if has_content:
-                print(
-                    f"DEBUG: Saving tab to history before closing (Q:{len(tab_data.get('chat_state', {}).get('questions', []))}, A:{len(tab_data.get('chat_history_answers', []))})",
-                )
-                self.store_tab_in_database(current_tab)
-            else:
-                print("DEBUG: Tab has no content, not saving to history")
-            if hasattr(self, "intelligent_wrapper"):
-                self.intelligent_wrapper.cleanup_tab(current_tab.chat_display)
-            current_tab.cleanup_resources()
-            self.notebook.forget(current_tab_index)
-            self.tabs.pop(current_tab_index)
-            if len(self.tabs) > 0:
-                new_index = min(current_tab_index, len(self.tabs) - 1)
-                if new_index >= 0:
-                    self.notebook.select(new_index)
-                    tab_name = self.notebook.tab(new_index, "text")
-                    self.master.title(f"Alpaca Assist - {tab_name}")
-            else:
-                self.master.title("Alpaca Assist")
-                self.create_tab()
+    def copy_code_block(self):
+        """Copy the code block at the cursor position to clipboard."""
+        from text_utils import copy_code_block_from_widget
 
-    def toggle_intelligent_wrap(self) -> None:
-        """Toggle intelligent wrap mode and update display."""
         try:
-            current_tab_index = self.notebook.index(self.notebook.select())
-            if 0 <= current_tab_index < len(self.tabs):
-                current_tab = self.tabs[current_tab_index]
-                if hasattr(current_tab, "chat_state") and current_tab.chat_state:
-                    text = current_tab.chat_state.get_display_text(
-                        include_tool_content=False,
-                    )
-                    print(
-                        f"DEBUG: Using chat_state.get_display_text() for intelligent wrapper",
-                    )
-                else:
-                    text = current_tab.chat_display.get("1.0", tk.END).strip()
-                    print(f"DEBUG: Fallback to display widget for intelligent wrapper")
-                tab_id = f"tab_{current_tab_index}"
-                self.intelligent_wrapper.set_original_text(
-                    tab_id,
-                    text,
-                    "manual_toggle",
-                )
-                is_wrapped = self.intelligent_wrapper.toggle_intelligent_wrap(
-                    current_tab.chat_display,
-                )
-                status = "enabled" if is_wrapped else "disabled"
-                print(f"Intelligent wrap {status} for current tab")
+            # Determine which widget to use
+            target_widget = None
+
+            if isinstance(self.last_focused_widget, SyntaxHighlightedText):
+                target_widget = self.last_focused_widget
             else:
-                print("DEBUG: No valid current tab found")
+                # Fall back to current tab's chat display
+                current_tab = self.notebook.index(self.notebook.select())
+                if current_tab < len(self.tabs):
+                    target_widget = self.tabs[current_tab].chat_display
+
+            if not target_widget:
+                print("Error: No valid text widget found for copying code")
+                return
+
+            # Use the centralized function from text_utils
+            success = copy_code_block_from_widget(target_widget, self.preferences)
+
+            if success:
+                print("Code block copied successfully!")
+
         except Exception as e:
-            print(f"Error in toggle_intelligent_wrap: {e}")
+            print(f"Error in copy_code_block: {type(e).__name__}: {e}")
             import traceback
 
             traceback.print_exc()
+
+    def get_answer_lines(self) -> list[int]:
+        """Get all line numbers that start with 'A:'.
+
+        Returns:
+            List of line numbers (1-indexed) that start with 'A:'
+        """
+        current_tab_index = self.notebook.index(self.notebook.select())
+        if 0 <= current_tab_index < len(self.tabs):
+            current_tab = self.tabs[current_tab_index]
+            chat_display = current_tab.chat_display
+
+            # Get the raw markdown content buffer if available (for MarkdownViewerAdapter)
+            if hasattr(chat_display, "_content_buffer"):
+                content = chat_display._content_buffer
+            else:
+                content = chat_display.get("1.0", tk.END)
+
+            lines = content.split("\n")
+            answer_lines = []
+            for i, line in enumerate(lines, 1):
+                if line.startswith("A: "):
+                    # Convert content line to rendered line if we have the mapping
+                    if hasattr(chat_display, "_char_to_content_line_map"):
+                        rendered_line = self._convert_content_line_to_rendered(
+                            chat_display,
+                            i - 1,  # Convert to 0-indexed
+                        )
+                        if rendered_line is not None:
+                            answer_lines.append(rendered_line)
+                    else:
+                        answer_lines.append(i)
+            return answer_lines
+        return []
+
+    def get_question_lines(self) -> list[int]:
+        """Get all line numbers that start with 'Q:'.
+
+        Returns:
+            List of line numbers (1-indexed) that start with 'Q:'
+        """
+        current_tab_index = self.notebook.index(self.notebook.select())
+        if 0 <= current_tab_index < len(self.tabs):
+            current_tab = self.tabs[current_tab_index]
+            chat_display = current_tab.chat_display
+
+            # Get the raw markdown content buffer if available (for MarkdownViewerAdapter)
+            if hasattr(chat_display, "_content_buffer"):
+                content = chat_display._content_buffer
+            else:
+                content = chat_display.get("1.0", tk.END)
+
+            lines = content.split("\n")
+            question_lines = []
+            for i, line in enumerate(lines, 1):
+                if line.startswith("Q: "):
+                    # Convert content line to rendered line if we have the mapping
+                    if hasattr(chat_display, "_char_to_content_line_map"):
+                        rendered_line = self._convert_content_line_to_rendered(
+                            chat_display,
+                            i - 1,  # Convert to 0-indexed
+                        )
+                        if rendered_line is not None:
+                            question_lines.append(rendered_line)
+                    else:
+                        question_lines.append(i)
+            return question_lines
+        return []
+
+    def _convert_content_line_to_rendered(
+        self,
+        chat_display,
+        content_line_0indexed: int,
+    ) -> int | None:
+        """Convert a content line number (0-indexed) to rendered line number (1-indexed).
+
+        Uses the _char_to_content_line_map to find where this content line appears
+        in the rendered display.
+        """
+        # Find the first character that maps to this content line
+        for rendered_idx, content_idx in enumerate(
+            chat_display._char_to_content_line_map,
+        ):
+            if content_idx == content_line_0indexed:
+                # Count newlines up to this position to get rendered line number (1-indexed)
+                rendered_line = (
+                    chat_display._rendered_display_buffer[:rendered_idx].count("\n") + 1
+                )
+                return rendered_line
+        return None
+
+    def show_available_tools(self):
+        """Show a window with all available MCP tools."""
+        tools_window = tk.Toplevel(self.master)
+        tools_window.title("Available MCP Tools")
+        tools_window.geometry("700x500")
+        tools_window.transient(self.master)
+        tools_window.grab_set()
+        self.master.update_idletasks()
+        x = self.master.winfo_x() + self.master.winfo_width() // 2 - 350
+        y = self.master.winfo_y() + self.master.winfo_height() // 2 - 250
+        tools_window.geometry(f"700x500+{x}+{y}")
+        tree = ttk.Treeview(tools_window, columns=("Server", "Tool", "Description"))
+        tree.heading("#0", text="Name")
+        tree.heading("Server", text="Server")
+        tree.heading("Tool", text="Tool")
+        tree.heading("Description", text="Description")
+        tools = self.get_available_mcp_tools()
+        for tool in tools:
+            function_name = tool["function"]["name"]
+            if "_" in function_name:
+                server_name = function_name.split("_")[0]
+                tool_name = "_".join(function_name.split("_")[1:])
+            else:
+                server_name = "Unknown"
+                tool_name = function_name
+            tree.insert(
+                "",
+                "end",
+                text=tool_name,
+                values=(
+                    server_name,
+                    tool_name,
+                    tool["function"].get("description", ""),
+                ),
+            )
+        tree.pack(fill="both", expand=True, padx=10, pady=10)
+
+        def call_selected_tool():
+            selection = tree.selection()
+            if selection:
+                item = tree.item(selection[0])
+                server_name = item["values"][0]
+                tool_name = item["values"][1]
+                self.show_tool_call_dialog(server_name, tool_name)
+
+        ttk.Button(tools_window, text="Call Tool", command=call_selected_tool).pack(
+            pady=5,
+        )

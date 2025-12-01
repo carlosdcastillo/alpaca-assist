@@ -6,6 +6,7 @@ are permanently replaced with summaries in the actual chat state.
 """
 import re
 import tkinter as tk
+from collections import defaultdict
 from typing import Any
 from typing import List
 from typing import Optional
@@ -94,68 +95,15 @@ class Compactor:
 
     def _compact_answer_in_place(self, answer: FullAnswer) -> None:
         """Compact a FullAnswer by replacing tool components with summaries."""
-        new_components = []
-        i = 0
+        values = []
         indices = []
-        indices2 = []
-        inserted = 0
-        while i < len(answer.components):
-            component = answer.components[i]
-            if isinstance(component, ToolCall):
-                tool_name = self._extract_tool_name_from_component(component)
-                tool_result = None
-                j = i + 1
-                while j < len(answer.components):
-                    next_component = answer.components[j]
-                    if (
-                        isinstance(next_component, ToolResult)
-                        and next_component.id == component.id
-                    ):
-                        tool_result = next_component
-                        break
-                    elif not isinstance(next_component, str):
-                        break
-                    j += 1
-                if tool_result:
-                    summary = (
-                        f"\n📦 [Tool: {tool_name}] (compacted - executed successfully)\n"
-                    )
-                    i = j + 1
-                else:
-                    summary = f"\n📦 [Tool: {tool_name}] (compacted - no result found)\n"
-                    i += 1
-                new_components.append(summary)
-                inserted += 1
-            elif isinstance(component, ToolResult):
-                already_handled = False
-                for k in range(len(new_components)):
-                    if (
-                        isinstance(new_components[k], str)
-                        and component.id in new_components[k]
-                    ):
-                        already_handled = True
-                        break
-                if not already_handled:
-                    summary = f"\n📦 [Tool Result: {component.id}] (compacted)\n"
-                    new_components.append(summary)
-                    i += 1
-                    inserted += 1
+        for i in range(len(answer.components)):
+            if isinstance(answer.components[i], (ToolCall, ToolResult)):
+                pass
             else:
-                indices.append(i)
-                indices2.append(inserted)
-                new_components.append("placeholder")
-                inserted += 1
-                i += 1
-        print("inserted:")
-        print(inserted)
-        print("indices2:")
-        print(indices2)
-        new_c = self.clear([answer.components[i] for i in indices])
-        for k, new in zip(indices2, new_c):
-            new_components[k] = new
-            print(f"guevo: {new}")
-        # Permanently replace the components in the FullAnswer
-        answer.components = new_components
+                values.append(answer.components[i])
+
+        answer.components = self.clear(values)
 
     def _extract_tool_name_from_component(self, tool_call: ToolCall) -> str:
         """Extract the tool name from a ToolCall component."""
@@ -193,73 +141,48 @@ class Compactor:
         if not lst:
             return lst
 
-        result = []
-        i = 0
+        lines_list = []
+        text_list = ""
+        for (i, item) in enumerate(lst):
+            lines = item.split("\n")
+            for x in lines:
+                text_list = text_list + "\n" + x
+                lines_list.append(i)
 
-        while i < len(lst):
-            current = lst[i]
+        current = text_list
 
+        removed = True
+
+        while removed:
+
+            removed = False
             # Check if start pattern exists in current item
             start_idx = current.find(start_pattern)
 
             if start_idx != -1:
+                # print('asdfasdfadfsasdfasfdfasd')
+
                 # Found start pattern
                 end_idx = current.find(end_pattern, start_idx)
 
                 if end_idx != -1:
                     # Both patterns in same item
                     end_idx += len(end_pattern)
-                    cleaned = current[:start_idx] + current[end_idx:]
+                    line_start = current[0:start_idx].count("\n")
+                    line_end = current[0:end_idx].count("\n")
+                    current = current[:start_idx] + current[end_idx:]
+                    lines_list = lines_list[:line_start] + lines_list[line_end:]
+                    removed = True
 
-                    # Check for more patterns in the same item
-                    if cleaned.find(start_pattern) != -1:
-                        # Recursively clean the same item
-                        result.append(
-                            self.clear([cleaned], start_pattern, end_pattern)[0],
-                        )
-                    else:
-                        result.append(cleaned)
-                else:
-                    # Start pattern found but end pattern not in same item
-                    # Check next item for end pattern
-                    if i + 1 < len(lst):
-                        next_item = lst[i + 1]
-                        end_idx_next = next_item.find(end_pattern)
+        d = defaultdict(str)
+        for line, i in zip(current.split("\n"), lines_list):
+            d[i] = d[i] + "\n" + line
 
-                        if end_idx_next != -1:
-                            # End pattern found in next item
-                            end_idx_next += len(end_pattern)
+        r = []
 
-                            # Keep part before start pattern from current item
-                            cleaned_current = current[:start_idx]
-                            # Keep part after end pattern from next item
-                            cleaned_next = next_item[end_idx_next:]
-
-                            # Combine the cleaned parts
-                            combined = cleaned_current + cleaned_next
-                            result.append(cleaned_current)
-                            result.append(
-                                self.clear([cleaned_next], start_pattern, end_pattern)[
-                                    0
-                                ],
-                            )
-
-                            # Skip the next item since we've processed it
-                            i += 1
-                        else:
-                            # End pattern not found in next item either
-                            # Keep the current item as is (or you might want different behavior)
-                            result.append(current)
-                    else:
-                        # No next item available
-                        result.append(current)
-            else:
-                # No start pattern in current item
-                result.append(current)
-
-            i += 1
-
-        return result
+        for i in range(len(d.keys())):
+            r.append(d[i])
+        return r
 
     def _update_display_from_state(self, tab: Any) -> None:
         """Update the display from the chat state."""

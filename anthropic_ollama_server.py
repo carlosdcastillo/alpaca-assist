@@ -21,7 +21,7 @@ from zoneinfo import ZoneInfo
 import requests
 import yaml
 
-SYSTEM_PROMPT = '\nYou are a highly skilled software engineer with extensive knowledge in many programming languages, frameworks, design patterns, and best practices.\n\n## Communication\n\n1. Be conversational but professional. Use a friendly tone while maintaining technical accuracy in your explanations.\n\n2. Refer to the user in the second person ("you") and yourself in the first person ("I"). Maintain this consistent voice throughout all interactions.\n\n3. Format responses in markdown for readability. Use backticks to format `file`, `directory`, `function`, and `class` names when referencing code elements.\n\n4. NEVER lie or make things up. If you don\'t know something, clearly state that rather than providing incorrect information.\n\n5. Refrain from apologizing when results are unexpected. Instead, focus on proceeding with solutions or explaining the circumstances clearly without unnecessary apologies.\n\n6. Always start responses with a newline character for consistent formatting.\n'
+SYSTEM_PROMPT = '\nYou are a highly skilled software engineer with extensive knowledge in many programming languages, frameworks, design patterns, and best practices.\n\n## Communication\n\n1. Be conversational but professional. Use a friendly tone while maintaining technical accuracy in your explanations.\n\n2. Refer to the user in the second person ("you") and yourself in the first person ("I"). Maintain this consistent voice throughout all interactions.\n\n3. Format responses in markdown for readability. Use backticks to format `file`, `directory`, `function`, and `class` names when referencing code elements.\n\n4. NEVER lie or make things up. If you don\'t know something, clearly state that rather than providing incorrect information.\n\n5. Refrain from apologizing when results are unexpected. Instead, focus on proceeding with solutions or explaining the circumstances clearly without unnecessary apologies.\n\n6. Always start responses with a newline character for consistent formatting.\n\n7. Prefer bullets and enumerations to tables, tables are not forbidden but the bar for outputting a table should be very high.\n'
 
 MODELS_JSON: str = '\n{\n  "models": [\n    {\n      "name": "codellama:13b",\n      "modified_at": "2023-11-04T14:56:49.277302595-07:00",\n      "size": 7365960935,\n      "digest": "9f438cb9cd581fc025612d27f7c1a6669ff83a8bb0ed86c94fcf4c5440555697",\n      "details": {\n        "format": "gguf",\n        "family": "llama",\n        "families": null,\n        "parameter_size": "13B",\n        "quantization_level": "Q4_0"\n      }\n    },\n    {\n      "name": "llama3:latest",\n      "modified_at": "2023-12-07T09:32:18.757212583-08:00",\n      "size": 3825819519,\n      "digest": "fe938a131f40e6f6d40083c9f0f430a515233eb2edaa6d72eb85c50d64f2300e",\n      "details": {\n        "format": "gguf",\n        "family": "llama",\n        "families": null,\n        "parameter_size": "7B",\n        "quantization_level": "Q4_0"\n      }\n    }\n  ]\n}\n'
 
@@ -36,28 +36,6 @@ class OllamaRequestHandler(BaseHTTPRequestHandler):
             self.send_header("Content-type", "application/json")
             self.end_headers()
             self.wfile.write(MODELS_JSON.encode())
-        else:
-            self.send_error(404, "Not Found")
-
-    def do_POST(self) -> None:
-        """Handle POST requests."""
-        if self.path == "/api/chat":
-            content_length: int = int(self.headers["Content-Length"])
-            post_data: bytes = self.rfile.read(content_length)
-            try:
-                request_data: dict[str, Any] = json.loads(post_data.decode("utf-8"))
-                messages: list[dict[str, str]] = request_data["messages"]
-                tools = request_data.get("tools", [])
-                print(f"Received tools: {tools}")
-                messages_out: list[dict[str, str]] = []
-                for i, item in enumerate(messages):
-                    print(item)
-                    messages_out.append(item)
-                self._handle_request_with_tools(messages_out, tools)
-            except json.JSONDecodeError:
-                self.send_error(400, "Invalid JSON")
-            except Exception as e:
-                self.send_error(500, f"Internal Server Error: {str(e)}")
         else:
             self.send_error(404, "Not Found")
 
@@ -113,27 +91,6 @@ class OllamaRequestHandler(BaseHTTPRequestHandler):
         local_timestamp = local_timestamp[:-3] + "000"
         local_timestamp += dt.strftime("%z")
         return local_timestamp[:-2] + ":" + local_timestamp[-2:]
-
-    def _handle_request_with_tools(
-        self,
-        messages: list[dict[str, str]],
-        tools: list[dict],
-    ):
-        """Handle requests with optional tools."""
-        anthropic_tools = None
-        tool_choice = None
-        if tools:
-            anthropic_tools = self._convert_tools_to_anthropic_format(tools)
-            tool_choice = {"type": "auto"}
-        stream = client.stream_complete(
-            messages=messages,
-            model="claude-sonnet-4-20250514",
-            max_tokens=40000,
-            system=SYSTEM_PROMPT,
-            tools=anthropic_tools,
-            tool_choice=tool_choice,
-        )
-        self._process_stream(stream)
 
     def _convert_tools_to_anthropic_format(self, tools: list[dict]) -> list[dict]:
         """Convert OpenAI-style tools to Anthropic format."""
@@ -233,7 +190,12 @@ class OllamaRequestHandler(BaseHTTPRequestHandler):
         # Send final completion chunk without tool calls
         self._send_completion_chunk(count, stop_reason)
 
-    def _send_completion_chunk(self, count: int, stop_reason: str = "stop"):
+    def _send_completion_chunk(
+        self,
+        count: int,
+        stop_reason: str = "stop",
+        tool_calls: list = None,
+    ):
         """Send the final completion chunk."""
         now = datetime.datetime.now(datetime.UTC).astimezone()
         local_timestamp = self._format_timestamp(now)
@@ -242,6 +204,10 @@ class OllamaRequestHandler(BaseHTTPRequestHandler):
             "role": "assistant",
             "content": "",
         }
+
+        # Add tool calls to the message if they exist
+        if tool_calls:
+            message["tool_calls"] = tool_calls
 
         response = {
             "model": "codellama:13b",
@@ -255,6 +221,59 @@ class OllamaRequestHandler(BaseHTTPRequestHandler):
         self.wfile.write(json.dumps(response).encode())
         self.wfile.write(b"\n")
         self.wfile.flush()
+
+    def do_POST(self) -> None:
+        """Handle POST requests."""
+        if self.path == "/api/chat":
+            content_length: int = int(self.headers["Content-Length"])
+            post_data: bytes = self.rfile.read(content_length)
+            try:
+                request_data: dict[str, Any] = json.loads(post_data.decode("utf-8"))
+                messages: list[dict[str, str]] = request_data["messages"]
+                tools = request_data.get("tools", [])
+                model = request_data.get(
+                    "model",
+                    "claude-3-5-sonnet-20240620",
+                )  # Extract model from request
+
+                model = model.replace("us.anthropic.", "")
+                model = model.replace("-v1:0", "")
+
+                print(f"Received tools: {tools}")
+                print(f"Using model: {model}")
+                messages_out: list[dict[str, str]] = []
+                for i, item in enumerate(messages):
+                    print(item)
+                    messages_out.append(item)
+                self._handle_request_with_tools(messages_out, tools, model)
+            except json.JSONDecodeError:
+                self.send_error(400, "Invalid JSON")
+            except Exception as e:
+                self.send_error(500, f"Internal Server Error: {str(e)}")
+        else:
+            self.send_error(404, "Not Found")
+
+    def _handle_request_with_tools(
+        self,
+        messages: list[dict[str, str]],
+        tools: list[dict],
+        model: str = "claude-3-5-sonnet-20240620",
+    ):
+        """Handle requests with optional tools."""
+        anthropic_tools = None
+        tool_choice = None
+        if tools:
+            anthropic_tools = self._convert_tools_to_anthropic_format(tools)
+            tool_choice = {"type": "auto"}
+        stream = client.stream_complete(
+            messages=messages,
+            model=model,  # Use the model passed from the request
+            max_tokens=40000,
+            system=SYSTEM_PROMPT,
+            tools=anthropic_tools,
+            tool_choice=tool_choice,
+        )
+        self._process_stream(stream)
 
 
 class ClaudeClient:

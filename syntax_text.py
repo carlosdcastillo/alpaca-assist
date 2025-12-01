@@ -45,6 +45,27 @@ class SyntaxHighlightedText(SyntaxHighlightingMixin, scrolledtext.ScrolledText):
         else:
             return "Highlighting active"
 
+    def ensure_caret_enabled(self) -> None:
+        """Ensure the text widget is enabled and the caret is visible."""
+        try:
+            # Make sure the widget is in NORMAL state
+            self.config(state=tk.NORMAL)
+
+            # Ensure the widget has focus to make caret visible
+            self.focus_set()
+
+            # Force update the widget to refresh the display
+            self.update_idletasks()
+
+            # Set the insertion cursor to be visible
+            self.config(insertofftime=300, insertontime=600)
+
+            # Make sure the cursor color is set correctly
+            self.config(insertbackground=self.cursor_color)
+
+        except tk.TclError as e:
+            print(f"Error ensuring caret enabled: {e}")
+
     def set_server_mode(self, enabled: bool) -> None:
         """Enable/disable server mode to control undo behavior."""
         old_server_mode = getattr(self, "server_mode", False)
@@ -192,6 +213,10 @@ class SyntaxHighlightedText(SyntaxHighlightingMixin, scrolledtext.ScrolledText):
         self.last_highlighted_length = 0
         self.highlight_text_full()
 
+    def _setup_horizontal_scrollbar(self) -> None:
+        """Setup horizontal scrollbar for the ScrolledText widget."""
+        pass
+
     def __init__(
         self,
         *args,
@@ -201,7 +226,7 @@ class SyntaxHighlightedText(SyntaxHighlightingMixin, scrolledtext.ScrolledText):
         font_size: int = 12,
         **kwargs,
     ) -> None:
-        kwargs.pop("wrap", None)
+        wrap_mode = kwargs.pop("wrap", tk.WORD)
         super().__init__(*args, **kwargs)
         self.lexer = MarkdownLexer()
         self.token_cache = TokenCache(max_size=50)
@@ -234,7 +259,7 @@ class SyntaxHighlightedText(SyntaxHighlightingMixin, scrolledtext.ScrolledText):
             bg=self.bg_color,
             fg=self.fg_color,
             insertbackground=self.cursor_color,
-            wrap=tk.NONE,
+            wrap=wrap_mode,
         )
         self.after_idle(self._setup_horizontal_scrollbar)
         self.tag_configure("default", foreground=self.fg_color)
@@ -254,7 +279,3 @@ class SyntaxHighlightedText(SyntaxHighlightingMixin, scrolledtext.ScrolledText):
         self.bind(f"<{modifier}-t>", lambda e: "break")
         self.server_mode = False
         self.config(undo=True, autoseparators=True, maxundo=-1)
-
-    def _setup_horizontal_scrollbar(self) -> None:
-        """Setup horizontal scrollbar for the ScrolledText widget."""
-        pass

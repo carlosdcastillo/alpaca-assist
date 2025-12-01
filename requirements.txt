@@ -4,3 +4,4 @@ pygments>=2.15.1
 typing-extensions>=4.7.1
 Markdown>=3.8.2
 mcp>=1.12.4
+pillow>=11.3.0

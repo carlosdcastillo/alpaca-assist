@@ -43,7 +43,7 @@ A desktop chat application that provides a convenient interface for interacting 
 
 3. Run the application:
    ```bash
-   python alpaca_assist.py
+   python main.py
    ```
 
 ## Using the Claude Emulator

@@ -293,13 +293,6 @@ class ChatAppCore:
             print(f"Error storing conversation: {e}")
             messagebox.showerror("Database Error", f"Failed to store conversation: {e}")
 
-    def update_tab_name(self, tab: ChatTab, summary: str) -> None:
-        tab_index = self.tabs.index(tab)
-        self.notebook.tab(tab_index, text=summary)
-        current_tab_index = self.notebook.index(self.notebook.select())
-        if tab_index == current_tab_index:
-            self.master.title(f"Alpaca Assist - {summary}")
-
     def update_last_focused(self, event: tk.Event) -> None:
         self.last_focused_widget = cast(SyntaxHighlightedText, event.widget)
         for tab in self.tabs:
@@ -344,3 +337,23 @@ class ChatAppCore:
         tab.cleanup_resources()
         self.notebook.forget(current_tab)
         del self.tabs[tab_index]
+
+    def update_tab_name(self, tab: ChatTab, summary: str) -> None:
+        """Update the tab name with a summary, with safety checks for deleted tabs."""
+        try:
+            # Check if tab still exists in the tabs list
+            if tab not in self.tabs:
+                print(f"Tab no longer exists (likely closed), skipping name update")
+                return
+
+            tab_index = self.tabs.index(tab)
+            self.notebook.tab(tab_index, text=summary)
+            current_tab_index = self.notebook.index(self.notebook.select())
+            if tab_index == current_tab_index:
+                self.master.title(f"Alpaca Assist - {summary}")
+        except ValueError as e:
+            print(f"Error updating tab name: tab not found in list - {e}")
+        except tk.TclError as e:
+            print(f"Error updating tab name: Tkinter error - {e}")
+        except Exception as e:
+            print(f"Error updating tab name: {e}")
