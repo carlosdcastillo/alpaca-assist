@@ -1,0 +1,70 @@
+[tool.mypy]
+python_version = "3.11"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = false
+ignore_missing_imports = true
+explicit_package_bases = true
+
+# Note: implicit_optional is NOT set to true because we will fix the code
+# in Phase 5. This keeps the type system honest.
+
+# Forward reference handling
+warn_redundant_casts = true
+warn_unused_ignores = true
+
+# Third-party packages that may not have stubs in all environments
+[[tool.mypy.overrides]]
+module = ["requests", "requests.*", "yaml", "markdown", "webview", "webview.*", "pyperclip"]
+ignore_missing_imports = true
+
+# webview stubs vary by environment; the arg-type ignore on webview.start() is
+# genuinely needed when stubs are present but unused when webview is untyped.
+[[tool.mypy.overrides]]
+module = "webview_app"
+warn_unused_ignores = false
+
+[tool.pytest.ini_options]
+testpaths = ["tests", "."]
+python_files = ["test_*.py", "*_test.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = [
+    "--strict-markers",
+    "--strict-config",
+    "--verbose",
+    "--tb=short",
+]
+markers = [
+    "slow: marks tests as slow (deselect with '-m \"not slow\"')",
+    "integration: marks tests as integration tests",
+    "unit: marks tests as unit tests",
+    "asyncio: marks async tests",
+]
+
+[tool.coverage.run]
+source = ["."]
+omit = [
+    "tests/*",
+    "test_*.py",
+    "__pycache__/*",
+    ".pytest_cache/*",
+    ".mypy_cache/*",
+    "*.pyc",
+    "venv/*",
+    ".venv/*",
+]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "raise AssertionError",
+    "raise NotImplementedError",
+    "if __name__ == .__main__.:",
+    "if TYPE_CHECKING:",
+    "pass",
+]
+show_missing = true
+skip_covered = false
+fail_under = 70

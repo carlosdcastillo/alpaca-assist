@@ -1,0 +1,17 @@
+{
+  "simple-tools": {
+    "command": [
+      "python",
+      "simple_mcp_server.py"
+    ],
+    "args": []
+  },
+  "ripple": {
+    "command": [
+      "C:/Users/Carlos/Desktop/ripple/target/debug/ripple.exe"
+    ],
+    "args": [
+      "serve"
+    ]
+  }
+}
