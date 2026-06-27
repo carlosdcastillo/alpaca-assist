@@ -1,6 +1,7 @@
 /* Theme Variables */
 :root {
     /* Dark theme (default) */
+    color-scheme: dark;
     --bg-primary: #1e1e1e;
     --bg-secondary: #252526;
     --bg-tertiary: #2d2d30;
@@ -37,6 +38,7 @@
 
 /* Light theme */
 [data-theme="light"] {
+    color-scheme: light;
     --bg-primary: #ffffff;
     --bg-secondary: #f3f3f3;
     --bg-tertiary: #e8e8e8;
