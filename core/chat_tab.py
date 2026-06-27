@@ -40,15 +40,22 @@ class ChatTab(ChatTabBase):
     interface while providing a clean, testable architecture.
     """
 
-    def __init__(self, tab_id: str, title: str, app_core: AppCore) -> None:
+    def __init__(
+        self,
+        tab_id: str,
+        title: str,
+        app_core: AppCore,
+        conversation_id: int,
+    ) -> None:
         """Initialize ChatTab with handler subsystems.
 
         Args:
             tab_id: Unique identifier for this tab.
             title: Initial tab title.
             app_core: Reference to the application core.
+            conversation_id: Permanent ID allocated before tab creation.
         """
-        super().__init__(tab_id, title, app_core)
+        super().__init__(tab_id, title, app_core, conversation_id)
 
         # Order matters: ToolHandler must exist before StreamingHandler
         # because StreamingHandler needs ToolHandler for continuation

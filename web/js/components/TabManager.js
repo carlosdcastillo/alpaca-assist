@@ -6,8 +6,8 @@ class TabManager {
     this.container = document.getElementById(containerId);
     this.api = api;
     this.tabs = new Map(); // tabId -> { button, chatDisplay, inputArea, data }
+    this._convIds = new Map(); // tabId -> conversation_id (permanent)
     this.activeTabId = null;
-    this._nextTabNumber = 1;
 
     // Scroll button references
     this.scrollLeftBtn = document.getElementById("tab-scroll-left");
@@ -21,13 +21,8 @@ class TabManager {
   /**
    * Create a new tab (JS calls Python)
    */
-  async createTab(title = null) {
-    if (!title) {
-      title = `Chat ${this._nextTabNumber++}`;
-    }
-
-    // Call Python to create tab
-    const result = await this.api.create_tab(title);
+  async createTab() {
+    const result = await this.api.create_tab();
 
     if (!result.success) {
       console.error("Failed to create tab:", result.error);
@@ -35,9 +30,34 @@ class TabManager {
     }
 
     const tabId = result.tab_id;
+    const convId = result.conversation_id;
+    const title = `#${convId}`;
 
-    // Create the UI for this tab
-    return this.createTabUI(tabId, title);
+    this.createTabUI(tabId, title);
+    this._convIds.set(tabId, convId);
+    return tabId;
+  }
+
+  /**
+   * Store the permanent conversation ID for a tab and update the title if
+   * it is still showing the placeholder (#ID from a previous allocation).
+   */
+  setConversationId(tabId, convId) {
+    this._convIds.set(tabId, convId);
+    const tab = this.tabs.get(tabId);
+    if (!tab) return;
+    // Update title only when it is still the placeholder set at creation.
+    const titleSpan = tab.button.querySelector(".tab-title");
+    if (titleSpan && titleSpan.textContent === `#${convId}`) return; // already correct
+    // For Python-initiated tabs (restore/revive), title was passed explicitly —
+    // don't overwrite it.  For JS-initiated new tabs the title IS #convId already.
+  }
+
+  /**
+   * Get the permanent conversation ID for a tab.
+   */
+  getConversationId(tabId) {
+    return this._convIds.get(tabId) ?? null;
   }
 
   /**
@@ -177,6 +197,7 @@ class TabManager {
     // Remove from UI
     tab.button.remove();
     this.tabs.delete(tabId);
+    this._convIds.delete(tabId);
 
     // Notify Python
     await this.api.close_tab(tabId);

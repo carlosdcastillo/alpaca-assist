@@ -239,16 +239,25 @@ class ToolHandler:
             logger.debug(f"[TOOL] Callback received result: {res}")
 
         try:
-            logger.debug("[TOOL] Calling MCP tool via app_core")
-            self._chat._app_core.call_mcp_tool(
-                server_name,
-                tool_name,
-                arguments,
-                callback,
-            )
+            if server_name == "internal":
+                import internal_tools
+
+                logger.debug(f"[TOOL] Calling internal tool: {tool_name}")
+                result = internal_tools.call_tool(tool_name, arguments)
+                callback(result)
+            else:
+                logger.debug("[TOOL] Calling MCP tool via app_core")
+                self._chat._app_core.call_mcp_tool(
+                    server_name,
+                    tool_name,
+                    arguments,
+                    callback,
+                )
 
             # Wait for result with timeout (using Event instead of busy-wait)
-            if not callback_event.wait(timeout=self.TOOL_EXECUTION_TIMEOUT_SECONDS):
+            if server_name != "internal" and not callback_event.wait(
+                timeout=self.TOOL_EXECUTION_TIMEOUT_SECONDS,
+            ):
                 logger.warning(f"[TOOL] Tool execution timed out: {tool_id}")
                 result = None
 

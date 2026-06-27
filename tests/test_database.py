@@ -16,6 +16,17 @@ from freezegun import freeze_time
 from database import ConversationDatabase
 
 
+def _store(
+    db: ConversationDatabase,
+    title: str,
+    data: dict[str, Any] | None = None,
+) -> int:
+    """Helper: allocate an ID and store a conversation in one call."""
+    cid = db.allocate_conversation_id()
+    db.store_conversation(cid, title, data or {})
+    return cid
+
+
 class TestDatabaseInitialization:
     """Tests for database initialization."""
 
@@ -31,7 +42,6 @@ class TestDatabaseInitialization:
         db = ConversationDatabase(str(temp_db_path))
         db.init_database()
 
-        # Verify table exists
         conn = sqlite3.connect(str(temp_db_path))
         cursor = conn.cursor()
         cursor.execute(
@@ -43,12 +53,100 @@ class TestDatabaseInitialization:
         assert result is not None
         assert result[0] == "conversations"
 
+    def test_init_creates_sequences_table(self, temp_db_path: Path) -> None:
+        """Test that initialization creates the sequences table."""
+        db = ConversationDatabase(str(temp_db_path))
+        db.init_database()
+
+        conn = sqlite3.connect(str(temp_db_path))
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='sequences'",
+        )
+        result = cursor.fetchone()
+        conn.close()
+
+        assert result is not None
+
     def test_init_idempotent(self, temp_db_path: Path) -> None:
         """Test that initialization is idempotent."""
         db = ConversationDatabase(str(temp_db_path))
         db.init_database()
         db.init_database()  # Should not raise
         assert temp_db_path.exists()
+
+
+class TestConversationIdAllocation:
+    """Tests for the permanent conversation ID sequence."""
+
+    def test_allocate_returns_integer(self, mock_db: ConversationDatabase) -> None:
+        cid = mock_db.allocate_conversation_id()
+        assert isinstance(cid, int)
+        assert cid >= 1
+
+    def test_allocate_increments(self, mock_db: ConversationDatabase) -> None:
+        id1 = mock_db.allocate_conversation_id()
+        id2 = mock_db.allocate_conversation_id()
+        id3 = mock_db.allocate_conversation_id()
+        assert id2 == id1 + 1
+        assert id3 == id2 + 1
+
+    def test_allocate_seeds_above_existing_rows(self, temp_db_path: Path) -> None:
+        """Sequence must start above any pre-existing rows so no collision occurs."""
+        # Insert raw rows with known IDs to simulate an existing DB.
+        conn = sqlite3.connect(str(temp_db_path))
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS conversations "
+            "(id INTEGER PRIMARY KEY, title TEXT NOT NULL, chat_data TEXT NOT NULL, "
+            "created_date TEXT NOT NULL, closed_date TEXT NOT NULL, "
+            "summary_generated INTEGER DEFAULT 0, original_id INTEGER DEFAULT NULL)",
+        )
+        conn.execute(
+            "INSERT INTO conversations VALUES (50, 't', '{}', 'x', 'x', 0, NULL)",
+        )
+        conn.commit()
+        conn.close()
+
+        db = ConversationDatabase(str(temp_db_path))
+        first_id = db.allocate_conversation_id()
+        assert first_id > 50
+
+    def test_store_with_explicit_id(self, mock_db: ConversationDatabase) -> None:
+        """store_conversation must use the pre-allocated ID as the primary key."""
+        cid = mock_db.allocate_conversation_id()
+        mock_db.store_conversation(cid, "My Chat", {"x": 1})
+
+        result = mock_db.get_conversation(cid)
+        assert result is not None
+        assert result["conversation_id"] == cid
+        assert result["title"] == "My Chat"
+
+    def test_upsert_updates_existing_row(self, mock_db: ConversationDatabase) -> None:
+        """Storing twice with the same ID must update, not duplicate."""
+        cid = mock_db.allocate_conversation_id()
+        mock_db.store_conversation(cid, "First Title", {"v": 1})
+        mock_db.store_conversation(cid, "Second Title", {"v": 2})
+
+        assert len(mock_db.get_conversations()) == 1
+        result = mock_db.get_conversation(cid)
+        assert result is not None
+        assert result["title"] == "Second Title"
+        assert result["v"] == 2
+
+    def test_upsert_preserves_created_date(self, mock_db: ConversationDatabase) -> None:
+        """Re-storing a conversation must not reset its created_date."""
+        with freeze_time("2024-01-01 10:00:00"):
+            cid = mock_db.allocate_conversation_id()
+            mock_db.store_conversation(cid, "Original", {})
+
+        original = mock_db.get_conversations()[0]
+        original_created = original[2]  # created_date tuple index
+
+        with freeze_time("2024-06-15 20:00:00"):
+            mock_db.store_conversation(cid, "Updated", {})
+
+        updated = mock_db.get_conversations()[0]
+        assert updated[2] == original_created  # created_date unchanged
 
 
 class TestConversationStorage:
@@ -65,7 +163,7 @@ class TestConversationStorage:
             "answers": [{"components": [{"type": "text", "content": "Hi!"}]}],
         }
 
-        conversation_id = mock_db.store_conversation("Test Conversation", chat_data)
+        conversation_id = _store(mock_db, "Test Conversation", chat_data)
 
         assert conversation_id is not None
         assert isinstance(conversation_id, int)
@@ -85,11 +183,10 @@ class TestConversationStorage:
             ],
         }
 
-        conversation_id = mock_db.store_conversation("My Chat", chat_data)
+        conversation_id = _store(mock_db, "My Chat", chat_data)
 
-        # Retrieve and verify
-        # get_conversation() merges chat_data keys directly into the result dict
-        # and adds 'original_conversation_id' and 'title' keys.
+        # get_conversation() merges chat_data keys into the result dict
+        # and adds 'conversation_id' and 'title' keys.
         result = mock_db.get_conversation(conversation_id)
         assert result is not None
         assert result["title"] == "My Chat"
@@ -104,7 +201,7 @@ class TestConversationStorage:
         chat_data: dict[str, Any] = {"questions": [], "answers": []}
         title = "Test \"Quote\" & <Special> 'Chars'"
 
-        conversation_id = mock_db.store_conversation(title, chat_data)
+        conversation_id = _store(mock_db, title, chat_data)
         result = mock_db.get_conversation(conversation_id)
 
         assert result is not None
@@ -120,11 +217,10 @@ class TestConversationStorage:
             ],
         }
 
-        conversation_id = mock_db.store_conversation("Large Chat", chat_data)
+        conversation_id = _store(mock_db, "Large Chat", chat_data)
         result = mock_db.get_conversation(conversation_id)
 
         assert result is not None
-        # get_conversation() merges chat_data keys directly into the result dict
         assert len(result["questions"]) == 100
 
 
@@ -140,16 +236,15 @@ class TestConversationRetrieval:
             "questions": ["Test"],
             "answers": [{"components": [{"type": "text", "content": "Response"}]}],
         }
-        conversation_id = mock_db.store_conversation("Test", chat_data)
+        conversation_id = _store(mock_db, "Test", chat_data)
 
         result = mock_db.get_conversation(conversation_id)
 
-        # get_conversation() returns the chat_data dict merged with two extra keys:
-        # 'original_conversation_id' (the DB row ID) and 'title'.
+        # get_conversation() returns chat_data merged with 'conversation_id' and 'title'.
         assert isinstance(result, dict)
-        assert "original_conversation_id" in result
+        assert "conversation_id" in result
+        assert result["conversation_id"] == conversation_id
         assert "title" in result
-        # The chat_data fields are merged at the top level, not nested
         assert "questions" in result
         assert "answers" in result
 
@@ -171,9 +266,8 @@ class TestConversationRetrieval:
         mock_db: ConversationDatabase,
     ) -> None:
         """Test that get_conversations returns a list."""
-        # Store some conversations
         for i in range(3):
-            mock_db.store_conversation(f"Chat {i}", {"questions": [], "answers": []})
+            _store(mock_db, f"Chat {i}")
 
         conversations = mock_db.get_conversations()
 
@@ -184,16 +278,15 @@ class TestConversationRetrieval:
         self,
         mock_db: ConversationDatabase,
     ) -> None:
-        """Test that conversations are sorted by updated_at descending."""
-        # Store conversations with delays
+        """Test that conversations are sorted by closed_date descending."""
         with freeze_time("2024-01-15 10:00:00"):
-            id1 = mock_db.store_conversation("First", {"questions": [], "answers": []})
+            id1 = _store(mock_db, "First")
 
         with freeze_time("2024-01-15 11:00:00"):
-            id2 = mock_db.store_conversation("Second", {"questions": [], "answers": []})
+            id2 = _store(mock_db, "Second")
 
         with freeze_time("2024-01-15 12:00:00"):
-            id3 = mock_db.store_conversation("Third", {"questions": [], "answers": []})
+            id3 = _store(mock_db, "Third")
 
         conversations = mock_db.get_conversations()
 
@@ -206,8 +299,7 @@ class TestConversationRetrieval:
         mock_db: ConversationDatabase,
     ) -> None:
         """Test that get_conversations returns correct tuple format."""
-        chat_data = {"questions": ["Hello"], "answers": []}
-        mock_db.store_conversation("Test Chat", chat_data)
+        _store(mock_db, "Test Chat", {"questions": ["Hello"], "answers": []})
 
         conversations = mock_db.get_conversations()
 
@@ -219,7 +311,6 @@ class TestConversationRetrieval:
         assert isinstance(conv[1], str)
         assert isinstance(conv[2], str)
         assert isinstance(conv[3], str)
-        # summary_generated is stored as INTEGER (0/1) in SQLite
         assert isinstance(conv[4], int)
 
 
@@ -231,8 +322,7 @@ class TestConversationDeletion:
         mock_db: ConversationDatabase,
     ) -> None:
         """Test that delete_conversation removes the record."""
-        chat_data: dict[str, Any] = {"questions": [], "answers": []}
-        conversation_id = mock_db.store_conversation("To Delete", chat_data)
+        conversation_id = _store(mock_db, "To Delete")
 
         result = mock_db.delete_conversation(conversation_id)
 
@@ -260,8 +350,8 @@ class TestConversationDeletion:
         mock_db: ConversationDatabase,
     ) -> None:
         """Test that deleting one conversation doesn't affect others."""
-        id1 = mock_db.store_conversation("Keep", {"questions": [], "answers": []})
-        id2 = mock_db.store_conversation("Delete", {"questions": [], "answers": []})
+        id1 = _store(mock_db, "Keep")
+        id2 = _store(mock_db, "Delete")
 
         mock_db.delete_conversation(id2)
 
@@ -277,8 +367,8 @@ class TestConversationSearch:
         mock_db: ConversationDatabase,
     ) -> None:
         """Test searching by title."""
-        mock_db.store_conversation("Python Tutorial", {"questions": [], "answers": []})
-        mock_db.store_conversation("JavaScript Guide", {"questions": [], "answers": []})
+        _store(mock_db, "Python Tutorial")
+        _store(mock_db, "JavaScript Guide")
 
         results = mock_db.search_conversations("Python")
 
@@ -290,11 +380,13 @@ class TestConversationSearch:
         mock_db: ConversationDatabase,
     ) -> None:
         """Test searching conversations — search operates on title only."""
-        mock_db.store_conversation(
+        _store(
+            mock_db,
             "Python Chat",
             {"questions": ["What is Python?"], "answers": []},
         )
-        mock_db.store_conversation(
+        _store(
+            mock_db,
             "JavaScript Chat",
             {"questions": ["What is JavaScript?"], "answers": []},
         )
@@ -309,7 +401,7 @@ class TestConversationSearch:
         mock_db: ConversationDatabase,
     ) -> None:
         """Test that search is case insensitive."""
-        mock_db.store_conversation("PYTHON Chat", {"questions": [], "answers": []})
+        _store(mock_db, "PYTHON Chat")
 
         results_lower = mock_db.search_conversations("python")
         results_upper = mock_db.search_conversations("PYTHON")
@@ -322,7 +414,7 @@ class TestConversationSearch:
         mock_db: ConversationDatabase,
     ) -> None:
         """Test searching with no matches."""
-        mock_db.store_conversation("Chat 1", {"questions": [], "answers": []})
+        _store(mock_db, "Chat 1")
 
         results = mock_db.search_conversations("nonexistent")
 
@@ -334,12 +426,11 @@ class TestConversationSearch:
         mock_db: ConversationDatabase,
     ) -> None:
         """Test searching with empty term."""
-        mock_db.store_conversation("Chat 1", {"questions": [], "answers": []})
-        mock_db.store_conversation("Chat 2", {"questions": [], "answers": []})
+        _store(mock_db, "Chat 1")
+        _store(mock_db, "Chat 2")
 
         results = mock_db.search_conversations("")
 
-        # Empty search should return all conversations
         assert len(results) == 2
 
     def test_search_conversations_special_characters(
@@ -347,10 +438,7 @@ class TestConversationSearch:
         mock_db: ConversationDatabase,
     ) -> None:
         """Test searching with special characters."""
-        mock_db.store_conversation(
-            'Chat with "quotes"',
-            {"questions": [], "answers": []},
-        )
+        _store(mock_db, 'Chat with "quotes"')
 
         results = mock_db.search_conversations('"quotes"')
 
@@ -362,10 +450,7 @@ class TestConversationExistence:
 
     def test_conversation_exists_true(self, mock_db: ConversationDatabase) -> None:
         """Test that conversation_exists returns True for existing conversation."""
-        conversation_id = mock_db.store_conversation(
-            "Test",
-            {"questions": [], "answers": []},
-        )
+        conversation_id = _store(mock_db, "Test")
 
         result = mock_db.conversation_exists(conversation_id)
 
@@ -390,12 +475,7 @@ class TestTabIdLookup:
 
     def test_find_conversation_by_tab_id(self, mock_db: ConversationDatabase) -> None:
         """Test finding conversation by tab ID."""
-        chat_data = {
-            "tab_id": "tab-123",
-            "questions": [],
-            "answers": [],
-        }
-        conversation_id = mock_db.store_conversation("Test", chat_data)
+        conversation_id = _store(mock_db, "Test", {"tab_id": "tab-123"})
 
         result = mock_db.find_conversation_by_tab_id("tab-123")
 
@@ -414,8 +494,7 @@ class TestTabIdLookup:
         mock_db: ConversationDatabase,
     ) -> None:
         """Test finding conversation without tab_id field."""
-        chat_data: dict[str, Any] = {"questions": [], "answers": []}
-        mock_db.store_conversation("Test", chat_data)
+        _store(mock_db, "Test")
 
         result = mock_db.find_conversation_by_tab_id("any-tab")
         assert result is None
@@ -435,12 +514,11 @@ class TestImageDetection:
         mock_db: ConversationDatabase,
     ) -> None:
         """Test that image URLs are preserved in stored chat_data."""
-        chat_data = {
-            "questions": [],
-            "answers": [],
-            "question_images": [["http://example.com/image.png"]],
-        }
-        conv_id = mock_db.store_conversation("With Images", chat_data)
+        conv_id = _store(
+            mock_db,
+            "With Images",
+            {"question_images": [["http://example.com/image.png"]]},
+        )
 
         result = mock_db.get_conversation(conv_id)
 
@@ -452,8 +530,7 @@ class TestImageDetection:
         mock_db: ConversationDatabase,
     ) -> None:
         """Test that conversations without images have no question_images key."""
-        chat_data: dict[str, Any] = {"questions": [], "answers": []}
-        conv_id = mock_db.store_conversation("Without Images", chat_data)
+        conv_id = _store(mock_db, "Without Images")
 
         result = mock_db.get_conversation(conv_id)
 
@@ -465,12 +542,7 @@ class TestImageDetection:
         mock_db: ConversationDatabase,
     ) -> None:
         """Test that empty image arrays are preserved in stored chat_data."""
-        chat_data: dict[str, Any] = {
-            "questions": [],
-            "answers": [],
-            "question_images": [[], []],
-        }
-        conv_id = mock_db.store_conversation("Empty Images", chat_data)
+        conv_id = _store(mock_db, "Empty Images", {"question_images": [[], []]})
 
         result = mock_db.get_conversation(conv_id)
 
@@ -486,8 +558,7 @@ class TestDatabaseEdgeCases:
         mock_db: ConversationDatabase,
     ) -> None:
         """Test storing conversation with empty title."""
-        chat_data: dict[str, Any] = {"questions": [], "answers": []}
-        conversation_id = mock_db.store_conversation("", chat_data)
+        conversation_id = _store(mock_db, "")
 
         result = mock_db.get_conversation(conversation_id)
         assert result is not None
@@ -498,11 +569,11 @@ class TestDatabaseEdgeCases:
         mock_db: ConversationDatabase,
     ) -> None:
         """Test storing conversation with None values in data."""
-        chat_data = {
-            "questions": ["Test"],
-            "answers": [None],  # Edge case: None in answers
-        }
-        conversation_id = mock_db.store_conversation("Test", chat_data)
+        conversation_id = _store(
+            mock_db,
+            "Test",
+            {"questions": ["Test"], "answers": [None]},
+        )
 
         result = mock_db.get_conversation(conversation_id)
         assert result is not None
@@ -513,18 +584,13 @@ class TestDatabaseEdgeCases:
         db = ConversationDatabase(str(db_path))
         db.init_database()
 
-        # Make database read-only by creating a file that can't be written to
-        # This is a simplified test - real error handling tests would need more setup
-        # Just verify the database doesn't crash on normal operations
-        chat_data: dict[str, Any] = {"questions": [], "answers": []}
-        conversation_id = db.store_conversation("Test", chat_data)
+        conversation_id = _store(db, "Test")
         assert conversation_id is not None
 
     def test_concurrent_access(self, mock_db: ConversationDatabase) -> None:
         """Test basic concurrent access handling."""
-        # Store multiple conversations rapidly
         for i in range(10):
-            mock_db.store_conversation(f"Chat {i}", {"questions": [], "answers": []})
+            _store(mock_db, f"Chat {i}")
 
         conversations = mock_db.get_conversations()
         assert len(conversations) == 10
@@ -542,11 +608,9 @@ class TestDatabaseMigration:
             ],
         }
 
-        conversation_id = mock_db.store_conversation("Old Format", old_format_data)
+        conversation_id = _store(mock_db, "Old Format", old_format_data)
         result = mock_db.get_conversation(conversation_id)
 
-        # get_conversation() merges chat_data keys directly into the result dict,
-        # so 'messages' is a top-level key, not nested under 'chat_data'.
         assert result is not None
         assert "messages" in result
 
@@ -558,7 +622,7 @@ class TestDatabaseMigration:
             "messages": [{"role": "user", "content": "Hello"}],
         }
 
-        conversation_id = mock_db.store_conversation("Mixed Format", mixed_data)
+        conversation_id = _store(mock_db, "Mixed Format", mixed_data)
         result = mock_db.get_conversation(conversation_id)
 
         assert result is not None
@@ -569,24 +633,23 @@ class TestDatabasePerformance:
 
     def test_large_conversation_storage(self, mock_db: ConversationDatabase) -> None:
         """Test storage of very large conversations."""
-        # Create a conversation with substantial content
         large_content = "x" * 100000  # 100KB of text
         chat_data = {
             "questions": [large_content],
             "answers": [{"components": [{"type": "text", "content": large_content}]}],
         }
 
-        conversation_id = mock_db.store_conversation("Large", chat_data)
+        conversation_id = _store(mock_db, "Large", chat_data)
         result = mock_db.get_conversation(conversation_id)
 
         assert result is not None
-        # get_conversation() merges chat_data keys directly into the result dict
         assert len(result["questions"][0]) == 100000
 
     def test_many_conversations(self, mock_db: ConversationDatabase) -> None:
         """Test handling many conversations."""
         for i in range(100):
-            mock_db.store_conversation(
+            _store(
+                mock_db,
                 f"Chat {i}",
                 {"questions": [f"Question {i}"], "answers": []},
             )
@@ -594,6 +657,5 @@ class TestDatabasePerformance:
         conversations = mock_db.get_conversations()
         assert len(conversations) == 100
 
-        # search_conversations searches by title only, not content
         results = mock_db.search_conversations("Chat 50")
         assert len(results) == 1

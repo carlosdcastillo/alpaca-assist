@@ -39,12 +39,18 @@ class ChatTabBase:
     All UI interactions go through the WebViewAPI bridge.
     """
 
-    def __init__(self, tab_id: str, title: str, app_core: AppCore) -> None:
+    def __init__(
+        self,
+        tab_id: str,
+        title: str,
+        app_core: AppCore,
+        conversation_id: int,
+    ) -> None:
         self.tab_id = tab_id
         self.title = title
         self._app_core = app_core
         self.chat_state: ChatState | ConversationGraph = ConversationGraph()
-        self.original_conversation_id: int | None = None
+        self.conversation_id: int = conversation_id
         self.preferences: dict[str, Any] = app_core.preferences
 
         # Streaming state (managed by StreamingHandler)
@@ -97,17 +103,21 @@ class ChatTabBase:
 
     def get_serializable_data(self) -> dict[str, Any]:
         """Get serializable data for session saving."""
-        data: dict[str, Any] = {
+        return {
             "chat_state": self.chat_state.to_dict(),
             "tab_id": self.tab_id,
             "name": self.title,
+            "conversation_id": self.conversation_id,
         }
-        if self.original_conversation_id is not None:
-            data["original_conversation_id"] = self.original_conversation_id
-        return data
 
     def load_from_data(self, data: dict[str, Any]) -> None:
-        """Load tab data from serialized form."""
+        """Load tab data from serialized form.
+
+        conversation_id is intentionally not restored here — it is set at
+        tab-creation time (via create_tab) so that clones and handoffs
+        always get their own fresh ID.  Session restore passes the stored
+        conversation_id directly to create_tab before calling this method.
+        """
         chat_state_data = data.get("chat_state", {})
 
         if "graph" in chat_state_data:
@@ -116,5 +126,3 @@ class ChatTabBase:
             self.chat_state = ChatState.from_dict(chat_state_data)
 
         self.title = data.get("name", data.get("title", "Chat"))
-        orig = data.get("original_conversation_id")
-        self.original_conversation_id = int(orig) if orig is not None else None

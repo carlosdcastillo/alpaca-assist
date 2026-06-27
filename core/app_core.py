@@ -159,7 +159,9 @@ class AppCore:
 
     def get_available_mcp_tools(self) -> list[dict[str, Any]]:
         """Get all available MCP tools in Ollama-compatible format."""
-        available_tools = []
+        import internal_tools
+
+        available_tools: list[dict[str, Any]] = list(internal_tools.TOOL_SCHEMAS)
         mcp_tools = self.mcp_manager.get_available_tools()
         logger.debug(f"Debug: MCP Manager has {len(mcp_tools)} servers")
         logger.debug(f"Debug: Server names: {list(mcp_tools.keys())}")
@@ -320,18 +322,26 @@ class AppCore:
 
         return f"tab-{self._tab_counter}-{uuid.uuid4().hex[:8]}"
 
-    def create_tab(self, title: str | None = None) -> tuple[str, ChatTab]:
+    def create_tab(
+        self,
+        title: str | None = None,
+        conversation_id: int | None = None,
+    ) -> tuple[str, ChatTab]:
         """Create a new tab.
 
-        Returns (tab_id, tab_instance)
+        Returns (tab_id, tab_instance).
+        conversation_id is pre-allocated from the sequences table when not supplied
+        (e.g. revive reuses the existing DB id).
         """
         from core.chat_tab import ChatTab
 
         tab_id = self._alloc_tab_id()
         if title is None:
             title = f"Chat {len(self.tabs) + 1}"
+        if conversation_id is None:
+            conversation_id = self.db.allocate_conversation_id()
 
-        tab = ChatTab(tab_id, title, self)
+        tab = ChatTab(tab_id, title, self, conversation_id)
         self.tabs[tab_id] = tab
         return tab_id, tab
 
@@ -359,7 +369,11 @@ class AppCore:
         if "created_date" not in tab_data:
             tab_data["created_date"] = datetime.now().isoformat()
         try:
-            conv_id = self.db.store_conversation(tab_title, tab_data)
+            conv_id = self.db.store_conversation(
+                tab.conversation_id,
+                tab_title,
+                tab_data,
+            )
             logger.info(f"Stored conversation '{tab_title}' with ID {conv_id}")
         except Exception as e:
             logger.error(f"Error storing conversation: {e}")

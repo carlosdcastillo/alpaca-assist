@@ -24,9 +24,51 @@ class ConversationDatabase:
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.cursor()
             cursor.execute(
-                "\n                CREATE TABLE IF NOT EXISTS conversations (\n                    id INTEGER PRIMARY KEY AUTOINCREMENT,\n                    title TEXT NOT NULL,\n                    chat_data TEXT NOT NULL,\n                    created_date TEXT NOT NULL,\n                    closed_date TEXT NOT NULL,\n                    summary_generated INTEGER DEFAULT 0,\n                    original_id INTEGER DEFAULT NULL\n                )\n            ",
+                """
+                CREATE TABLE IF NOT EXISTS conversations (
+                    id INTEGER PRIMARY KEY,
+                    title TEXT NOT NULL,
+                    chat_data TEXT NOT NULL,
+                    created_date TEXT NOT NULL,
+                    closed_date TEXT NOT NULL,
+                    summary_generated INTEGER DEFAULT 0,
+                    original_id INTEGER DEFAULT NULL
+                )
+                """,
+            )
+            cursor.execute(
+                """
+                CREATE TABLE IF NOT EXISTS sequences (
+                    name TEXT PRIMARY KEY,
+                    next_val INTEGER NOT NULL DEFAULT 1
+                )
+                """,
+            )
+            # Seed so the sequence never collides with existing rows.
+            cursor.execute(
+                """
+                INSERT OR IGNORE INTO sequences (name, next_val)
+                VALUES ('conversation',
+                        (SELECT COALESCE(MAX(id), 0) + 1 FROM conversations))
+                """,
             )
             conn.commit()
+
+    def allocate_conversation_id(self) -> int:
+        """Atomically reserve the next conversation ID from the sequences table."""
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "UPDATE sequences SET next_val = next_val + 1 WHERE name = 'conversation'",
+            )
+            cursor.execute(
+                "SELECT next_val - 1 FROM sequences WHERE name = 'conversation'",
+            )
+            row = cursor.fetchone()
+            conn.commit()
+            if row is None:
+                raise RuntimeError("Failed to allocate conversation ID")
+            return int(row[0])
 
     def get_conversations(self) -> list[tuple[int, str, str, str, bool]]:
         """Get all conversations ordered by closed_date descending."""
@@ -41,20 +83,20 @@ class ConversationDatabase:
         """Get a specific conversation by ID.
 
         Returns the chat_data dict with additional keys:
-        - 'original_conversation_id': the database conversation ID
+        - 'conversation_id': the stable database conversation ID
         - 'title': the conversation title from the database
         """
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.cursor()
             cursor.execute(
-                "\n                SELECT title, chat_data FROM conversations WHERE id = ?\n            ",
+                "SELECT title, chat_data FROM conversations WHERE id = ?",
                 (conversation_id,),
             )
             result = cursor.fetchone()
             if result:
                 title, chat_data_json = result
                 chat_data: dict[str, Any] = json.loads(chat_data_json)
-                chat_data["original_conversation_id"] = conversation_id
+                chat_data["conversation_id"] = conversation_id
                 chat_data["title"] = title
                 return chat_data
             return None
@@ -122,60 +164,47 @@ class ConversationDatabase:
                     continue
             return None
 
-    def store_conversation(self, title: str, chat_data: dict[str, Any]) -> int:
-        """Store a conversation in the database.
+    def store_conversation(
+        self,
+        conversation_id: int,
+        title: str,
+        chat_data: dict[str, Any],
+    ) -> int:
+        """Upsert a conversation using its pre-allocated permanent ID.
 
-        This method now properly handles large conversations by ensuring
-        the full JSON data is stored without truncation.
+        The created_date is preserved if the row already exists so that
+        reviving and re-closing a conversation does not reset its age.
         """
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.cursor()
-            created_date = datetime.now().isoformat()
-            if "created_date" in chat_data:
-                created_date = chat_data["created_date"]
-            original_id_raw = chat_data.get("original_conversation_id")
-            original_id: int | None = (
-                int(original_id_raw) if isinstance(original_id_raw, int) else None
-            )
+            fallback_date = chat_data.get("created_date", datetime.now().isoformat())
             json_data = json.dumps(chat_data, ensure_ascii=False)
-            data_size = len(json_data)
-            logger.debug(f"Storing conversation with {data_size} bytes of JSON data")
-            if original_id:
-                cursor.execute(
-                    "\n                UPDATE conversations\n                SET chat_data = ?, closed_date = ?, summary_generated = ?\n                WHERE id = ?\n            ",
-                    (
-                        json_data,
-                        datetime.now().isoformat(),
-                        int(chat_data.get("summary_generated", False)),
-                        original_id,
-                    ),
-                )
-                if cursor.rowcount > 0:
-                    conn.commit()
-                    logger.debug(
-                        f"Updated conversation {original_id} with {data_size} bytes",
-                    )
-                    return original_id
-                else:
-                    logger.warning(
-                        f"Original conversation {original_id} not found, creating new record",
-                    )
+            logger.debug(
+                f"Storing conversation {conversation_id} with {len(json_data)} bytes",
+            )
             cursor.execute(
-                "\n            INSERT INTO conversations (title, chat_data, created_date, closed_date, summary_generated, original_id)\n            VALUES (?, ?, ?, ?, ?, ?)\n        ",
+                """
+                INSERT OR REPLACE INTO conversations
+                    (id, title, chat_data, created_date, closed_date, summary_generated)
+                VALUES (
+                    ?,
+                    ?,
+                    ?,
+                    COALESCE((SELECT created_date FROM conversations WHERE id = ?), ?),
+                    ?,
+                    ?
+                )
+                """,
                 (
+                    conversation_id,
                     title,
                     json_data,
-                    created_date,
+                    conversation_id,
+                    fallback_date,
                     datetime.now().isoformat(),
                     int(chat_data.get("summary_generated", False)),
-                    original_id,
                 ),
             )
-            conversation_id: int | None = cursor.lastrowid
             conn.commit()
-            logger.debug(
-                f"Stored new conversation {conversation_id} with {data_size} bytes",
-            )
-            if conversation_id is None:
-                raise RuntimeError("Failed to get conversation_id after insert")
+            logger.debug(f"Stored conversation {conversation_id}")
             return conversation_id

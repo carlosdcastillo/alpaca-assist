@@ -63,33 +63,60 @@ describe("TabManager", () => {
       expect(tabManager.activeTabId).toBeNull();
     });
 
-    it("should start tab numbering at 1", () => {
-      expect(tabManager._nextTabNumber).toBe(1);
+    it("should start with empty conv-id map", () => {
+      expect(tabManager._convIds.size).toBe(0);
     });
   });
 
   describe("createTab()", () => {
-    it("should call Python to create tab", async () => {
+    it("should call Python to create tab with no args", async () => {
       mockApi.create_tab.mockResolvedValue({
         success: true,
         tab_id: "tab-1-abc123",
+        conversation_id: 42,
       });
 
-      await tabManager.createTab("Test Tab");
+      await tabManager.createTab();
 
-      expect(mockApi.create_tab).toHaveBeenCalledWith("Test Tab");
+      expect(mockApi.create_tab).toHaveBeenCalledWith();
     });
 
     it("should create tab UI on success", async () => {
       mockApi.create_tab.mockResolvedValue({
         success: true,
         tab_id: "tab-1-abc123",
+        conversation_id: 42,
       });
 
-      const tabId = await tabManager.createTab("Test Tab");
+      const tabId = await tabManager.createTab();
 
       expect(tabId).toBe("tab-1-abc123");
       expect(tabManager.tabs.has("tab-1-abc123")).toBe(true);
+    });
+
+    it("should use conversation id as initial title", async () => {
+      mockApi.create_tab.mockResolvedValue({
+        success: true,
+        tab_id: "tab-1-abc123",
+        conversation_id: 42,
+      });
+
+      await tabManager.createTab();
+
+      const button = container.querySelector('[data-tab-id="tab-1-abc123"]');
+      expect(button.querySelector(".tab-title").textContent).toBe("#42");
+    });
+
+    it("should store conversation id in _convIds map", async () => {
+      mockApi.create_tab.mockResolvedValue({
+        success: true,
+        tab_id: "tab-1-abc123",
+        conversation_id: 42,
+      });
+
+      await tabManager.createTab();
+
+      expect(tabManager._convIds.get("tab-1-abc123")).toBe(42);
     });
 
     it("should return null on failure", async () => {
@@ -98,32 +125,9 @@ describe("TabManager", () => {
         error: "Failed to create",
       });
 
-      const tabId = await tabManager.createTab("Test Tab");
+      const tabId = await tabManager.createTab();
 
       expect(tabId).toBeNull();
-    });
-
-    it("should auto-generate title if not provided", async () => {
-      mockApi.create_tab.mockResolvedValue({
-        success: true,
-        tab_id: "tab-1-abc123",
-      });
-
-      await tabManager.createTab();
-
-      expect(mockApi.create_tab).toHaveBeenCalledWith("Chat 1");
-    });
-
-    it("should increment tab number for auto titles", async () => {
-      mockApi.create_tab
-        .mockResolvedValueOnce({ success: true, tab_id: "tab-1" })
-        .mockResolvedValueOnce({ success: true, tab_id: "tab-2" });
-
-      await tabManager.createTab();
-      await tabManager.createTab();
-
-      expect(mockApi.create_tab).toHaveBeenNthCalledWith(1, "Chat 1");
-      expect(mockApi.create_tab).toHaveBeenNthCalledWith(2, "Chat 2");
     });
 
     it("should dispatch tabCreated event", async () => {
@@ -133,9 +137,10 @@ describe("TabManager", () => {
       mockApi.create_tab.mockResolvedValue({
         success: true,
         tab_id: "tab-1-abc123",
+        conversation_id: 42,
       });
 
-      await tabManager.createTab("Test Tab");
+      await tabManager.createTab();
 
       expect(eventHandler).toHaveBeenCalled();
       expect(eventHandler.mock.calls[0][0].detail.tabId).toBe("tab-1-abc123");

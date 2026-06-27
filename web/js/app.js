@@ -625,6 +625,19 @@ class AlpacaApp {
       case "agent-skills":
         await this._showAgentSkillsDialog();
         break;
+      case "copy-conversation-id": {
+        const convId = this.tabManager.getConversationId(
+          this.tabManager.activeTabId,
+        );
+        if (convId !== null) {
+          await navigator.clipboard.writeText(String(convId));
+          this._showToast(`Conversation ID #${convId} copied`, {
+            type: "success",
+            duration: 2000,
+          });
+        }
+        break;
+      }
 
       // Help menu
       case "about":

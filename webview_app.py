@@ -175,7 +175,15 @@ class ChatApp:
                     f"Restoring tab {i}: title='{title}' from data keys {list(tab_data.keys())}",
                 )
 
-                result = self.api.create_tab_and_notify_js(title, auto_switch=False)
+                saved_conv_id_raw = tab_data.get("conversation_id")
+                saved_conv_id = (
+                    int(saved_conv_id_raw) if saved_conv_id_raw is not None else None
+                )
+                result = self.api.create_tab_and_notify_js(
+                    title,
+                    auto_switch=False,
+                    conversation_id=saved_conv_id,
+                )
 
                 logger.info(f"create_tab_and_notify_js result: {result}")
                 if result["success"]:

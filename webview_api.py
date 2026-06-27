@@ -82,15 +82,13 @@ class WebViewAPI:
         """Create new tab — Python generates the ID."""
         try:
             tab_id, tab = self._app.core.create_tab(title)
-            # create_tab always returns a ChatTab, so initialize the index
-            self._current_answer_index[
-                tab_id
-            ] = -1  # Will be 0 after first on_new_qa_turn
+            self._current_answer_index[tab_id] = -1
 
             return {
                 "success": True,
                 "tab_id": tab_id,
                 "title": title,
+                "conversation_id": tab.conversation_id,
             }
         except Exception as e:
             logger.error(f"Error creating tab: {e}")
@@ -339,14 +337,19 @@ class WebViewAPI:
 
             # Refuse to open a conversation that is already open in a tab
             for tab in self._app.core.tabs.values():
-                if tab.original_conversation_id == conv_id:
+                if tab.conversation_id == conv_id:
                     return {"success": False, "error": "already_open"}
 
             tab_data = self._app.core.db.get_conversation(conv_id)
             if not tab_data:
                 return {"success": False, "error": "Conversation not found"}
             title = tab_data.get("name") or tab_data.get("title") or "Chat"
-            result = self.create_tab_and_notify_js(title, auto_switch=True)
+            # Reuse the permanent conversation_id — don't allocate a new one.
+            result = self.create_tab_and_notify_js(
+                title,
+                auto_switch=True,
+                conversation_id=conv_id,
+            )
             if not result["success"]:
                 return result
             tab_id = result["tab_id"]
@@ -399,7 +402,7 @@ class WebViewAPI:
             conv_id = int(conv_id)
             # Check if already open in any tab
             for tab_id, tab in self._app.core.tabs.items():
-                if tab.original_conversation_id == conv_id:
+                if tab.conversation_id == conv_id:
                     return {"success": True, "action": "switch", "tab_id": tab_id}
             # Not open — restore from DB
             result = self.revive_conversation(conv_id)
@@ -882,11 +885,13 @@ class WebViewAPI:
             if not result["success"]:
                 return result
 
+            clone_conv_id = result["conversation_id"]
             new_tab = self._app.core.tabs.get(result["tab_id"])
             if new_tab:
-                # load_from_data restores the *original* title from the
-                # serialized payload, clobbering clone_title — reassert it.
+                # load_from_data restores the *original* title and conversation_id
+                # from the serialized payload — reassert our own values.
                 new_tab.load_from_data(tab.get_serializable_data())
+                new_tab.conversation_id = clone_conv_id
                 new_tab.title = clone_title
                 new_tab._summary_handler._generated = True
                 self.update_tab_title(result["tab_id"], clone_title)
@@ -923,38 +928,29 @@ class WebViewAPI:
 
             # --- Create the new tab (Python + JS side) -------------------------
             new_tab_id, new_tab = self._app.core.create_tab("📋 Handoff")
+            handoff_conv_id = new_tab.conversation_id
             self._current_answer_index[new_tab_id] = -1
             # Notify JS to create the tab UI and switch to it
             self._safe_evaluate_js(
                 f"app.tabManager.createTabUI("
                 f"{json.dumps(new_tab_id)}, {json.dumps('📋 Handoff')}, true);",
             )
+            self._safe_evaluate_js(
+                f"app.tabManager.setConversationId({json.dumps(new_tab_id)}, {handoff_conv_id});",
+            )
 
             # --- Load clone and compact ----------------------------------------
             new_tab.load_from_data(original_tab.get_serializable_data())
+            # load_from_data copies the original's conversation_id; restore our own.
+            new_tab.conversation_id = handoff_conv_id
             new_tab.compact_conversation()  # strip tool call/result components
 
             # Suppress automatic summary generation — we control the title ourselves
             new_tab._summary_handler._generated = True
 
-            # --- Pin original tab to a DB conv_id for a durable back-link ------
-            # Tab IDs are ephemeral (reallocated each session), so the back-link
-            # must use the stable DB conv_id.  Save the original tab now so we
-            # have a permanent identifier even if the tab is closed before the
-            # user ever clicks the back-link.
-            if original_tab.original_conversation_id is None:
-                orig_tab_data = original_tab.get_serializable_data()
-                from datetime import datetime as _dt
-
-                if "created_date" not in orig_tab_data:
-                    orig_tab_data["created_date"] = _dt.now().isoformat()
-                orig_conv_id = self._app.core.db.store_conversation(
-                    original_tab.title,
-                    orig_tab_data,
-                )
-                original_tab.original_conversation_id = orig_conv_id
-            else:
-                orig_conv_id = original_tab.original_conversation_id
+            # conversation_id is permanent and allocated at tab-creation time,
+            # so the back-link is always available without a force-save.
+            orig_conv_id = original_tab.conversation_id
 
             # --- Register post-streaming callback ------------------------------
             api_ref = self  # capture for closure
@@ -1325,30 +1321,38 @@ class WebViewAPI:
         self,
         title: str = "New Chat",
         auto_switch: bool = True,
+        conversation_id: int | None = None,
     ) -> dict[str, Any]:
         """Create a new tab and notify JavaScript to create the UI.
 
-        Used during session restoration to create both Python and JS-side tabs.
+        Used during session restoration, revive, and handoff.
+        Pass conversation_id to reuse an existing permanent ID (revive / restore);
+        omit it to allocate a fresh one.
         """
         try:
-            # Create Python-side tab
-            tab_id, tab = self._app.core.create_tab(title)
+            tab_id, tab = self._app.core.create_tab(
+                title,
+                conversation_id=conversation_id,
+            )
             self._current_answer_index[tab_id] = -1
 
-            # Notify JavaScript to create the tab UI
-            # Pass auto_switch parameter to prevent switching during bulk tab creation
             self._safe_evaluate_js(
                 f"app.tabManager.createTabUI({json.dumps(tab_id)}, {json.dumps(title)}, {json.dumps(auto_switch)});",
             )
+            # Push the permanent conversation ID so JS can show/copy it.
+            self._safe_evaluate_js(
+                f"app.tabManager.setConversationId({json.dumps(tab_id)}, {tab.conversation_id});",
+            )
 
             logger.info(
-                f"Created tab {tab_id} with title '{title}' and notified JS (auto_switch={auto_switch})",
+                f"Created tab {tab_id} conv={tab.conversation_id} title='{title}' auto_switch={auto_switch}",
             )
 
             return {
                 "success": True,
                 "tab_id": tab_id,
                 "title": title,
+                "conversation_id": tab.conversation_id,
             }
         except Exception as e:
             logger.error(f"Error creating tab: {e}")

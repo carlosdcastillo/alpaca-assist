@@ -110,17 +110,17 @@ def _make_api_for_tabs(tabs: dict):
 
 
 class TestNavigateToConv:
-    """navigate_to_conv must use original_conversation_id to locate open tabs
+    """navigate_to_conv must use conversation_id to locate open tabs
     and fall back to revive_conversation for closed ones."""
 
     # --- open-tab path ---
 
     def test_open_tab_returns_switch_action(self):
-        """If any open tab has matching original_conversation_id, return switch."""
+        """If any open tab has matching conversation_id, return switch."""
         from webview_api import WebViewAPI
 
         mock_tab = Mock()
-        mock_tab.original_conversation_id = 42
+        mock_tab.conversation_id = 42
         api = _make_api_for_tabs({"tab-1-abc": mock_tab})
 
         with patch.object(WebViewAPI, "revive_conversation") as mock_revive:
@@ -136,7 +136,7 @@ class TestNavigateToConv:
         from webview_api import WebViewAPI
 
         mock_tab = Mock()
-        mock_tab.original_conversation_id = 99
+        mock_tab.conversation_id = 99
         api = _make_api_for_tabs({"tab-1-abc": mock_tab})
 
         with patch.object(
@@ -155,9 +155,9 @@ class TestNavigateToConv:
         from webview_api import WebViewAPI
 
         t1 = Mock()
-        t1.original_conversation_id = 10
+        t1.conversation_id = 10
         t2 = Mock()
-        t2.original_conversation_id = 20
+        t2.conversation_id = 20
         api = _make_api_for_tabs({"tab-a": t1, "tab-b": t2})
 
         with patch.object(WebViewAPI, "revive_conversation"):
@@ -208,7 +208,7 @@ class TestNavigateToConv:
         from webview_api import WebViewAPI
 
         mock_tab = Mock()
-        mock_tab.original_conversation_id = 5
+        mock_tab.conversation_id = 5
         api = _make_api_for_tabs({"tab-x": mock_tab})
 
         with patch.object(WebViewAPI, "revive_conversation"):
@@ -224,41 +224,30 @@ class TestNavigateToConv:
 
 
 class TestPerformHandoffConvIdPinning:
-    """perform_handoff must pin the original tab to a stable DB conv_id
-    BEFORE registering the back-link callback.
+    """perform_handoff must use the original tab's permanent conversation_id
+    in the back-link callback.
 
-    If the conv_id is not pinned, or if the ephemeral tab_id is used instead,
-    the back-link will silently fail after a session restart.
+    conversation_id is allocated at tab-creation time (not during handoff),
+    so it is always a valid integer by the time perform_handoff runs.
     """
 
-    def test_fresh_tab_gets_conv_id_assigned(self, api, tab_with_content):
-        """A fresh tab (original_conversation_id=None) should be saved to the
-        DB and have original_conversation_id set to the returned integer."""
+    def test_tab_has_permanent_conv_id_at_creation(self, api, tab_with_content):
+        """Every tab is assigned a permanent integer conversation_id at creation."""
+        _tab_id, tab = tab_with_content
+        assert isinstance(tab.conversation_id, int)
+        assert tab.conversation_id > 0
+
+    def test_handoff_preserves_original_tab_conv_id(self, api, tab_with_content):
+        """perform_handoff must NOT reallocate the original tab's conversation_id."""
         from core.chat_tab import ChatTab
 
         tab_id, tab = tab_with_content
-        assert tab.original_conversation_id is None
+        original_conv_id = tab.conversation_id
 
         with patch.object(ChatTab, "handle_user_message"):
             api.perform_handoff(tab_id)
 
-        assert tab.original_conversation_id is not None
-        assert isinstance(tab.original_conversation_id, int)
-
-    def test_already_pinned_tab_reuses_conv_id(self, api, tab_with_content, core):
-        """A tab already linked to a DB record must NOT create a second record;
-        the existing conv_id is reused."""
-        from core.chat_tab import ChatTab
-
-        tab_id, tab = tab_with_content
-        existing_data = tab.get_serializable_data()
-        existing_conv_id = core.db.store_conversation("My Conversation", existing_data)
-        tab.original_conversation_id = existing_conv_id
-
-        with patch.object(ChatTab, "handle_user_message"):
-            api.perform_handoff(tab_id)
-
-        assert tab.original_conversation_id == existing_conv_id
+        assert tab.conversation_id == original_conv_id
 
     def test_back_link_uses_alpaca_conv_scheme(self, api, tab_with_content, core):
         """The injected back-link must use alpaca://conv/{int}, NOT alpaca://tab/{str}.
@@ -316,7 +305,7 @@ class TestPerformHandoffConvIdPinning:
         end = back_link.index(")", start)
         link_conv_id = int(back_link[start:end])
 
-        assert link_conv_id == tab.original_conversation_id
+        assert link_conv_id == tab.conversation_id
 
     # --- end-to-end regression test ---
 
