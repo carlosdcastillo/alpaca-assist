@@ -67,6 +67,7 @@ class ChatTabBase:
         self.last_invocation_metrics: dict[str, Any] | None = None
         self.session_output_tokens: int = 0
         self.session_input_tokens: int = 0
+        self.session_cached_input_tokens: int = 0
 
         # One-shot callback fired by on_streaming_complete (e.g. handoff post-processing).
         # Cleared after firing so it only runs once.

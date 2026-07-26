@@ -300,6 +300,11 @@ class WebViewAPI:
             metrics = getattr(tab, "last_invocation_metrics", None)
             session_output_tokens = getattr(tab, "session_output_tokens", 0)
             session_input_tokens = getattr(tab, "session_input_tokens", 0)
+            session_cached_input_tokens = getattr(
+                tab,
+                "session_cached_input_tokens",
+                0,
+            )
             latency_ms = metrics.get("invocation_latency_ms") if metrics else None
 
             skill_count = len(self._app.core.skill_manager.skills)
@@ -310,6 +315,7 @@ class WebViewAPI:
                 "line_count": line_count,
                 "token_estimate": token_estimate,
                 "session_input_tokens": session_input_tokens,
+                "session_cached_input_tokens": session_cached_input_tokens,
                 "session_output_tokens": session_output_tokens,
                 "latency_ms": latency_ms,
                 "skill_count": skill_count,

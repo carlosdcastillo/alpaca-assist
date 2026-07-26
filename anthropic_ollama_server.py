@@ -610,6 +610,7 @@ class OllamaRequestHandler(BaseHTTPRequestHandler):
         tool_arguments_buffer = ""
         input_tokens: int | None = None
         output_tokens: int | None = None
+        cached_tokens: int = 0
         start_time = time.time()
 
         if stream:
@@ -627,6 +628,10 @@ class OllamaRequestHandler(BaseHTTPRequestHandler):
                     _cr = usage.get("cache_read_input_tokens") or 0
                     _total = _it + _cw + _cr
                     input_tokens = _total if _total > 0 else None
+                    # cache_read is billed at ~10% of input price, cache_creation
+                    # at ~1.25x — both are still "cached" in the sense that the
+                    # UI cares about: not fresh full-price input tokens.
+                    cached_tokens = _cw + _cr
 
                 elif (
                     val.get("type") == "content_block_delta"
@@ -725,12 +730,14 @@ class OllamaRequestHandler(BaseHTTPRequestHandler):
                     _total = _it + _cw + _cr
                     if _total > 0:
                         input_tokens = _total
+                        cached_tokens = _cw + _cr
 
         elapsed_ms = int((time.time() - start_time) * 1000)
         invocation_metrics: dict | None = None
         if input_tokens is not None and output_tokens is not None:
             invocation_metrics = {
                 "input_token_count": input_tokens,
+                "cached_input_token_count": cached_tokens,
                 "output_token_count": output_tokens,
                 "invocation_latency_ms": elapsed_ms,
             }

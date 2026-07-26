@@ -64,6 +64,55 @@ class TestProcessStreamHappyPath:
         mock_api.on_streaming_end.assert_called_once_with("tab-1", 0)
 
 
+class TestProcessStreamSessionTokenAccumulation:
+    """session_input_tokens/session_output_tokens/session_cached_input_tokens
+
+    must accumulate across every call in the tab's lifetime, not just
+    reflect the most recent one — a single turn's tool loop alone can be
+    dozens of calls, and only summing the last one badly undercounts what
+    the status bar reports to the user.
+    """
+
+    def test_metrics_accumulate_across_multiple_calls(self) -> None:
+        processor, mock_chat, _ = _make_processor()
+        mock_chat.session_input_tokens = 0
+        mock_chat.session_output_tokens = 0
+        mock_chat.session_cached_input_tokens = 0
+
+        first_call = _lines(
+            {
+                "message": {"content": "call one"},
+                "done": True,
+                "invocation_metrics": {
+                    "input_token_count": 1000,
+                    "cached_input_token_count": 800,
+                    "output_token_count": 20,
+                },
+            },
+        )
+        processor.process_stream(_make_response(200, first_call), 0, _stop_flag())
+
+        second_call = _lines(
+            {
+                "message": {"content": "call two"},
+                "done": True,
+                "invocation_metrics": {
+                    "input_token_count": 1500,
+                    "cached_input_token_count": 1400,
+                    "output_token_count": 15,
+                },
+            },
+        )
+        processor.process_stream(_make_response(200, second_call), 0, _stop_flag())
+
+        # Sum of both calls, not just the second (which last_invocation_metrics
+        # already covers separately).
+        assert mock_chat.session_input_tokens == 2500
+        assert mock_chat.session_cached_input_tokens == 2200
+        assert mock_chat.session_output_tokens == 35
+        assert mock_chat.last_invocation_metrics["input_token_count"] == 1500
+
+
 # ---------------------------------------------------------------------------
 # Stream-as-pending-unit guard (race condition regression)
 # ---------------------------------------------------------------------------

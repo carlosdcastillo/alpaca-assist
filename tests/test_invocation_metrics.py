@@ -117,3 +117,57 @@ class TestInputTokenCapture:
         assert metrics is not None
         assert metrics["input_token_count"] == 16
         assert metrics["output_token_count"] == 8
+
+
+class TestCachedInputTokenCapture:
+    """cached_input_token_count must separate cache reads/writes out of the
+
+    combined input_token_count total, so the client can show how much of
+    the bill was cache-discounted rather than fresh full-price input.
+    """
+
+    def test_cache_read_and_creation_both_counted_as_cached(self) -> None:
+        events = [
+            {
+                "type": "message_start",
+                "message": {
+                    "usage": {
+                        "input_tokens": 100,
+                        "cache_creation_input_tokens": 50,
+                        "cache_read_input_tokens": 850,
+                        "output_tokens": 0,
+                    },
+                },
+            },
+            {"type": "content_block_delta", "delta": {"text": "hi"}},
+            {
+                "type": "message_delta",
+                "delta": {"stop_reason": "end_turn"},
+                "usage": {"output_tokens": 5},
+            },
+        ]
+
+        metrics = _capture_metrics(_make_handler(), events)
+
+        assert metrics is not None
+        assert metrics["input_token_count"] == 1000  # 100 + 50 + 850
+        assert metrics["cached_input_token_count"] == 900  # 50 + 850
+
+    def test_no_cache_fields_means_zero_cached(self) -> None:
+        events = [
+            {
+                "type": "message_start",
+                "message": {"usage": {"input_tokens": 16, "output_tokens": 1}},
+            },
+            {"type": "content_block_delta", "delta": {"text": "hi"}},
+            {
+                "type": "message_delta",
+                "delta": {"stop_reason": "end_turn"},
+                "usage": {"input_tokens": 16, "output_tokens": 8},
+            },
+        ]
+
+        metrics = _capture_metrics(_make_handler(), events)
+
+        assert metrics is not None
+        assert metrics["cached_input_token_count"] == 0

@@ -229,16 +229,24 @@ class StreamProcessor:
                             f"total={total_content}",
                         )
 
-                        # Persist token metrics for webview_api.get_status_info()
+                        # Persist token metrics for webview_api.get_status_info().
+                        # session_* fields accumulate across every call in this
+                        # tab's lifetime (a tool loop alone can be dozens of
+                        # calls) — last_invocation_metrics is the only place
+                        # that reflects a single call in isolation.
                         metrics = data.get("invocation_metrics")
                         if metrics:
                             self._chat.last_invocation_metrics = metrics
-                            self._chat.session_output_tokens = metrics.get(
+                            self._chat.session_output_tokens += metrics.get(
                                 "output_token_count",
                                 0,
                             )
-                            self._chat.session_input_tokens = metrics.get(
+                            self._chat.session_input_tokens += metrics.get(
                                 "input_token_count",
+                                0,
+                            )
+                            self._chat.session_cached_input_tokens += metrics.get(
+                                "cached_input_token_count",
                                 0,
                             )
 

@@ -2533,7 +2533,16 @@ class AlpacaApp {
       `Chat: ${result.char_count.toLocaleString()} chars, ${result.line_count.toLocaleString()} lines`,
     ];
     if (result.session_output_tokens > 0 || result.session_input_tokens > 0) {
-      let tok = `API: in:${result.session_input_tokens.toLocaleString()} out:${result.session_output_tokens.toLocaleString()} tokens`;
+      // "in" already includes cached tokens (both cache writes and cache
+      // reads) — surface how much of it was cache-discounted rather than
+      // billed at full price, so the raw total doesn't read as sticker
+      // shock. cache_read is typically ~10% of input price; cache_creation
+      // is a smaller portion, usually a premium over plain input.
+      let tok = `Session: in:${result.session_input_tokens.toLocaleString()}`;
+      if (result.session_cached_input_tokens > 0) {
+        tok += ` (${result.session_cached_input_tokens.toLocaleString()} cached)`;
+      }
+      tok += ` out:${result.session_output_tokens.toLocaleString()} tokens`;
       if (result.latency_ms) {
         tok += `, ${(result.latency_ms / 1000).toFixed(1)}s`;
       }
