@@ -49,6 +49,18 @@ class ToolHandler:
     # first; only a genuinely hung tool should ever hit this ceiling.
     TOOL_EXECUTION_TIMEOUT_SECONDS = 310.0
 
+    # Coarse tool-result clearing: once a single turn's tool-call loop
+    # exceeds this many call/result pairs, older pairs have their result
+    # content replaced with a stub on subsequent continuation requests.
+    # Bounds worst-case resend growth in long tool loops; see
+    # TOOL_RESULT_CLEARING.md. Deliberately coarse and count-based (not
+    # time-based) to avoid interacting with the prompt-cache TTL.
+    KEEP_LAST_N_TOOL_PAIRS = 15
+    CLEARED_TOOL_RESULT_STUB = (
+        "[tool result cleared to reduce context size — result of this call "
+        "is no longer shown; re-run the tool if you need this again]"
+    )
+
     def __init__(
         self,
         chat_tab: ChatTabBase,
@@ -530,8 +542,18 @@ class ToolHandler:
             if pre_text:
                 messages.append({"role": "assistant", "content": pre_text})
 
-            # Tool call / result pairs
-            for tc, tr in tool_pairs:
+            # Tool call / result pairs. For the turn currently being
+            # continued (i == answer_index), coarsely clear the result
+            # content of pairs older than the last KEEP_LAST_N_TOOL_PAIRS —
+            # bounds resend growth in long tool loops. See
+            # TOOL_RESULT_CLEARING.md. Historical (already-completed)
+            # turns are left untouched.
+            is_current_turn = i == answer_index
+            n_pairs = len(tool_pairs)
+            clear_boundary = (
+                max(0, n_pairs - self.KEEP_LAST_N_TOOL_PAIRS) if is_current_turn else 0
+            )
+            for pair_index, (tc, tr) in enumerate(tool_pairs):
                 call_data = self._parse_for_message(tc.content, tc.id)
                 if call_data:
                     messages.append(
@@ -541,13 +563,23 @@ class ToolHandler:
                             "call": call_data,
                         },
                     )
-                    messages.append(
-                        {
-                            "role": "tool_result",
-                            "content": f"Tool execution result:\n{tr.content}",
-                            "id": tc.id,
-                        },
-                    )
+                    if pair_index < clear_boundary:
+                        result_content = self.CLEARED_TOOL_RESULT_STUB
+                    else:
+                        result_content = f"Tool execution result:\n{tr.content}"
+                    result_msg: dict[str, Any] = {
+                        "role": "tool_result",
+                        "content": result_content,
+                        "id": tc.id,
+                    }
+                    # Second cache breakpoint: the cleared region only ever
+                    # grows by appending identical stub content, so marking
+                    # its end lets later continuation requests in this turn
+                    # keep hitting cache against it instead of paying full
+                    # price for it on every round-trip.
+                    if clear_boundary > 0 and pair_index == clear_boundary - 1:
+                        result_msg["cache_control"] = True
+                    messages.append(result_msg)
 
             # Post-tool continuation text
             post_text = "".join(post_texts).strip()

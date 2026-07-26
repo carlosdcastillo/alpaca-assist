@@ -859,6 +859,100 @@ class TestToolHandlerPrepareContinuationMessages:
         assert len(tool_calls) == 2
         assert len(tool_results) == 2
 
+    @staticmethod
+    def _make_pairs(count: int) -> list[Any]:
+        from chat_state import ToolCall, ToolResult
+
+        components: list[Any] = []
+        for n in range(count):
+            components.append(
+                ToolCall(
+                    f'{{"tool_call": {{"name": "tool{n}"}}}}',
+                    f"tool-{n}",
+                ),
+            )
+            components.append(ToolResult(f"Result {n}", f"tool-{n}"))
+        return components
+
+    def test_prepare_below_threshold_does_not_clear(self) -> None:
+        """Pair count under the threshold: no clearing, unchanged output."""
+        mock_chat = Mock()
+        mock_chat.chat_state.questions = ["Question?"]
+        mock_answer = Mock()
+        mock_answer.components = self._make_pairs(
+            ToolHandler.KEEP_LAST_N_TOOL_PAIRS,
+        )
+        mock_chat.chat_state.answers = [mock_answer]
+
+        callback = Mock()
+        handler = ToolHandler(mock_chat, callback)
+        messages = handler.prepare_continuation_messages(0)
+
+        tool_results = [m for m in messages if m["role"] == "tool_result"]
+        assert len(tool_results) == ToolHandler.KEEP_LAST_N_TOOL_PAIRS
+        assert all(
+            ToolHandler.CLEARED_TOOL_RESULT_STUB not in m["content"]
+            for m in tool_results
+        )
+        assert all("cache_control" not in m for m in tool_results)
+
+    def test_prepare_above_threshold_clears_older_pairs(self) -> None:
+        """Pairs beyond the last N get their result content stubbed."""
+        mock_chat = Mock()
+        mock_chat.chat_state.questions = ["Question?"]
+        total = ToolHandler.KEEP_LAST_N_TOOL_PAIRS + 5
+        mock_answer = Mock()
+        mock_answer.components = self._make_pairs(total)
+        mock_chat.chat_state.answers = [mock_answer]
+
+        callback = Mock()
+        handler = ToolHandler(mock_chat, callback)
+        messages = handler.prepare_continuation_messages(0)
+
+        tool_calls = [m for m in messages if m["role"] == "tool_use_call"]
+        tool_results = [m for m in messages if m["role"] == "tool_result"]
+        assert len(tool_calls) == total  # tool_use blocks never cleared
+        assert len(tool_results) == total
+
+        cleared = [
+            m
+            for m in tool_results
+            if m["content"] == ToolHandler.CLEARED_TOOL_RESULT_STUB
+        ]
+        kept = [m for m in tool_results if m not in cleared]
+        assert len(cleared) == 5
+        assert len(kept) == ToolHandler.KEEP_LAST_N_TOOL_PAIRS
+        # The most recent pairs must be the ones kept at full fidelity.
+        assert "Result 5" in kept[0]["content"]
+        assert "Result " + str(total - 1) in kept[-1]["content"]
+
+        # Second cache breakpoint sits on the last cleared pair's result.
+        breakpoints = [m for m in tool_results if m.get("cache_control")]
+        assert len(breakpoints) == 1
+        assert breakpoints[0] is cleared[-1]
+
+    def test_prepare_does_not_clear_historical_turns(self) -> None:
+        """Clearing only applies to the turn currently being continued."""
+        mock_chat = Mock()
+        mock_chat.chat_state.questions = ["Q1?", "Q2?"]
+        total = ToolHandler.KEEP_LAST_N_TOOL_PAIRS + 5
+
+        historical_answer = Mock()
+        historical_answer.components = self._make_pairs(total)
+        current_answer = Mock()
+        current_answer.components = ["Just text, no tools."]
+        mock_chat.chat_state.answers = [historical_answer, current_answer]
+
+        callback = Mock()
+        handler = ToolHandler(mock_chat, callback)
+        messages = handler.prepare_continuation_messages(1)
+
+        tool_results = [m for m in messages if m["role"] == "tool_result"]
+        assert len(tool_results) == total
+        assert all(
+            m["content"] != ToolHandler.CLEARED_TOOL_RESULT_STUB for m in tool_results
+        )
+
 
 class TestToolHandlerParseForMessage:
     """Tests for _parse_for_message method."""
