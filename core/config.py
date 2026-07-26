@@ -15,6 +15,7 @@ from typing import Any
 DEFAULT_PREFERENCES: dict[str, Any] = {
     "api_url": "http://localhost:11434/api/chat",
     "font_family": "Cascadia Mono",
+    "content_font_family": "Georgia, 'Noto Serif', 'Iowan Old Style', serif",
     "font_size": 12,
     "theme": "dark",
     "agent_skills": {

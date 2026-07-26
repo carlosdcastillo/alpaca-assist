@@ -64,7 +64,6 @@ html, body {
     gap: 0;
     padding: 0 8px;
     background: var(--bg-secondary);
-    border-bottom: 1px solid var(--border-color);
     user-select: none;
 }
 
@@ -151,7 +150,6 @@ html, body {
     gap: 8px;
     padding: 6px 12px;
     background: var(--bg-secondary);
-    border-bottom: 1px solid var(--border-color);
     user-select: none;
 }
 
@@ -246,11 +244,13 @@ html, body {
     border-color: var(--accent-primary);
 }
 
-/* Tab Bar */
+/* Tab Bar — same tone as the menu bar/toolbar above it, so the three read as
+   one chrome region with a single seam (this border) instead of three
+   separately-bordered strips. */
 .tab-bar {
     display: flex;
     align-items: center;
-    background: var(--bg-tertiary);
+    background: var(--bg-secondary);
     border-bottom: 1px solid var(--border-color);
     padding: 4px 8px;
     gap: 4px;
@@ -303,7 +303,7 @@ html, body {
     align-items: center;
     gap: 8px;
     padding: 6px 12px;
-    background: var(--bg-secondary);
+    background: var(--bg-tertiary);
     border: 1px solid var(--border-color);
     border-radius: 4px 4px 0 0;
     cursor: pointer;
@@ -319,7 +319,7 @@ html, body {
     border-bottom-color: var(--bg-primary);
     border-top: 2px solid var(--accent-primary);
     font-weight: 600;
-    box-shadow: 0 -2px 4px rgba(0, 0, 0, 0.1);
+    box-shadow: 0 -1px 0 var(--accent-primary), 0 6px 14px -10px rgba(0, 0, 0, 0.6);
 }
 
 .tab.active .tab-title {
@@ -387,6 +387,7 @@ html, body {
     flex: 1;
     overflow: hidden;
     position: relative;
+    box-shadow: inset 0 6px 10px -8px rgba(0, 0, 0, 0.45);
 }
 
 /* Chat Container */
@@ -396,6 +397,20 @@ html, body {
     padding: 16px;
     background: var(--bg-primary);
     min-height: 100px;
+}
+
+/* Empty-tab hint. :empty only matches while the container has literally no
+   child nodes, so this disappears the moment the first message is added -
+   no JS needed to show or clear it. */
+.chat-container:empty::before {
+    content: "Type a message below to get started \2014  Ctrl+Enter to send.";
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    color: var(--text-muted);
+    font-size: 14px;
+    text-align: center;
 }
 
 .chat-container:focus,
@@ -440,6 +455,9 @@ html, body {
 /* Message Styles */
 .message {
     margin-bottom: 16px;
+    max-width: 760px;
+    margin-left: auto;
+    margin-right: auto;
 }
 
 .message-header {
@@ -455,6 +473,7 @@ html, body {
     font-weight: 600;
     font-size: 12px;
     text-transform: uppercase;
+    letter-spacing: 0.06em;
     color: var(--accent-primary);
 }
 
@@ -464,8 +483,9 @@ html, body {
 }
 
 .message-content {
+    font-family: var(--font-content);
     line-height: 1.8;
-    font-size: 15px;
+    font-size: var(--content-font-size, 16px);
     text-align: justify;
     text-justify: inter-word;
     hyphens: auto;
@@ -555,6 +575,7 @@ html, body {
 .message-content ul, .message-content ol {
     margin: 16px 0;
     padding-left: 32px;
+    text-align: left;
 }
 
 .message-content ul {
@@ -627,6 +648,7 @@ html, body {
     background: var(--bg-secondary);
     border-radius: 0 8px 8px 0;
     font-style: italic;
+    text-align: left;
 }
 
 .message-content blockquote p {
@@ -640,22 +662,20 @@ html, body {
 /* Headings within content */
 .message-content h1, .message-content h2, .message-content h3,
 .message-content h4, .message-content h5, .message-content h6 {
+    font-family: var(--font-content);
     margin-top: 28px;
     margin-bottom: 16px;
     font-weight: 600;
     line-height: 1.3;
+    text-align: left;
 }
 
 .message-content h1 {
-    font-size: 1.8em;
-    border-bottom: 2px solid var(--border-color);
-    padding-bottom: 8px;
+    font-size: 1.65em;
 }
 
 .message-content h2 {
-    font-size: 1.5em;
-    border-bottom: 1px solid var(--border-color);
-    padding-bottom: 6px;
+    font-size: 1.4em;
 }
 
 .message-content h3 {
@@ -751,6 +771,7 @@ a[href^="alpaca://conv/"] {
     border: 1px solid var(--code-border);
     border-radius: 6px;
     overflow: hidden;
+    box-shadow: 0 4px 12px -8px rgba(0, 0, 0, 0.5);
 }
 
 .code-header {
@@ -799,6 +820,7 @@ a[href^="alpaca://conv/"] {
     flex: 0 0 auto;
     height: 220px;
     min-height: 100px;
+    box-shadow: 0 -8px 20px -16px rgba(0, 0, 0, 0.5);
 }
 
 /* Image Attachment Strip */
@@ -1388,7 +1410,8 @@ a[href^="alpaca://conv/"] {
 
 /* Answer wrapper for streaming content */
 .answer-wrapper {
-    margin: 20px 0;
+    margin: 20px auto;
+    max-width: 760px;
 }
 
 /* Answer header with ASSISTANT indicator */
@@ -1405,13 +1428,15 @@ a[href^="alpaca://conv/"] {
     font-weight: 600;
     font-size: 12px;
     text-transform: uppercase;
+    letter-spacing: 0.06em;
     color: var(--success-color);
 }
 
 /* Answer content - same high-end styling as message-content */
 .answer {
+    font-family: var(--font-content);
     line-height: 1.8;
-    font-size: 15px;
+    font-size: var(--content-font-size, 16px);
     text-align: justify;
     text-justify: inter-word;
     hyphens: auto;
@@ -1537,6 +1562,7 @@ a[href^="alpaca://conv/"] {
 /* Headings in answers */
 .answer h1, .answer h2, .answer h3,
 .answer h4, .answer h5, .answer h6 {
+    font-family: var(--font-content);
     margin-top: 28px;
     margin-bottom: 16px;
     font-weight: 600;
@@ -1545,15 +1571,11 @@ a[href^="alpaca://conv/"] {
 }
 
 .answer h1 {
-    font-size: 1.8em;
-    border-bottom: 2px solid var(--border-color);
-    padding-bottom: 8px;
+    font-size: 1.65em;
 }
 
 .answer h2 {
-    font-size: 1.5em;
-    border-bottom: 1px solid var(--border-color);
-    padding-bottom: 6px;
+    font-size: 1.4em;
 }
 
 .answer h3 { font-size: 1.25em; }

@@ -455,11 +455,28 @@ class AlpacaApp {
     const theme = prefs.theme === "light" ? "light" : "dark";
     document.documentElement.setAttribute("data-theme", theme);
 
-    // Font
+    // Font. --font-ui drives chrome (menus, tabs, buttons); --font-content is
+    // the separate reading face for message prose, so switching one doesn't
+    // drag the other along.
     if (prefs.font_family) {
       document.documentElement.style.setProperty(
         "--font-ui",
         prefs.font_family,
+      );
+    }
+    if (prefs.content_font_family) {
+      document.documentElement.style.setProperty(
+        "--font-content",
+        prefs.content_font_family,
+      );
+    }
+    // Message/answer text size. Was read from and saved to preferences.json
+    // but never applied anywhere — the Preferences dialog's Font Size field
+    // did nothing.
+    if (prefs.font_size) {
+      document.documentElement.style.setProperty(
+        "--content-font-size",
+        `${prefs.font_size}px`,
       );
     }
 
@@ -471,7 +488,9 @@ class AlpacaApp {
     // Update preferences dialog fields
     document.getElementById("pref-api-url").value = prefs.api_url || "";
     document.getElementById("pref-font-family").value = prefs.font_family || "";
-    document.getElementById("pref-font-size").value = prefs.font_size || 11;
+    document.getElementById("pref-content-font-family").value =
+      prefs.content_font_family || "";
+    document.getElementById("pref-font-size").value = prefs.font_size || 12;
     document.getElementById("pref-theme").value = theme;
   }
 
@@ -2044,6 +2063,8 @@ class AlpacaApp {
     const preferences = {
       api_url: document.getElementById("pref-api-url").value,
       font_family: document.getElementById("pref-font-family").value,
+      content_font_family: document.getElementById("pref-content-font-family")
+        .value,
       font_size: parseInt(document.getElementById("pref-font-size").value, 10),
       theme: document.getElementById("pref-theme").value,
     };
