@@ -167,31 +167,10 @@ class WebViewAPI:
             tab.handle_user_message(message, images or [])
 
             answer_index: int = getattr(tab, "_current_answer_index", 0)
-            result: dict[str, Any] = {
+            return {
                 "success": True,
                 "answer_index": answer_index,
             }
-
-            # Return graph node info so JS can attach QA bars immediately
-            from conversation_graph import ConversationGraph
-
-            if isinstance(tab.chat_state, ConversationGraph):
-                try:
-                    pairs = tab.chat_state._get_active_pairs()
-                    if 0 <= answer_index < len(pairs):
-                        user_node, _ = pairs[answer_index]
-                        user_siblings = tab.chat_state.get_siblings(user_node.id)
-                        result["user_node_id"] = user_node.id
-                        result["user_sibling_count"] = len(user_siblings)
-                        result["user_position"] = (
-                            user_siblings.index(user_node.id)
-                            if user_node.id in user_siblings
-                            else 0
-                        )
-                except Exception:
-                    pass
-
-            return result
         except Exception as e:
             logger.error(f"Error sending message: {e}")
             return {"success": False, "error": str(e)}
@@ -1021,136 +1000,6 @@ class WebViewAPI:
             logger.error(f"[HANDOFF] Error: {e}")
             return {"success": False, "error": str(e)}
 
-    def navigate_qa(self, tab_id: str, direction: str) -> dict[str, Any]:
-        """Navigate to next/previous Q/A pair."""
-        try:
-            tab = self._app.core.tabs.get(tab_id)
-            if not tab:
-                return {"success": False, "error": "Tab not found"}
-
-            if direction == "next":
-                tab.go_to_next_qa()
-            else:
-                tab.go_to_previous_qa()
-
-            return {"success": True}
-        except Exception as e:
-            logger.error(f"Error navigating Q/A: {e}")
-            return {"success": False, "error": str(e)}
-
-    def fork_conversation(
-        self,
-        tab_id: str,
-        node_id: str,
-        new_question: str = "",
-    ) -> dict[str, Any]:
-        """Fork conversation from a node with a new question.
-
-        The node_id can be either a user or assistant node.  When the fork
-        button is on an answer bar, node_id is the assistant node; we
-        resolve it to its parent user node so fork_from_node() works
-        correctly (it expects a user node ID).
-        """
-        try:
-            tab = self._app.core.tabs.get(tab_id)
-            if not tab:
-                return {"success": False, "error": "Tab not found"}
-
-            # If node_id is an assistant node, resolve to its parent user node
-            from conversation_graph import ConversationGraph
-
-            if isinstance(tab.chat_state, ConversationGraph):
-                node = tab.chat_state.nodes.get(node_id)
-                if node and node.role == "assistant":
-                    # Assistant node's parent is the user node
-                    node_id = node.parent_id or node_id
-
-            result = tab.fork_from_node(node_id, new_question)
-            if result.get("success"):
-                answer_index = result["answer_index"]
-                with self._lock:
-                    self._current_answer_index[tab_id] = answer_index
-                self._safe_evaluate_js(
-                    f"app.onGraphBranchCreated({json.dumps(tab_id)}, {answer_index});",
-                )
-            return result
-        except Exception as e:
-            logger.error(f"Error forking conversation: {e}")
-            return {"success": False, "error": str(e)}
-
-    def regenerate_answer(self, tab_id: str, node_id: str) -> dict[str, Any]:
-        """Regenerate the answer for the pair containing node_id.
-
-        node_id can be either a user or assistant node.  When the regenerate
-        button is on an answer bar, node_id is the assistant node; the
-        ChatTab layer already handles both via _find_pair_index_for_node.
-        """
-        try:
-            tab = self._app.core.tabs.get(tab_id)
-            if not tab:
-                return {"success": False, "error": "Tab not found"}
-            result = tab.regenerate_answer(node_id)
-            if result.get("success"):
-                answer_index = result["answer_index"]
-                with self._lock:
-                    self._current_answer_index[tab_id] = answer_index
-                self._safe_evaluate_js(
-                    f"app.onGraphBranchCreated({json.dumps(tab_id)}, {answer_index});",
-                )
-            return result
-        except Exception as e:
-            logger.error(f"Error regenerating answer: {e}")
-            return {"success": False, "error": str(e)}
-
-    def edit_question(self, tab_id: str, node_id: str, new_text: str) -> dict[str, Any]:
-        """Edit a question and stream a new answer.
-
-        node_id should be a user (question) node since the edit button
-        is on the question bar.
-        """
-        try:
-            tab = self._app.core.tabs.get(tab_id)
-            if not tab:
-                return {"success": False, "error": "Tab not found"}
-            result = tab.edit_question(node_id, new_text)
-            if result.get("success"):
-                answer_index = result["answer_index"]
-                with self._lock:
-                    self._current_answer_index[tab_id] = answer_index
-                self._safe_evaluate_js(
-                    f"app.onGraphBranchCreated({json.dumps(tab_id)}, {answer_index});",
-                )
-            return result
-        except Exception as e:
-            logger.error(f"Error editing question: {e}")
-            return {"success": False, "error": str(e)}
-
-    def navigate_sibling(
-        self,
-        tab_id: str,
-        node_id: str,
-        direction: str,
-    ) -> dict[str, Any]:
-        """Navigate to the previous or next sibling of node_id."""
-        try:
-            from conversation_graph import ConversationGraph
-
-            tab = self._app.core.tabs.get(tab_id)
-            if not tab:
-                return {"success": False, "error": "Tab not found"}
-            if not isinstance(tab.chat_state, ConversationGraph):
-                return {"success": False, "error": "Not a graph conversation"}
-            if direction == "prev":
-                new_id = tab.chat_state.navigate_to_prev_sibling(node_id)
-            else:
-                new_id = tab.chat_state.navigate_to_next_sibling(node_id)
-            if new_id is None:
-                return {"success": False, "error": "No sibling in that direction"}
-            return {"success": True, "new_active_node_id": new_id}
-        except Exception as e:
-            logger.error(f"Error navigating sibling: {e}")
-            return {"success": False, "error": str(e)}
-
     # =======================================================================
     # Python-side methods for pushing updates to web UI
     # =======================================================================
@@ -1217,33 +1066,6 @@ class WebViewAPI:
         self._safe_evaluate_js(
             f"app.onStreamingEnd({json.dumps(tab_id)}, {answer_index});",
         )
-        # Push QA bar info for graph conversations so the answer bar appears after streaming
-        try:
-            from conversation_graph import ConversationGraph
-
-            tab = self._app.core.tabs.get(tab_id)
-            if tab and isinstance(tab.chat_state, ConversationGraph):
-                pairs = tab.chat_state._get_active_pairs()
-                if 0 <= answer_index < len(pairs):
-                    user_node, asst_node = pairs[answer_index]
-                    if asst_node:
-                        asst_siblings = tab.chat_state.get_siblings(asst_node.id)
-                        asst_pos = (
-                            asst_siblings.index(asst_node.id)
-                            if asst_node.id in asst_siblings
-                            else 0
-                        )
-                        qa_info = {
-                            "nodeId": asst_node.id,
-                            "siblingCount": len(asst_siblings),
-                            "position": asst_pos,
-                        }
-                        self._safe_evaluate_js(
-                            f"app.chatDisplay.finalizeAnswerBar"
-                            f"({answer_index}, {json.dumps(qa_info)});",
-                        )
-        except Exception as e:
-            logger.warning(f"Could not push answer QA bar: {e}")
 
     def on_error(self, tab_id: str, message: str, details: str = "") -> None:
         """Push error notification to web UI."""

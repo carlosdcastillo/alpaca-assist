@@ -241,26 +241,6 @@ class PythonAPI {
     return this.call("navigate_to_conv", convId);
   }
 
-  async navigate_qa(tabId, direction) {
-    return this.call("navigate_qa", tabId, direction);
-  }
-
-  async fork_conversation(tabId, nodeId, newQuestion) {
-    return this.call("fork_conversation", tabId, nodeId, newQuestion);
-  }
-
-  async regenerate_answer(tabId, nodeId) {
-    return this.call("regenerate_answer", tabId, nodeId);
-  }
-
-  async edit_question(tabId, nodeId, newText) {
-    return this.call("edit_question", tabId, nodeId, newText);
-  }
-
-  async navigate_sibling(tabId, nodeId, direction) {
-    return this.call("navigate_sibling", tabId, nodeId, direction);
-  }
-
   // =======================================================================
   // Status Bar
   // =======================================================================

@@ -248,23 +248,6 @@ class AlpacaApp {
         }
       });
 
-    // Q/A action events
-    // Q/A action events
-    document.addEventListener("editQuestion", (e) =>
-      this._onEditQuestion(e.detail.nodeId),
-    );
-    // Fork button is on the answer bar; nodeId is an assistant node.
-    // The Python side resolves assistant node IDs to their parent user nodes.
-    document.addEventListener("forkConversation", (e) =>
-      this._onForkConversation(e.detail.nodeId),
-    );
-    document.addEventListener("regenerateAnswer", (e) =>
-      this._onRegenerateAnswer(e.detail.nodeId),
-    );
-    document.addEventListener("navigateSibling", (e) =>
-      this._onNavigateSibling(e.detail.nodeId, e.detail.direction),
-    );
-
     // Splitter drag events
     this._setupSplitter();
 
@@ -538,16 +521,6 @@ class AlpacaApp {
       // Chat menu
       case "submit":
         this.submit_current_tab();
-        break;
-      case "next-qa":
-        if (this.currentTabId) {
-          await this.api.navigate_qa(this.currentTabId, "next");
-        }
-        break;
-      case "prev-qa":
-        if (this.currentTabId) {
-          await this.api.navigate_qa(this.currentTabId, "prev");
-        }
         break;
       case "compact":
         if (this.currentTabId) {
@@ -1431,19 +1404,6 @@ class AlpacaApp {
   }
 
   /**
-   * Called by Python when a graph branch is created (edit/regen/fork).
-   * Reloads the conversation display so the new branch is rendered,
-   * then streaming content fills in the new answer.
-   */
-  async onGraphBranchCreated(tabId, answerIndex) {
-    if (tabId !== this.currentTabId) return;
-    await this._reloadConversationDisplay();
-    // Update streaming state so the toolbar shows the right indicator
-    this.inputArea.setStreaming(true);
-    this.tabManager.setTabStreaming(tabId, true);
-  }
-
-  /**
    * Show about dialog
    */
   async _showAboutDialog() {
@@ -1558,16 +1518,7 @@ class AlpacaApp {
       nodeId = node.parent_id ?? null;
     }
 
-    // Build children index for sibling counting
-    const childrenIndex = {};
-    for (const [id, node] of Object.entries(graph.nodes)) {
-      if (node.parent_id != null) {
-        childrenIndex[node.parent_id] = childrenIndex[node.parent_id] || [];
-        childrenIndex[node.parent_id].push(id);
-      }
-    }
-
-    // Walk active path, pairing user/assistant nodes and rendering with QA bars
+    // Walk active path, pairing user/assistant nodes and rendering them.
     let answerIndex = 0;
     let pendingUserId = null;
 
@@ -1580,21 +1531,7 @@ class AlpacaApp {
       } else if (node.role === "assistant" && pendingUserId !== null) {
         const userNode = graph.nodes[pendingUserId];
 
-        // Sibling info for the user (question) node.
-        // For root-level nodes (parent_id == null), siblings are all root-level nodes —
-        // mirrors Python's get_siblings() which returns [n for n in nodes if n.parent_id is None].
-        let userSiblings;
-        if (userNode.parent_id != null) {
-          userSiblings = childrenIndex[userNode.parent_id] || [pendingUserId];
-        } else {
-          userSiblings = Object.keys(graph.nodes).filter(
-            (nid) => graph.nodes[nid].parent_id == null,
-          );
-          if (userSiblings.length === 0) userSiblings = [pendingUserId];
-        }
-        const userPos = userSiblings.indexOf(pendingUserId);
-
-        // Render question with QA bar
+        // Render question
         const images = (userNode.images || []).map((b64) =>
           this._base64ToDataUri(b64),
         );
@@ -1607,15 +1544,7 @@ class AlpacaApp {
                   .map((c) => (typeof c === "string" ? c : c.content))
                   .join("")
               : "";
-        this.chatDisplay.addQuestion(questionText, images, {
-          nodeId: pendingUserId,
-          siblingCount: userSiblings.length,
-          position: userPos,
-        });
-
-        // Sibling info for the assistant (answer) node
-        const asstSiblings = childrenIndex[pendingUserId] || [id];
-        const asstPos = asstSiblings.indexOf(id);
+        this.chatDisplay.addQuestion(questionText, images);
 
         // Render answer content
         const content = node.content;
@@ -1627,18 +1556,8 @@ class AlpacaApp {
               answer_index: answerIndex,
               is_done: true,
             });
-            this.chatDisplay.finalizeAnswerBar(answerIndex, {
-              nodeId: id,
-              siblingCount: asstSiblings.length,
-              position: asstPos,
-            });
           } else if (content.components && content.components.length > 0) {
             this._renderFullAnswer(content, answerIndex);
-            this.chatDisplay.finalizeAnswerBar(answerIndex, {
-              nodeId: id,
-              siblingCount: asstSiblings.length,
-              position: asstPos,
-            });
           }
         }
 
@@ -1849,23 +1768,10 @@ class AlpacaApp {
     this.inputArea.setStreaming(true);
     this.tabManager.setTabStreaming(this.currentTabId, true);
 
-    // Send to Python — returns node info for QA bar (fast call, just starts a thread)
+    // Send to Python (fast call, just starts a thread)
     try {
-      const result = await this.api.send_message(
-        this.currentTabId,
-        text,
-        base64s,
-      );
-      // Add question to display with QA bar if node info is available
-      const qaInfo =
-        result && result.user_node_id
-          ? {
-              nodeId: result.user_node_id,
-              siblingCount: result.user_sibling_count || 1,
-              position: result.user_position || 0,
-            }
-          : null;
-      this.chatDisplay.addQuestion(text, dataUris, qaInfo);
+      await this.api.send_message(this.currentTabId, text, base64s);
+      this.chatDisplay.addQuestion(text, dataUris);
     } catch (e) {
       // Nothing was actually persisted on the Python side, so don't show a
       // bubble implying it was sent — restore the text instead so it isn't
@@ -2025,177 +1931,6 @@ class AlpacaApp {
         foldData.type,
         foldData.fold_id,
       );
-    }
-  }
-
-  // =======================================================================
-  // Q/A Actions
-  // =======================================================================
-
-  async _onEditQuestion(nodeId) {
-    if (!this.currentTabId) return;
-    if (this.tabManager.isTabStreaming(this.currentTabId)) return;
-
-    const container = this.chatDisplay.container;
-
-    // Only one inline editor at a time
-    if (container.querySelector(".inline-edit-container")) return;
-
-    const msgEl = container.querySelector(
-      `.message.question[data-node-id="${nodeId}"]`,
-    );
-    if (!msgEl) return;
-
-    const contentEl = msgEl.querySelector(".message-content");
-    const rawText =
-      msgEl.dataset.rawText || contentEl?.textContent?.trim() || "";
-
-    const editorEl = document.createElement("div");
-    editorEl.className = "inline-edit-container";
-    editorEl.innerHTML = `
-      <textarea class="inline-edit-textarea"></textarea>
-      <div class="inline-edit-hint">Ctrl+Enter to save · Esc to cancel</div>
-      <div class="inline-edit-actions">
-        <button class="inline-edit-save">Save</button>
-        <button class="inline-edit-cancel">Cancel</button>
-      </div>`;
-    editorEl.querySelector(".inline-edit-textarea").value = rawText;
-
-    contentEl.style.display = "none";
-    msgEl.appendChild(editorEl);
-
-    const textarea = editorEl.querySelector(".inline-edit-textarea");
-    textarea.focus();
-    textarea.setSelectionRange(textarea.value.length, textarea.value.length);
-
-    const cleanup = () => {
-      editorEl.remove();
-      contentEl.style.display = "";
-    };
-
-    const save = async () => {
-      const newText = textarea.value.trim();
-      if (!newText) {
-        cleanup();
-        return;
-      }
-      cleanup();
-      const result = await this.api.edit_question(
-        this.currentTabId,
-        nodeId,
-        newText,
-      );
-      if (!result.success) {
-        this._showError(result.error || "Could not edit question");
-      }
-    };
-
-    editorEl.querySelector(".inline-edit-save").addEventListener("click", save);
-    editorEl
-      .querySelector(".inline-edit-cancel")
-      .addEventListener("click", cleanup);
-    textarea.addEventListener("keydown", (e) => {
-      if (e.key === "Escape") cleanup();
-      if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) save();
-    });
-  }
-
-  async _onForkConversation(nodeId) {
-    if (!this.currentTabId) return;
-    if (this.tabManager.isTabStreaming(this.currentTabId)) return;
-
-    const container = this.chatDisplay.container;
-
-    // Only one fork panel at a time
-    if (container.querySelector(".inline-fork-container")) return;
-
-    // Place the fork panel after the answer wrapper that follows this question
-    const msgEl = container.querySelector(
-      `.message.question[data-node-id="${nodeId}"]`,
-    );
-    const anchor = msgEl?.nextElementSibling?.classList.contains(
-      "answer-wrapper",
-    )
-      ? msgEl.nextElementSibling
-      : msgEl;
-
-    const forkEl = document.createElement("div");
-    forkEl.className = "inline-fork-container";
-    forkEl.innerHTML = `
-      <div class="inline-fork-label">Fork — new follow-up question</div>
-      <textarea class="inline-fork-textarea" placeholder="Enter your question..."></textarea>
-      <div class="inline-fork-hint">Ctrl+Enter to submit · Esc to cancel</div>
-      <div class="inline-fork-actions">
-        <button class="inline-fork-submit">Submit</button>
-        <button class="inline-fork-cancel">Cancel</button>
-      </div>`;
-
-    anchor ? anchor.after(forkEl) : container.appendChild(forkEl);
-    forkEl.scrollIntoView({ block: "nearest" });
-
-    const textarea = forkEl.querySelector(".inline-fork-textarea");
-    textarea.focus();
-
-    const cleanup = () => forkEl.remove();
-
-    const submit = async () => {
-      const newQuestion = textarea.value.trim();
-      if (!newQuestion) {
-        cleanup();
-        return;
-      }
-      cleanup();
-      const result = await this.api.fork_conversation(
-        this.currentTabId,
-        nodeId,
-        newQuestion,
-      );
-      if (!result.success) {
-        this._showError(result.error || "Could not fork conversation");
-      }
-    };
-
-    forkEl
-      .querySelector(".inline-fork-submit")
-      .addEventListener("click", submit);
-    forkEl
-      .querySelector(".inline-fork-cancel")
-      .addEventListener("click", cleanup);
-    textarea.addEventListener("keydown", (e) => {
-      if (e.key === "Escape") cleanup();
-      if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) submit();
-    });
-  }
-
-  async _onRegenerateAnswer(nodeId) {
-    if (!this.currentTabId) return;
-    if (this.tabManager.isTabStreaming(this.currentTabId)) return;
-
-    // nodeId is the assistant node.  _find_pair_index_for_node on the
-    // Python side accepts either user or assistant node IDs, so we can
-    // pass it directly.
-    const result = await this.api.regenerate_answer(this.currentTabId, nodeId);
-    if (!result.success) {
-      await this._showAlert(
-        `Could not regenerate: ${result.error || "unknown error"}`,
-      );
-    }
-    // onGraphBranchCreated will be pushed by Python to reload the display
-  }
-
-  async _onNavigateSibling(nodeId, direction) {
-    if (!this.currentTabId) return;
-    if (this.tabManager.isTabStreaming(this.currentTabId)) return;
-
-    const result = await this.api.navigate_sibling(
-      this.currentTabId,
-      nodeId,
-      direction,
-    );
-    if (result.success) {
-      const prevScrollTop = this.chatDisplay.container.scrollTop;
-      await this._reloadConversationDisplay();
-      this.chatDisplay.container.scrollTop = prevScrollTop;
     }
   }
 

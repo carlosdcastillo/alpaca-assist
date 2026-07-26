@@ -82,10 +82,6 @@ describe("PythonAPI", () => {
       export_conversation: jest.fn().mockResolvedValue({ success: true }),
       compact_conversation: jest.fn().mockResolvedValue({ success: true }),
       truncate_conversation: jest.fn().mockResolvedValue({ success: true }),
-      navigate_qa: jest.fn().mockResolvedValue({ success: true }),
-      fork_conversation: jest.fn().mockResolvedValue({ success: true }),
-      regenerate_answer: jest.fn().mockResolvedValue({ success: true }),
-      edit_question: jest.fn().mockResolvedValue({ success: true }),
       get_status_info: jest.fn().mockResolvedValue({
         success: true,
         char_count: 100,

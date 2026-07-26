@@ -814,14 +814,10 @@ class ChatDisplay {
    * Add a question message.
    * @param {string} text - The question text.
    * @param {string[]} images - Array of data URI strings for image previews.
-   * @param {Object|null} qaInfo - Optional { nodeId, siblingCount, position } for QA bar.
    */
-  addQuestion(text, images = [], qaInfo = null) {
+  addQuestion(text, images = []) {
     const messageEl = document.createElement("div");
     messageEl.className = "message question";
-    if (qaInfo && qaInfo.nodeId) {
-      messageEl.dataset.nodeId = qaInfo.nodeId;
-    }
     messageEl.dataset.rawText = text;
 
     const headerEl = document.createElement("div");
@@ -850,51 +846,9 @@ class ChatDisplay {
     messageEl.appendChild(headerEl);
     messageEl.appendChild(contentEl);
 
-    // Add QA action bar for question if node info is available (before content)
-    if (qaInfo && qaInfo.nodeId) {
-      const qaBar = document.createElement("qa-bar");
-      qaBar.setAttribute("data-node-id", qaInfo.nodeId);
-      qaBar.setAttribute("data-kind", "question");
-      qaBar.setAttribute("data-position", String(qaInfo.position ?? 0));
-      qaBar.setAttribute(
-        "data-sibling-count",
-        String(qaInfo.siblingCount ?? 1),
-      );
-      qaBar.contentEditable = "false";
-      messageEl.insertBefore(qaBar, contentEl);
-    }
-
     this.container.appendChild(messageEl);
 
     this.scrollToBottom();
-  }
-
-  /**
-   * Append a QA action bar to an answer wrapper after streaming completes.
-   * @param {number} answerIndex - The answer buffer index.
-   * @param {Object} qaInfo - { nodeId, siblingCount, position }
-   */
-  finalizeAnswerBar(answerIndex, qaInfo) {
-    if (!qaInfo || !qaInfo.nodeId) return;
-    const bd = this.answerBuffers.get(answerIndex);
-    if (!bd || !bd.answerWrapper) return;
-
-    // Don't add duplicate bars
-    if (bd.answerWrapper.querySelector("qa-bar[data-kind='answer']")) return;
-
-    const qaBar = document.createElement("qa-bar");
-    qaBar.setAttribute("data-node-id", qaInfo.nodeId);
-    qaBar.setAttribute("data-kind", "answer");
-    qaBar.setAttribute("data-position", String(qaInfo.position ?? 0));
-    qaBar.setAttribute("data-sibling-count", String(qaInfo.siblingCount ?? 1));
-    qaBar.contentEditable = "false";
-    // Insert after the header (first child) so the bar appears before content
-    const header = bd.answerWrapper.children[0];
-    if (header && header.nextSibling) {
-      bd.answerWrapper.insertBefore(qaBar, header.nextSibling);
-    } else {
-      bd.answerWrapper.appendChild(qaBar);
-    }
   }
 
   /**
