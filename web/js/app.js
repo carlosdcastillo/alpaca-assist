@@ -527,9 +527,6 @@ class AlpacaApp {
       case "paste":
         this._pasteText();
         break;
-      case "copy-code":
-        this._copyCodeBlock();
-        break;
       case "find":
         this._showFindDialog();
         break;
@@ -763,14 +760,6 @@ class AlpacaApp {
     if (focused && focused.tagName === "TEXTAREA") {
       document.execCommand("paste");
     }
-  }
-
-  /**
-   * Copy code block at cursor
-   */
-  _copyCodeBlock() {
-    // TODO: Implement code block detection and copying
-    console.log("Copy code block - not yet implemented");
   }
 
   /**
