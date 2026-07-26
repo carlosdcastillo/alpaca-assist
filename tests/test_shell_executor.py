@@ -341,8 +341,16 @@ class TestShellExecutorParseCommand:
         self,
         shell_executor: ShellExecutor,
     ) -> None:
-        """A bare, unquoted Windows path (no spaces) needs no quoting at all."""
-        result = shell_executor._parse_command("dir C:\\Users\\Carlos")
+        """A bare, unquoted Windows path (no spaces) needs no quoting at all.
+
+        This exercises Windows-only parsing behavior, so `platform.system`
+        is patched — otherwise on non-Windows hosts `_parse_command` falls
+        through to POSIX `shlex.split`, which (unlike `_split_windows_command`)
+        treats backslash as an escape character even outside quotes and
+        strips it from the path.
+        """
+        with patch("shell_executor.platform.system", return_value="Windows"):
+            result = shell_executor._parse_command("dir C:\\Users\\Carlos")
 
         assert "C:\\Users\\Carlos" in result
 
