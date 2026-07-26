@@ -463,10 +463,14 @@ class AlpacaApp {
    * Apply preferences to UI
    */
   _applyPreferences(prefs) {
-    // Theme
-    if (prefs.theme) {
-      document.documentElement.setAttribute("data-theme", prefs.theme);
-    }
+    // Theme. Only "dark" (the default, no attribute needed) and "light"
+    // (web/css/themes.css [data-theme="light"]) are real themes. A stale or
+    // otherwise unrecognized value (e.g. a preferences.json predating this
+    // check) silently falls back to dark instead of setting an attribute
+    // nothing styles and leaving the Preferences dialog's Theme dropdown
+    // blank.
+    const theme = prefs.theme === "light" ? "light" : "dark";
+    document.documentElement.setAttribute("data-theme", theme);
 
     // Font
     if (prefs.font_family) {
@@ -485,7 +489,7 @@ class AlpacaApp {
     document.getElementById("pref-api-url").value = prefs.api_url || "";
     document.getElementById("pref-font-family").value = prefs.font_family || "";
     document.getElementById("pref-font-size").value = prefs.font_size || 11;
-    document.getElementById("pref-theme").value = prefs.theme || "dark";
+    document.getElementById("pref-theme").value = theme;
   }
 
   /**

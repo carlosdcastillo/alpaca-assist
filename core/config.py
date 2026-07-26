@@ -2,19 +2,21 @@
 from pathlib import Path
 from typing import Any
 
-# Preferences defaults
+# Preferences defaults.
+#
+# Keep this list to keys something actually reads — a handful of prior
+# entries (default_model, summary_model, window_geometry, background_color,
+# max_undo_levels, chat_update_throttle, ui_update_interval) had no reader
+# anywhere in the codebase and only added confusion to the preferences
+# surface. "theme" previously defaulted to "nord", a value neither
+# web/css/themes.css nor the Preferences dialog's Theme dropdown implements
+# (only "dark"/"light" are real) — new users got a preferences.json with an
+# unrecognized theme, which rendered as a blank Theme dropdown.
 DEFAULT_PREFERENCES: dict[str, Any] = {
     "api_url": "http://localhost:11434/api/chat",
-    "default_model": "granite-code:8b",
-    "summary_model": "codellama:13b",
     "font_family": "Cascadia Mono",
     "font_size": 12,
-    "theme": "nord",  # Default to nord theme for dark background
-    "background_color": "black",
-    "window_geometry": "600x800+100+100",
-    "ui_update_interval": 500,
-    "max_undo_levels": -1,
-    "chat_update_throttle": 0.1,
+    "theme": "dark",
     "agent_skills": {
         "enabled": True,
         "directories": [],
