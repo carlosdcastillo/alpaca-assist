@@ -7,6 +7,7 @@ import tempfile
 import threading
 import time
 from pathlib import Path
+from unittest.mock import MagicMock
 from unittest.mock import patch
 
 import pytest
@@ -471,3 +472,67 @@ class TestAppCoreIntegration:
         # Should have both questions
         if "questions" in chat_state:
             assert len(chat_state["questions"]) == 2
+
+
+class TestAppCoreCopyToClipboard:
+    """Tests for copy_to_clipboard (backs the code-block Copy button)."""
+
+    @pytest.fixture
+    def temp_dir(self, tmp_path):
+        original_dir = os.getcwd()
+        os.chdir(tmp_path)
+        yield tmp_path
+        os.chdir(original_dir)
+
+    @pytest.fixture
+    def core(self, temp_dir):
+        class MockAPI:
+            pass
+
+        return AppCore(api=MockAPI())
+
+    def test_uses_gtk_clipboard_when_available(self, core):
+        """GTK path: set_text + store called, returns True."""
+        mock_clipboard = MagicMock()
+        mock_gtk_module = MagicMock()
+        mock_gtk_module.Gtk.Clipboard.get.return_value = mock_clipboard
+        mock_gi_module = MagicMock()
+        mock_gi_module.repository = mock_gtk_module
+
+        with patch.dict(
+            "sys.modules",
+            {
+                "gi": mock_gi_module,
+                "gi.repository": mock_gtk_module,
+                "gi.repository.Gtk": mock_gtk_module.Gtk,
+                "gi.repository.Gdk": mock_gtk_module.Gdk,
+            },
+        ):
+            result = core.copy_to_clipboard("hello from a code block")
+
+        assert result is True
+        mock_clipboard.set_text.assert_called_once_with(
+            "hello from a code block",
+            -1,
+        )
+        mock_clipboard.store.assert_called_once()
+
+    def test_falls_back_to_pyperclip_when_gtk_unavailable(self, core):
+        """No gi module: falls back to pyperclip.copy, returns True."""
+        with patch.dict("sys.modules", {"gi": None}):
+            with patch("core.app_core.pyperclip.copy") as mock_copy:
+                result = core.copy_to_clipboard("fallback text")
+
+        assert result is True
+        mock_copy.assert_called_once_with("fallback text")
+
+    def test_returns_false_when_both_backends_fail(self, core):
+        """Neither GTK nor pyperclip available: returns False, doesn't raise."""
+        with patch.dict("sys.modules", {"gi": None}):
+            with patch(
+                "core.app_core.pyperclip.copy",
+                side_effect=Exception("no clipboard mechanisms for this system"),
+            ):
+                result = core.copy_to_clipboard("unreachable clipboard")
+
+        assert result is False

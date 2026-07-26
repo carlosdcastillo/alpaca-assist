@@ -403,6 +403,36 @@ class AppCore:
         except Exception as e:
             logger.error(f"Error exporting to HTML: {e}")
 
+    def copy_to_clipboard(self, text: str) -> bool:
+        """Copy text to the system clipboard.
+
+        Backs the code-block Copy button. Goes through GTK directly rather
+        than the browser's navigator.clipboard API — WebKit2GTK's clipboard
+        permission handling isn't implemented by pywebview, so the browser
+        API silently rejects there. GTK talks to the display server (X11 or
+        XWayland) directly and needs no external clipboard binary (xclip,
+        wl-copy, ...). Falls back to pyperclip for non-GTK platforms.
+        """
+        try:
+            import gi
+
+            gi.require_version("Gtk", "3.0")
+            from gi.repository import Gdk
+            from gi.repository import Gtk
+
+            clipboard = Gtk.Clipboard.get(Gdk.SELECTION_CLIPBOARD)
+            clipboard.set_text(text, -1)
+            clipboard.store()
+            return True
+        except Exception as e:
+            logger.warning(f"GTK clipboard copy failed, trying pyperclip: {e}")
+            try:
+                pyperclip.copy(text)
+                return True
+            except Exception as e2:
+                logger.error(f"Clipboard copy failed: {e2}")
+                return False
+
     @staticmethod
     def _mime_from_b64(b64: str) -> str:
         """Detect image MIME type from leading base64 characters (magic bytes)."""

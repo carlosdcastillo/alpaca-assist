@@ -94,6 +94,15 @@ class WebViewAPI:
             logger.error(f"Error creating tab: {e}")
             return {"success": False, "error": str(e)}
 
+    def copy_to_clipboard(self, text: str) -> dict[str, Any]:
+        """Copy text to the system clipboard — used by code-block Copy buttons."""
+        try:
+            success = self._app.core.copy_to_clipboard(text)
+            return {"success": success}
+        except Exception as e:
+            logger.error(f"Error copying to clipboard: {e}")
+            return {"success": False, "error": str(e)}
+
     def save_and_close(self) -> dict[str, Any]:
         """Save the session then close the window.
 
