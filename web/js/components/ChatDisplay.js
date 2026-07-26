@@ -72,8 +72,10 @@ class ChatDisplay {
   _configureMarked() {
     const renderer = new marked.Renderer();
 
-    // Custom code block rendering with header and copy button
-    renderer.code = (code, language) => {
+    // Custom code block rendering with header and copy button.
+    // marked v5+ calls renderer.code with a single token object
+    // ({ text, lang, ... }) instead of positional (code, language) args.
+    renderer.code = ({ text: code, lang: language }) => {
       const escapedCode = this._escapeHtml(code);
       // Guard against unknown language identifiers (e.g. "bash configuration")
       // that hljs.highlight() throws on, which would abort the entire render loop.
