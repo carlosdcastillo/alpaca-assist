@@ -140,7 +140,12 @@ class SummaryHandler:
                 {"role": "user", "content": summary_prompt},
             ]
 
-            selected_model = self._chat.preferences.get("model", "llama3.1")
+            # "llama3.1" was a leftover from an old local-Ollama setup and
+            # isn't one of this app's actual models — fall back to the
+            # server's own default instead of a name nothing here offers.
+            from anthropic_ollama_server import DEFAULT_MODEL
+
+            selected_model = self._chat.preferences.get("model", DEFAULT_MODEL)
             payload: dict[str, Any] = {
                 "model": selected_model,
                 "messages": messages,

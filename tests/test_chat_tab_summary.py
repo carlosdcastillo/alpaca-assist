@@ -137,6 +137,39 @@ class TestSummaryHandlerFetch:
         result = summary_queue.get(timeout=1)
         assert result == "Programming Language Overview"
 
+    def test_fetch_falls_back_to_default_model_when_unset(self) -> None:
+        """If preferences has no "model" key, request the app's real default —
+
+        not the "llama3.1" placeholder from an old local-Ollama setup, which
+        isn't one of this app's actual models.
+        """
+        from anthropic_ollama_server import DEFAULT_MODEL
+
+        mock_chat = Mock()
+        mock_chat.chat_state.get_safe_copy_full.return_value = (
+            ["What is Python?"],
+            [FullAnswer(["Python is a programming language."])],
+            None,
+        )
+        mock_chat.preferences = {"api_url": "http://localhost:11434"}
+        mock_chat._app_core.api = Mock()
+
+        handler = SummaryHandler(mock_chat)
+        summary_queue: queue.Queue[str] = queue.Queue()
+
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.__enter__ = Mock(return_value=mock_response)
+        mock_response.__exit__ = Mock(return_value=False)
+        mock_response.iter_lines.return_value = [
+            '{"message": {"content": "Summary"}, "done": true}',
+        ]
+
+        with patch("requests.post", return_value=mock_response) as mock_post:
+            handler._fetch(summary_queue)
+
+        assert mock_post.call_args.kwargs["json"]["model"] == DEFAULT_MODEL
+
     def test_fetch_api_error_puts_fallback(self) -> None:
         """Test that _fetch puts fallback on API error."""
         mock_chat = Mock()

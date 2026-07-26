@@ -108,9 +108,14 @@ class StreamingHandler:
             else []
         )
 
+        # "llama3.1" was a leftover from an old local-Ollama setup and isn't
+        # one of this app's actual models — fall back to the server's own
+        # default instead of a name nothing here offers.
+        from anthropic_ollama_server import DEFAULT_MODEL
+
         data_payload: dict[str, Any] = {
             "prompt": message,
-            "model": self._chat.preferences.get("model", "llama3.1"),
+            "model": self._chat.preferences.get("model", DEFAULT_MODEL),
             "chat_history_questions": self._chat.chat_state.questions.copy(),
             "chat_history_answers": [
                 a.get_text_only_content() for a in self._chat.chat_state.answers
@@ -188,9 +193,14 @@ class StreamingHandler:
             messages = self._tool_handler.prepare_continuation_messages(answer_index)
             logger.info(f"[CONTINUATION] Prepared {len(messages)} messages")
 
+            # "llama3.1" was a leftover from an old local-Ollama setup and
+            # isn't one of this app's actual models — fall back to the
+            # server's own default instead of a name nothing here offers.
+            from anthropic_ollama_server import DEFAULT_MODEL
+
             # Create continuation payload
             ollama_payload: dict[str, Any] = {
-                "model": self._chat.preferences.get("model", "llama3.1"),
+                "model": self._chat.preferences.get("model", DEFAULT_MODEL),
                 "messages": messages,
                 "stream": True,
             }
@@ -284,11 +294,16 @@ class StreamingHandler:
             if prompt_images and messages and messages[-1].get("role") == "user":
                 messages[-1] = {**messages[-1], "images": prompt_images}
 
+            # "llama3.1" was a leftover from an old local-Ollama setup and
+            # isn't one of this app's actual models — fall back to the
+            # server's own default instead of a name nothing here offers.
+            from anthropic_ollama_server import DEFAULT_MODEL
+
             # Create Ollama payload
             ollama_payload: dict[str, Any] = {
                 "model": data_payload.get(
                     "model",
-                    self._chat.preferences.get("model", "llama3.1"),
+                    self._chat.preferences.get("model", DEFAULT_MODEL),
                 ),
                 "messages": messages,
                 "stream": True,
