@@ -1427,7 +1427,15 @@ class AlpacaApp {
    */
   async _showAboutDialog() {
     const aboutText =
-      "Version 0.11\n\nA chat application using the Ollama API.";
+      "Version 0.11\n\n" +
+      "Alpaca Assist is a desktop AI assistant that can act, not just " +
+      "answer — it calls tools, runs shell commands, and reads and edits " +
+      "files as it works through a task, with support for external tools " +
+      "and services through MCP (Model Context Protocol).\n\n" +
+      "• Anthropic Claude, Fireworks AI, and local models, side by side\n" +
+      "• Agentic tool calling: files, shell commands, MCP servers\n" +
+      "• Agent Skills for extending what it can do\n" +
+      "• Multi-tab conversations with searchable history";
     await this._showAlert(aboutText, "About Alpaca Assist");
   }
 
