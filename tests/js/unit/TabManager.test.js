@@ -35,6 +35,7 @@ describe("TabManager", () => {
 
     mockApi = {
       create_tab: jest.fn(),
+      create_pack_tab: jest.fn(),
       close_tab: jest.fn(),
       switch_tab: jest.fn(),
     };
@@ -146,6 +147,46 @@ describe("TabManager", () => {
       expect(eventHandler.mock.calls[0][0].detail.tabId).toBe("tab-1-abc123");
 
       document.removeEventListener("tabCreated", eventHandler);
+    });
+  });
+
+  describe("createPackTab()", () => {
+    it("should call Python with the given host", async () => {
+      mockApi.create_pack_tab.mockResolvedValue({
+        success: true,
+        tab_id: "tab-2-def456",
+        conversation_id: 7,
+      });
+
+      await tabManager.createPackTab("user@host");
+
+      expect(mockApi.create_pack_tab).toHaveBeenCalledWith("user@host");
+    });
+
+    it("should create tab UI tagged as pack on success", async () => {
+      mockApi.create_pack_tab.mockResolvedValue({
+        success: true,
+        tab_id: "tab-2-def456",
+        conversation_id: 7,
+      });
+
+      const tabId = await tabManager.createPackTab("user@host");
+
+      expect(tabId).toBe("tab-2-def456");
+      const button = container.querySelector('[data-tab-id="tab-2-def456"]');
+      expect(button.classList.contains("pack")).toBe(true);
+      expect(tabManager.tabs.get("tab-2-def456").isPack).toBe(true);
+    });
+
+    it("should return null on failure", async () => {
+      mockApi.create_pack_tab.mockResolvedValue({
+        success: false,
+        error: "unreachable",
+      });
+
+      const tabId = await tabManager.createPackTab("user@host");
+
+      expect(tabId).toBeNull();
     });
   });
 
@@ -321,6 +362,33 @@ describe("TabManager", () => {
       await Promise.resolve();
 
       expect(tabManager.tabs.has("tab-1-abc123")).toBe(false);
+    });
+  });
+
+  describe("setTabOffline()", () => {
+    beforeEach(() => {
+      tabManager.createTabUI("tab-1-abc123", "Test Tab", false, true);
+    });
+
+    it("should add the offline class when true", () => {
+      tabManager.setTabOffline("tab-1-abc123", true);
+
+      const button = container.querySelector('[data-tab-id="tab-1-abc123"]');
+      expect(button.classList.contains("offline")).toBe(true);
+      expect(tabManager.tabs.get("tab-1-abc123").isOffline).toBe(true);
+    });
+
+    it("should remove the offline class when false", () => {
+      tabManager.setTabOffline("tab-1-abc123", true);
+      tabManager.setTabOffline("tab-1-abc123", false);
+
+      const button = container.querySelector('[data-tab-id="tab-1-abc123"]');
+      expect(button.classList.contains("offline")).toBe(false);
+      expect(tabManager.tabs.get("tab-1-abc123").isOffline).toBe(false);
+    });
+
+    it("should do nothing for a non-existent tab", () => {
+      expect(() => tabManager.setTabOffline("nope", true)).not.toThrow();
     });
   });
 

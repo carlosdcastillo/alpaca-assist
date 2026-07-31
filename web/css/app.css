@@ -342,6 +342,27 @@ html, body {
     margin-left: 4px;
 }
 
+/* Pack tab badge — a small glyph before the title, marking a tab whose
+   backend runs on a remote host over SSH instead of locally. */
+.tab.pack .tab-title::before {
+    content: '\1F517';  /* chain link emoji - broader font-fallback coverage
+                            than the text-mode chains symbol (U+26D3), which
+                            renders as tofu in Cascadia Mono */
+    margin-right: 4px;
+    font-size: 11px;
+}
+
+/* Offline state: the remote daemon is unreachable (host down, SSH
+   dropped, or connection not yet established). Retried opportunistically
+   on tab click (switch_tab) or the next message send. */
+.tab.offline {
+    opacity: 0.7;
+}
+
+.tab.offline .tab-title::before {
+    color: var(--error-color);
+}
+
 .tab-title {
     flex: 1;
     overflow: hidden;

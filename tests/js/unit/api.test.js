@@ -36,6 +36,10 @@ describe("PythonAPI", () => {
         success: true,
         tab_id: "tab-1-abc123", // String ID like real implementation
       }),
+      create_pack_tab: jest.fn().mockResolvedValue({
+        success: true,
+        tab_id: "tab-2-def456",
+      }),
       close_tab: jest.fn().mockResolvedValue({ success: true }),
       get_tabs: jest.fn().mockResolvedValue({ success: true, tabs: [] }),
       switch_tab: jest.fn().mockResolvedValue({ success: true }),
@@ -215,6 +219,25 @@ describe("PythonAPI", () => {
 
       await api.create_tab("Custom Title");
       expect(mockPythonAPI.create_tab).toHaveBeenCalledWith("Custom Title");
+    });
+
+    it("create_pack_tab() should call Python with host and title", async () => {
+      const result = await api.create_pack_tab("user@host", "My Pack");
+
+      expect(mockPythonAPI.create_pack_tab).toHaveBeenCalledWith(
+        "user@host",
+        "My Pack",
+      );
+      expect(result.success).toBe(true);
+    });
+
+    it("create_pack_tab() should default the title when omitted", async () => {
+      await api.create_pack_tab("user@host");
+
+      expect(mockPythonAPI.create_pack_tab).toHaveBeenCalledWith(
+        "user@host",
+        "Pack Tab",
+      );
     });
 
     it("close_tab() should call Python with string tabId", async () => {

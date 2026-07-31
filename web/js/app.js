@@ -503,6 +503,17 @@ class AlpacaApp {
       case "new-tab":
         await this.tabManager.createTab();
         break;
+      case "new-pack-tab": {
+        const host = await this._showPrompt(
+          "Remote host (user@host):",
+          "",
+          "New Pack Tab",
+        );
+        if (host && host.trim()) {
+          await this.tabManager.createPackTab(host.trim());
+        }
+        break;
+      }
       case "close-tab":
         if (this.currentTabId) {
           await this.tabManager.closeTab(this.currentTabId);
@@ -1883,6 +1894,8 @@ class AlpacaApp {
   onStreamingStart(tabId, answerIndex) {
     // Always update the tab's streaming state, even if not the current tab
     this.tabManager.setTabStreaming(tabId, true);
+    // Receiving any live notification proves a Pack tab's connection is up.
+    this.tabManager.setTabOffline(tabId, false);
 
     // Only update UI if this is the current tab
     if (tabId === this.currentTabId) {
@@ -1915,11 +1928,30 @@ class AlpacaApp {
     console.error(`[APP] Error on tab ${tabId}:`, error.message);
     this._setStreamingComplete(tabId);
 
-    // Show a toast so errors from background tabs are never silently dropped.
+    // A Pack tab's connection errors (unreachable host, daemon spawn
+    // failure, lost SSH link) surface through this same generic push —
+    // badge it as offline rather than adding a dedicated notification.
     const tab = this.tabManager.tabs.get(tabId);
+    if (tab && tab.isPack) {
+      this.tabManager.setTabOffline(tabId, true);
+    }
+
+    // Show a toast so errors from background tabs are never silently dropped.
     const tabHint =
       tabId !== this.currentTabId && tab ? `From tab: ${tab.title}` : null;
     this._showToast(error.message, { type: "error", tabHint });
+  }
+
+  /**
+   * Called by Python when a Pack tab (re)connects and its remote state may
+   * have changed while nobody was attached (e.g. content that streamed
+   * while the app was closed). Reuses the same refetch path background
+   * tabs already rely on when switched into.
+   */
+  async onPackStateSynced(tabId) {
+    this.tabManager.setTabOffline(tabId, false);
+    if (tabId !== this.currentTabId) return;
+    await this._reloadConversationDisplay();
   }
 
   /**

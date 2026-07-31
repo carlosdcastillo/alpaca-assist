@@ -66,6 +66,10 @@ class PythonAPI {
     return this.call("create_tab", title);
   }
 
+  async create_pack_tab(host, title = "Pack Tab") {
+    return this.call("create_pack_tab", host, title);
+  }
+
   async save_and_close() {
     return this.call("save_and_close");
   }

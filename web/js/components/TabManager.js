@@ -39,6 +39,28 @@ class TabManager {
   }
 
   /**
+   * Create a new Pack tab — a tab whose backend runs on `host` over SSH.
+   * Mirrors createTab() almost exactly; only the API call and the UI's
+   * pack badge differ.
+   */
+  async createPackTab(host) {
+    const result = await this.api.create_pack_tab(host);
+
+    if (!result.success) {
+      console.error("Failed to create pack tab:", result.error);
+      return null;
+    }
+
+    const tabId = result.tab_id;
+    const convId = result.conversation_id;
+    const title = `#${convId}`;
+
+    this.createTabUI(tabId, title, true, true);
+    this._convIds.set(tabId, convId);
+    return tabId;
+  }
+
+  /**
    * Store the permanent conversation ID for a tab and update the title if
    * it is still showing the placeholder (#ID from a previous allocation).
    */
@@ -63,9 +85,9 @@ class TabManager {
   /**
    * Create just the UI for a tab (used when Python already created the tab)
    */
-  createTabUI(tabId, title, autoSwitch = true) {
+  createTabUI(tabId, title, autoSwitch = true, isPack = false) {
     // Create tab button in UI
-    const tabButton = this._createTabButton(tabId, title);
+    const tabButton = this._createTabButton(tabId, title, isPack);
     this.container.appendChild(tabButton);
 
     // Create tab data structure
@@ -76,6 +98,7 @@ class TabManager {
       chatDisplay: null, // Set when tab is activated
       inputArea: null,
       isStreaming: false,
+      isPack: isPack,
     };
 
     this.tabs.set(tabId, tabData);
@@ -98,15 +121,15 @@ class TabManager {
   /**
    * Create tab button element
    */
-  _createTabButton(tabId, title) {
+  _createTabButton(tabId, title, isPack = false) {
     const button = document.createElement("div");
-    button.className = "tab";
+    button.className = isPack ? "tab pack" : "tab";
     button.dataset.tabId = tabId;
 
     const titleSpan = document.createElement("span");
     titleSpan.className = "tab-title";
     titleSpan.textContent = title;
-    titleSpan.title = title;
+    titleSpan.title = isPack ? `${title} (Pack — remote)` : title;
 
     const closeBtn = document.createElement("button");
     closeBtn.className = "tab-close";
@@ -279,6 +302,21 @@ class TabManager {
   isTabStreaming(tabId) {
     const tab = this.tabs.get(tabId);
     return tab ? tab.isStreaming : false;
+  }
+
+  /**
+   * Set offline state for a Pack tab (mirrors setTabStreaming).
+   */
+  setTabOffline(tabId, isOffline) {
+    const tab = this.tabs.get(tabId);
+    if (tab) {
+      tab.isOffline = isOffline;
+      if (isOffline) {
+        tab.button.classList.add("offline");
+      } else {
+        tab.button.classList.remove("offline");
+      }
+    }
   }
 
   /**
