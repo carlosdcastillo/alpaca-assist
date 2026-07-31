@@ -5,6 +5,7 @@ import json
 import logging
 import queue
 import threading
+import uuid
 from typing import Any
 from typing import Optional
 from typing import TYPE_CHECKING
@@ -94,6 +95,39 @@ class WebViewAPI:
             logger.error(f"Error creating tab: {e}")
             return {"success": False, "error": str(e)}
 
+    def create_pack_tab(self, host: str, title: str = "Pack Tab") -> dict[str, Any]:
+        """Create a new Pack tab — a tab whose backend runs on `host` over SSH.
+
+        Seeds the remote daemon's first-launch preferences with the local
+        current model choice; after that, remote and local preferences
+        evolve independently (ChatTabBase.preferences is a reference to
+        the single shared AppCore.preferences dict, so the remote
+        daemon's own AppCore must never be pointed at this machine's
+        preferences.json directly).
+        """
+        try:
+            session_id = uuid.uuid4().hex
+            model = self._app.core.preferences.get("model")
+            tab_id, tab = self._app.core.create_pack_tab(
+                host,
+                session_id,
+                title,
+                model=model,
+            )
+            self._current_answer_index[tab_id] = -1
+
+            return {
+                "success": True,
+                "tab_id": tab_id,
+                "title": title,
+                "conversation_id": tab.conversation_id,
+                "host": host,
+                "session_id": session_id,
+            }
+        except Exception as e:
+            logger.error(f"Error creating pack tab: {e}")
+            return {"success": False, "error": str(e)}
+
     def copy_to_clipboard(self, text: str) -> dict[str, Any]:
         """Copy text to the system clipboard — used by code-block Copy buttons."""
         try:
@@ -146,6 +180,12 @@ class WebViewAPI:
         """Switch to a different tab."""
         try:
             self._app.set_active_tab(tab_id)
+            tab = self._app.core.tabs.get(tab_id)
+            if tab is not None and getattr(tab, "offline", False):
+                # Clicking into an offline Pack tab is as good a signal as
+                # any to retry — reuses the tab-click path that's already
+                # wired, no new UI surface needed.
+                tab.reconnect_async()
             return {"success": True}
         except Exception as e:
             logger.error(f"Error switching tab: {e}")
@@ -1193,4 +1233,53 @@ class WebViewAPI:
             }
         except Exception as e:
             logger.error(f"Error creating tab: {e}")
+            return {"success": False, "error": str(e)}
+
+    def create_pack_tab_and_notify_js(
+        self,
+        host: str,
+        session_id: str,
+        title: str = "Pack Tab",
+        auto_switch: bool = True,
+        conversation_id: int | None = None,
+    ) -> dict[str, Any]:
+        """Create a new Pack tab and notify JavaScript to create the UI.
+
+        Used during session restoration to reattach a previously saved
+        Pack tab. Unlike create_tab_and_notify_js, session_id is always
+        supplied by the caller (never generated here) since restore must
+        reuse the exact session id the remote daemon is keyed on.
+        """
+        try:
+            tab_id, tab = self._app.core.create_pack_tab(
+                host,
+                session_id,
+                title,
+                conversation_id=conversation_id,
+            )
+            self._current_answer_index[tab_id] = -1
+
+            self._safe_evaluate_js(
+                f"app.tabManager.createTabUI({json.dumps(tab_id)}, {json.dumps(title)}, "
+                f"{json.dumps(auto_switch)}, true);",
+            )
+            self._safe_evaluate_js(
+                f"app.tabManager.setConversationId({json.dumps(tab_id)}, {tab.conversation_id});",
+            )
+
+            logger.info(
+                f"Created pack tab {tab_id} conv={tab.conversation_id} "
+                f"host={host} session={session_id} title='{title}' auto_switch={auto_switch}",
+            )
+
+            return {
+                "success": True,
+                "tab_id": tab_id,
+                "title": title,
+                "conversation_id": tab.conversation_id,
+                "host": host,
+                "session_id": session_id,
+            }
+        except Exception as e:
+            logger.error(f"Error creating pack tab: {e}")
             return {"success": False, "error": str(e)}

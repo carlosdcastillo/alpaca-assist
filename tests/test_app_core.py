@@ -371,6 +371,62 @@ class TestAppCoreTabLifecycle:
         """get_active_tab_id() should return None if not set."""
         assert core.get_active_tab_id() is None
 
+    def test_delete_tab_skips_db_storage_for_pack_tabs(self, core):
+        """A Pack tab's skip_db_storage=True must stop delete_tab from
+
+        storing a dead local snapshot — reviving it later would silently
+        create a disconnected local ChatTab instead of resuming the
+        still-running remote session.
+        """
+        tab_id = "pack-tab-1"
+        pack_tab = MagicMock()
+        pack_tab.skip_db_storage = True
+        core.tabs[tab_id] = pack_tab
+
+        with patch.object(core, "store_tab_in_database") as mock_store:
+            core.delete_tab(tab_id)
+
+        mock_store.assert_not_called()
+        pack_tab.cleanup_resources.assert_called_once()
+        assert tab_id not in core.tabs
+
+    def test_delete_tab_stores_regular_tabs(self, core):
+        """A tab with no skip_db_storage attribute (an ordinary ChatTab)
+
+        must still go through the normal store-then-delete path.
+        """
+        tab_id, _tab = core.create_tab("Regular")
+
+        with patch.object(core, "store_tab_in_database") as mock_store:
+            core.delete_tab(tab_id)
+
+        mock_store.assert_called_once()
+        assert tab_id not in core.tabs
+
+    def test_create_pack_tab_registers_a_duck_typed_pack_tab(self, core):
+        """create_pack_tab must store a PackTab in the same tabs dict as
+
+        ordinary ChatTabs, satisfying every duck-typed call site with no
+        isinstance branching.
+        """
+        with patch("core.pack_tab.PackTransport") as mock_transport_cls:
+            instance = mock_transport_cls.return_value
+            instance.connected = False
+            instance.send_request.return_value = {
+                "state": {},
+                "title": "My Pack",
+                "is_streaming": False,
+                "resumed": False,
+            }
+            tab_id, tab = core.create_pack_tab("user@host", "sess-1", "My Pack")
+
+        assert tab_id in core.tabs
+        assert core.tabs[tab_id] is tab
+        assert tab.skip_db_storage is True
+        assert tab.host == "user@host"
+        assert tab.session_id == "sess-1"
+        assert tab.title == "My Pack"
+
     def test_alloc_tab_id_format(self, core):
         """Tab IDs should follow expected format."""
         tab_id = core._alloc_tab_id()

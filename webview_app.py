@@ -179,11 +179,20 @@ class ChatApp:
                 saved_conv_id = (
                     int(saved_conv_id_raw) if saved_conv_id_raw is not None else None
                 )
-                result = self.api.create_tab_and_notify_js(
-                    title,
-                    auto_switch=False,
-                    conversation_id=saved_conv_id,
-                )
+                if tab_data.get("tab_type") == "pack":
+                    result = self.api.create_pack_tab_and_notify_js(
+                        tab_data.get("host", ""),
+                        tab_data.get("session_id", ""),
+                        title,
+                        auto_switch=False,
+                        conversation_id=saved_conv_id,
+                    )
+                else:
+                    result = self.api.create_tab_and_notify_js(
+                        title,
+                        auto_switch=False,
+                        conversation_id=saved_conv_id,
+                    )
 
                 logger.info(f"create_tab_and_notify_js result: {result}")
                 if result["success"]:

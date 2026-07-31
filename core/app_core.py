@@ -31,6 +31,7 @@ from utils import is_macos
 
 if TYPE_CHECKING:
     from core.chat_tab import ChatTab
+    from core.pack_tab import PackTab
     from webview_api import WebViewAPI
 
 logger = logging.getLogger(__name__)
@@ -51,7 +52,7 @@ class AppCore:
         self.db = ConversationDatabase()
         self.preferences = DEFAULT_PREFERENCES.copy()
         self.load_preferences()
-        self.tabs: dict[str, ChatTab] = {}
+        self.tabs: dict[str, ChatTab | PackTab] = {}
         self.mcp_manager = MCPManager()
         self.event_loop: asyncio.AbstractEventLoop | None = None
         self.mcp_thread: threading.Thread | None = None
@@ -345,12 +346,50 @@ class AppCore:
         self.tabs[tab_id] = tab
         return tab_id, tab
 
+    def create_pack_tab(
+        self,
+        host: str,
+        session_id: str,
+        title: str | None = None,
+        model: str | None = None,
+        conversation_id: int | None = None,
+    ) -> tuple[str, PackTab]:
+        """Create a new Pack tab — a tab whose backend runs on a remote
+
+        host over SSH, reached via core/pack_transport.py.
+
+        Sibling to create_tab, same allocation pattern. Returns
+        immediately; the actual SSH connect + attach happens on a
+        background thread (see PackTab.connect_async), so the tab button
+        appears right away exactly like a local tab.
+        """
+        from core.pack_tab import PackTab
+
+        tab_id = self._alloc_tab_id()
+        if title is None:
+            title = "Pack Tab"
+        if conversation_id is None:
+            conversation_id = self.db.allocate_conversation_id()
+
+        tab = PackTab(tab_id, title, self, conversation_id, host, session_id)
+        self.tabs[tab_id] = tab
+        tab.connect_async(model=model)
+        return tab_id, tab
+
     def delete_tab(self, tab_id: str) -> None:
-        """Delete a tab and store in database if it has content."""
+        """Delete a tab and store in database if it has content.
+
+        Pack tabs are the one exception (skip_db_storage=True): storing
+        one would create a dead local snapshot that, if later revived,
+        would silently create a disconnected local ChatTab instead of
+        resuming the still-running remote session. Closing a Pack tab
+        always just detaches — the remote daemon keeps running.
+        """
         if tab_id not in self.tabs:
             return
         tab = self.tabs[tab_id]
-        self.store_tab_in_database(tab)
+        if not getattr(tab, "skip_db_storage", False):
+            self.store_tab_in_database(tab)
         tab.cleanup_resources()
         del self.tabs[tab_id]
 
