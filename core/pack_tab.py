@@ -167,6 +167,32 @@ class PackTab:
         self.is_streaming = result.get("is_streaming", False)
         return result
 
+    def _resync_async(self) -> None:
+        """Fire-and-forget resync on a background thread.
+
+        Must never be called directly from a notification handler: those
+        run on the transport's own reader thread, and _resync's blocking
+        send_request("attach", ...) waits for a response that only that
+        same reader thread can read — calling it inline would deadlock.
+
+        This is the fix for a real bug: get_conversation_state (used when
+        switching tabs) reads self.chat_state directly, with no RPC round
+        trip — it was never refreshed after a turn completed, only at
+        connect time and after compact/truncate/pop. A turn streamed via
+        live on_content_update pushes rendered fine while the tab stayed
+        active, but the mirror itself was still whatever it was at the
+        last resync (usually empty), so switching away and back showed
+        nothing at all.
+        """
+
+        def run() -> None:
+            try:
+                self._resync(timeout=ATTACH_TIMEOUT)
+            except PackTransportError as e:
+                logger.warning(f"Pack tab {self.tab_id} post-turn resync failed: {e}")
+
+        threading.Thread(target=run, daemon=True).start()
+
     def _load_state(self, state: dict[str, Any]) -> None:
         chat_state_data = state.get("chat_state", {})
         if "graph" in chat_state_data:
@@ -202,6 +228,11 @@ class PackTab:
         api = self._app_core.api
         if api is not None:
             api.on_streaming_end(self.tab_id, params["answer_index"])
+        # The turn's content only ever reached the display via live
+        # on_content_update pushes — catch the local mirror up now so a
+        # later get_conversation_state (tab switch) doesn't read stale
+        # (often still-empty) state. See _resync_async's docstring.
+        self._resync_async()
 
     def _on_content_update(self, params: dict[str, Any]) -> None:
         api = self._app_core.api
@@ -215,6 +246,9 @@ class PackTab:
         api = self._app_core.api
         if api is not None:
             api.on_error(self.tab_id, params["message"], params.get("details", ""))
+        # A turn can end via error instead of a clean streaming_end —
+        # resync here too so a partial turn isn't lost on tab switch.
+        self._resync_async()
 
     def _on_update_tab_title(self, params: dict[str, Any]) -> None:
         self.title = params["title"]

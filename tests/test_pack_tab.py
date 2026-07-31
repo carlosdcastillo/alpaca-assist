@@ -198,11 +198,35 @@ class TestNotificationHandlers:
         app_core: MagicMock,
     ) -> None:
         pack_tab.is_streaming = True
+        pack_tab._transport.send_request.return_value = ATTACH_RESPONSE
 
-        pack_tab._on_streaming_end({"tab_id": "remote-daemon-tab-99","answer_index": 2})
+        pack_tab._on_streaming_end({"tab_id": "remote-daemon-tab-99", "answer_index": 2})
 
         assert pack_tab.is_streaming is False
         app_core.api.on_streaming_end.assert_called_once_with("tab-1", 2)
+
+    def test_on_streaming_end_resyncs_the_chat_state_mirror(
+        self,
+        pack_tab: PackTab,
+    ) -> None:
+        """Regression test: get_conversation_state (used on tab switch)
+
+        reads pack_tab.chat_state directly with no RPC round trip. A turn
+        that streamed purely via live on_content_update pushes must still
+        leave the mirror caught up afterward, or switching away and back
+        to the tab shows nothing — exactly the bug this locks in.
+        """
+        assert pack_tab.chat_state.to_dict()["graph"]["nodes"] == {}
+        pack_tab._transport.send_request.return_value = ATTACH_RESPONSE
+
+        pack_tab._on_streaming_end({"tab_id": "remote-daemon-tab-99", "answer_index": 0})
+
+        deadline = time.monotonic() + 2.0
+        while time.monotonic() < deadline and pack_tab.title != "Real Title":
+            time.sleep(0.02)
+
+        assert pack_tab.title == "Real Title"
+        assert pack_tab.chat_state.to_dict()["graph"]["id"] == "g1"
 
     def test_on_content_update_reconstructs_real_content_update(
         self,
@@ -238,8 +262,9 @@ class TestNotificationHandlers:
         app_core: MagicMock,
     ) -> None:
         pack_tab.is_streaming = True
+        pack_tab._transport.send_request.return_value = ATTACH_RESPONSE
 
-        pack_tab._on_error({"tab_id": "remote-daemon-tab-99","message": "boom", "details": "x"})
+        pack_tab._on_error({"tab_id": "remote-daemon-tab-99", "message": "boom", "details": "x"})
 
         assert pack_tab.is_streaming is False
         app_core.api.on_error.assert_called_once_with("tab-1", "boom", "x")
