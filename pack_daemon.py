@@ -221,12 +221,25 @@ def make_dispatcher(
     def dispatch(method: str, params: dict[str, Any]) -> Any:
         nonlocal resumed
         if method == "attach":
-            return {
+            response = {
                 "state": tab.get_serializable_data(),
                 "title": tab.title,
                 "is_streaming": tab.is_streaming,
                 "resumed": resumed,
             }
+            # resumed answers "did this process find a persisted session
+            # when it started" — true only for the very first attach.
+            # Every later attach in this same process's lifetime is a
+            # reconnect to a session that's been continuously live since
+            # then, not a fresh/uncertain one, so it must report resumed
+            # regardless of how this process itself started. Without
+            # this, a daemon created fresh (the normal case for every
+            # brand-new Pack tab, since no chat_session.json exists yet)
+            # would report resumed=False forever, and PackTab's "session
+            # lost" prompt would fire on every ordinary reconnect —
+            # an app restart, a brief network blip — not just a real loss.
+            resumed = True
+            return response
         if method == "send_message":
             tab.handle_user_message(params.get("message", ""), params.get("images", []))
             return {"answer_index": getattr(tab, "_current_answer_index", 0)}

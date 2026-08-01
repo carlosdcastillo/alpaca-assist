@@ -182,6 +182,27 @@ class TestMakeDispatcher:
         assert result["is_streaming"] is False
         assert result["state"] == {"chat_state": {}, "name": "Pack Tab"}
 
+    def test_only_the_first_attach_reports_resumed_false(self) -> None:
+        """resumed=False means "this process found nothing persisted when
+
+        it started" — true only for the very first attach. A daemon that
+        started fresh (every brand-new Pack tab) must not keep reporting
+        resumed=False on every later attach in its own lifetime, or a
+        plain reconnect (app restart, brief network blip) to a perfectly
+        healthy, continuously-running session would wrongly look like a
+        lost one.
+        """
+        tab = self._tab()
+        dispatch = make_dispatcher(tab, PackDaemonAdapter(), resumed=False, core=self._core())
+
+        first = dispatch("attach", {})
+        second = dispatch("attach", {})
+        third = dispatch("attach", {})
+
+        assert first["resumed"] is False
+        assert second["resumed"] is True
+        assert third["resumed"] is True
+
     def test_send_message_returns_answer_index_set_before_return(self) -> None:
         tab = self._tab()
         dispatch = make_dispatcher(tab, PackDaemonAdapter(), resumed=False, core=self._core())
