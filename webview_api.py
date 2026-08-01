@@ -1292,3 +1292,23 @@ class WebViewAPI:
         except Exception as e:
             logger.error(f"Error creating pack tab: {e}")
             return {"success": False, "error": str(e)}
+
+    def resolve_pack_session_lost(self, tab_id: str, recreate: bool) -> dict[str, Any]:
+        """Called after the user answers the "Pack session lost" prompt
+
+        (see core/pack_tab.py's PackTab._apply_resync_result, which fires
+        app.onPackSessionLost instead of silently discarding local content
+        when the remote daemon reports resumed=False).
+        """
+        try:
+            tab = self._app.core.tabs.get(tab_id)
+            if tab is None:
+                return {"success": False, "error": "tab_not_found"}
+            resolver = getattr(tab, "resolve_session_lost", None)
+            if resolver is None:
+                return {"success": False, "error": "not_a_pack_tab"}
+            resolver(recreate)
+            return {"success": True}
+        except Exception as e:
+            logger.error(f"Error resolving pack session lost for {tab_id}: {e}")
+            return {"success": False, "error": str(e)}

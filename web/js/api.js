@@ -70,6 +70,10 @@ class PythonAPI {
     return this.call("create_pack_tab", host, title);
   }
 
+  async resolve_pack_session_lost(tabId, recreate) {
+    return this.call("resolve_pack_session_lost", tabId, recreate);
+  }
+
   async save_and_close() {
     return this.call("save_and_close");
   }

@@ -167,10 +167,13 @@ class TestMakeDispatcher:
         tab.pop_conversation.return_value = {"popped": False, "reason": "empty"}
         return tab
 
+    def _core(self) -> MagicMock:
+        return MagicMock()
+
     def test_attach_reports_resumed_flag(self) -> None:
         tab = self._tab()
         adapter = PackDaemonAdapter()
-        dispatch = make_dispatcher(tab, adapter, resumed=True)
+        dispatch = make_dispatcher(tab, adapter, resumed=True, core=self._core())
 
         result = dispatch("attach", {})
 
@@ -181,7 +184,7 @@ class TestMakeDispatcher:
 
     def test_send_message_returns_answer_index_set_before_return(self) -> None:
         tab = self._tab()
-        dispatch = make_dispatcher(tab, PackDaemonAdapter(), resumed=False)
+        dispatch = make_dispatcher(tab, PackDaemonAdapter(), resumed=False, core=self._core())
 
         result = dispatch("send_message", {"message": "hi", "images": []})
 
@@ -190,7 +193,7 @@ class TestMakeDispatcher:
 
     def test_stop_streaming_dispatches(self) -> None:
         tab = self._tab()
-        dispatch = make_dispatcher(tab, PackDaemonAdapter(), resumed=False)
+        dispatch = make_dispatcher(tab, PackDaemonAdapter(), resumed=False, core=self._core())
 
         result = dispatch("stop_streaming", {})
 
@@ -199,7 +202,7 @@ class TestMakeDispatcher:
 
     def test_mutating_methods_dispatch_to_real_tab_methods(self) -> None:
         tab = self._tab()
-        dispatch = make_dispatcher(tab, PackDaemonAdapter(), resumed=False)
+        dispatch = make_dispatcher(tab, PackDaemonAdapter(), resumed=False, core=self._core())
 
         assert dispatch("compact_conversation", {}) == {"compacted": True}
         assert dispatch("truncate_conversation", {}) == {"truncated": True}
@@ -209,7 +212,7 @@ class TestMakeDispatcher:
         tab = self._tab()
         adapter = PackDaemonAdapter()
         adapter.inject_tool_fold("tab-1", "fold-1", "result", "body", 0)
-        dispatch = make_dispatcher(tab, adapter, resumed=False)
+        dispatch = make_dispatcher(tab, adapter, resumed=False, core=self._core())
 
         dispatch("fold_rendered", {"tab_id": "tab-1", "fold_id": "fold-1", "rendered": True})
 
@@ -217,10 +220,30 @@ class TestMakeDispatcher:
 
     def test_unknown_method_raises(self) -> None:
         tab = self._tab()
-        dispatch = make_dispatcher(tab, PackDaemonAdapter(), resumed=False)
+        dispatch = make_dispatcher(tab, PackDaemonAdapter(), resumed=False, core=self._core())
 
         with pytest.raises(ValueError):
             dispatch("not_a_real_method", {})
+
+    def test_seed_state_loads_data_persists_and_flips_resumed(self) -> None:
+        """The local side calls this to recreate a session on a daemon that
+
+        reported resumed=False. Must load the seed into the real tab,
+        save immediately (so a crash before the next autosave doesn't
+        lose it and repeat the same prompt), and report resumed=True to
+        any later attach in this same daemon lifetime.
+        """
+        tab = self._tab()
+        core = self._core()
+        dispatch = make_dispatcher(tab, PackDaemonAdapter(), resumed=False, core=core)
+        seed = {"chat_state": {"questions": ["Q"], "answers": ["A"]}, "name": "Revived"}
+
+        result = dispatch("seed_state", {"seed": seed})
+
+        tab.load_from_data.assert_called_once_with(seed)
+        core.save_session.assert_called_once()
+        assert result == {"success": True}
+        assert dispatch("attach", {})["resumed"] is True
 
 
 class TestBindSocket:

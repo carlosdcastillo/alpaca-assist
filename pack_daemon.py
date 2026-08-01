@@ -214,10 +214,12 @@ def make_dispatcher(
     tab: Any,
     adapter: PackDaemonAdapter,
     resumed: bool,
+    core: Any,
 ) -> Callable[[str, dict[str, Any]], Any]:
     """Build the method -> handler mapping for the daemon's one ChatTab."""
 
     def dispatch(method: str, params: dict[str, Any]) -> Any:
+        nonlocal resumed
         if method == "attach":
             return {
                 "state": tab.get_serializable_data(),
@@ -244,6 +246,17 @@ def make_dispatcher(
                 params.get("rendered", False),
             )
             return {"ok": True}
+        if method == "seed_state":
+            # Local side recreating a session we reported resumed=False
+            # for (no chat_session.json existed when we started) — load
+            # its copy of the conversation into our still-empty tab and
+            # persist it immediately, so a crash before the next autosave
+            # doesn't lose the seed and repeat the same "session lost"
+            # prompt on the next attach.
+            tab.load_from_data(params["seed"])
+            core.save_session()
+            resumed = True
+            return {"success": True}
         raise ValueError(f"Unknown method: {method!r}")
 
     return dispatch
@@ -394,7 +407,7 @@ def main() -> None:
 
     core.start_autosave()
 
-    dispatch = make_dispatcher(tab, adapter, resumed)
+    dispatch = make_dispatcher(tab, adapter, resumed, core)
 
     sock_path = session_dir / "daemon.sock"
     listener = _bind_socket(sock_path)

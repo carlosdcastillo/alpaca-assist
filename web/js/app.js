@@ -1955,6 +1955,33 @@ class AlpacaApp {
   }
 
   /**
+   * Called by Python when a Pack tab reconnected and found its remote
+   * daemon had no persisted session (host restarted, session directory
+   * deleted, etc.) even though we still hold a local copy of the
+   * conversation. Ask whether to recreate the remote session from that
+   * local copy, or accept a fresh empty one.
+   */
+  async onPackSessionLost(tabId) {
+    const tab = this.tabManager.tabs.get(tabId);
+    const label = tab ? tab.title : "This Pack tab";
+    const recreate = await this._showMessageDialog(
+      `${label}'s remote session was lost — the host may have restarted, ` +
+        `or the session was deleted. Your local copy of the conversation ` +
+        `is still here.\n\nRecreate the remote session from your local ` +
+        `copy, or start fresh?`,
+      {
+        title: "Pack session lost",
+        okText: "Recreate",
+        cancelText: "Start fresh",
+      },
+    );
+    await this.api.resolve_pack_session_lost(tabId, recreate);
+    if (tabId === this.currentTabId) {
+      await this._reloadConversationDisplay();
+    }
+  }
+
+  /**
    * Called when tab title should be updated
    */
   updateTabTitle(tabId, title) {

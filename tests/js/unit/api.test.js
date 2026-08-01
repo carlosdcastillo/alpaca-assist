@@ -40,6 +40,7 @@ describe("PythonAPI", () => {
         success: true,
         tab_id: "tab-2-def456",
       }),
+      resolve_pack_session_lost: jest.fn().mockResolvedValue({ success: true }),
       close_tab: jest.fn().mockResolvedValue({ success: true }),
       get_tabs: jest.fn().mockResolvedValue({ success: true, tabs: [] }),
       switch_tab: jest.fn().mockResolvedValue({ success: true }),
@@ -238,6 +239,16 @@ describe("PythonAPI", () => {
         "user@host",
         "Pack Tab",
       );
+    });
+
+    it("resolve_pack_session_lost() should call Python with tabId and the choice", async () => {
+      const result = await api.resolve_pack_session_lost("tab-2-def456", true);
+
+      expect(mockPythonAPI.resolve_pack_session_lost).toHaveBeenCalledWith(
+        "tab-2-def456",
+        true,
+      );
+      expect(result.success).toBe(true);
     });
 
     it("close_tab() should call Python with string tabId", async () => {

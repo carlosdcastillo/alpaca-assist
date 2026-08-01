@@ -138,6 +138,104 @@ class TestMutatingMethods:
         assert transport.send_request.call_count == 2
 
 
+class TestSessionLostRecreate:
+    """resumed=False from an attach response means the remote daemon found
+
+    no persisted chat_session.json — either a genuinely first-ever connect
+    (nothing local to lose, apply normally) or a real "the worker is
+    gone" event (local content must not be silently overwritten — ask the
+    user, per PackTab._apply_resync_result / resolve_session_lost).
+    """
+
+    def test_resumed_false_with_no_local_content_applies_normally(
+        self,
+        pack_tab: PackTab,
+        app_core: MagicMock,
+    ) -> None:
+        result = {**ATTACH_RESPONSE, "resumed": False}
+
+        pack_tab._apply_resync_result(result)
+
+        assert pack_tab.title == "Real Title"
+        assert pack_tab._pending_recreate_state is None
+        app_core.api._safe_evaluate_js.assert_not_called()
+
+    def test_resumed_false_with_local_content_prompts_instead_of_overwriting(
+        self,
+        pack_tab: PackTab,
+        app_core: MagicMock,
+    ) -> None:
+        pack_tab.load_from_data({"chat_state": {"questions": ["Q"], "answers": ["A"]}})
+        result = {**ATTACH_RESPONSE, "resumed": False}
+
+        pack_tab._apply_resync_result(result)
+
+        assert pack_tab.chat_state.to_dict()["questions"] == ["Q"]
+        assert pack_tab.title != "Real Title"
+        assert pack_tab._pending_recreate_state == result
+        app_core.api._safe_evaluate_js.assert_called_once()
+        js_call = app_core.api._safe_evaluate_js.call_args[0][0]
+        assert "onPackSessionLost" in js_call
+        assert pack_tab.tab_id in js_call
+
+    def test_resolve_session_lost_recreate_seeds_the_remote_tab(
+        self,
+        pack_tab: PackTab,
+    ) -> None:
+        pack_tab.load_from_data({"chat_state": {"questions": ["Q"], "answers": ["A"]}})
+        pack_tab._apply_resync_result({**ATTACH_RESPONSE, "resumed": False})
+        transport = pack_tab._transport
+        transport.send_request.reset_mock()
+        transport.send_request.return_value = {"success": True}
+
+        pack_tab.resolve_session_lost(recreate=True)
+
+        transport.send_request.assert_called_once_with(
+            "seed_state",
+            {"seed": pack_tab.get_serializable_data()},
+            timeout=mock.ANY,
+        )
+        assert pack_tab._pending_recreate_state is None
+        assert pack_tab.chat_state.to_dict()["questions"] == ["Q"]
+
+    def test_resolve_session_lost_recreate_failure_marks_offline(
+        self,
+        pack_tab: PackTab,
+    ) -> None:
+        pack_tab.load_from_data({"chat_state": {"questions": ["Q"], "answers": ["A"]}})
+        pack_tab._apply_resync_result({**ATTACH_RESPONSE, "resumed": False})
+        transport = pack_tab._transport
+        transport.send_request.side_effect = PackTransportError("gone")
+
+        pack_tab.resolve_session_lost(recreate=True)
+
+        assert pack_tab.offline is True
+
+    def test_resolve_session_lost_start_fresh_applies_the_empty_state(
+        self,
+        pack_tab: PackTab,
+    ) -> None:
+        pack_tab.load_from_data({"chat_state": {"questions": ["Q"], "answers": ["A"]}})
+        pack_tab._apply_resync_result({**ATTACH_RESPONSE, "resumed": False})
+
+        pack_tab.resolve_session_lost(recreate=False)
+
+        assert pack_tab.title == "Real Title"
+        assert pack_tab.chat_state.to_dict()["graph"]["id"] == "g1"
+        assert pack_tab._pending_recreate_state is None
+
+    def test_resolve_session_lost_with_nothing_pending_is_a_noop(
+        self,
+        pack_tab: PackTab,
+    ) -> None:
+        transport = pack_tab._transport
+        transport.send_request.reset_mock()
+
+        pack_tab.resolve_session_lost(recreate=True)
+
+        transport.send_request.assert_not_called()
+
+
 class TestSerialization:
     def test_get_serializable_data_includes_pack_fields(self, pack_tab: PackTab) -> None:
         data = pack_tab.get_serializable_data()

@@ -72,6 +72,9 @@ class PackTab:
         self.offline = False
         self._current_answer_index = -1
         self._connect_lock = threading.Lock()
+        # Set by _apply_resync_result when the daemon reports resumed=False
+        # while we still hold real local content — see resolve_session_lost.
+        self._pending_recreate_state: dict[str, Any] | None = None
 
         self._transport = self._build_transport()
 
@@ -158,10 +161,68 @@ class PackTab:
         replay a live event log across any gap.
         """
         result = self._transport.send_request("attach", {}, timeout=timeout)
+        self._apply_resync_result(result)
+        return result
+
+    def _apply_resync_result(self, result: dict[str, Any]) -> None:
+        """Adopt an attach response — unless it reports the remote session
+
+        was lost (resumed=False) while we're still holding real local
+        content, in which case silently overwriting it would repeat the
+        exact "goes blank" bug this class has already been fixed for
+        once, just triggered by a dead remote worker instead of a stale
+        mirror. Stash the response and ask the user whether to recreate
+        the remote session from the local copy or accept a fresh one —
+        see resolve_session_lost.
+        """
+        if not result.get("resumed", True) and self._has_local_content():
+            self._pending_recreate_state = result
+            api = self._app_core.api
+            if api is not None:
+                api._safe_evaluate_js(
+                    f"app.onPackSessionLost({json.dumps(self.tab_id)});",
+                )
+            return
         self._load_state(result.get("state", {}))
         self.title = result.get("title", self.title)
         self.is_streaming = result.get("is_streaming", False)
-        return result
+
+    def _has_local_content(self) -> bool:
+        data = self.chat_state.to_dict()
+        return bool(
+            data.get("graph", {}).get("nodes")
+            or (data.get("questions") and data.get("answers")),
+        )
+
+    def resolve_session_lost(self, recreate: bool) -> None:
+        """Called after the user answers the onPackSessionLost prompt.
+
+        recreate=True pushes our local copy to the (empty) remote tab via
+        the seed_state RPC, continuing the same conversation on a fresh
+        remote session. recreate=False accepts the empty state the daemon
+        already reported — the same outcome as attaching to a genuinely
+        new Pack tab.
+        """
+        result = self._pending_recreate_state
+        self._pending_recreate_state = None
+        if result is None:
+            return
+        if recreate:
+            try:
+                self._transport.send_request(
+                    "seed_state",
+                    {"seed": self.get_serializable_data()},
+                    timeout=ATTACH_TIMEOUT,
+                )
+            except PackTransportError as e:
+                logger.warning(f"Pack tab {self.tab_id} recreate failed: {e}")
+                self.offline = True
+                return
+        else:
+            self._load_state(result.get("state", {}))
+            self.title = result.get("title", self.title)
+            self.is_streaming = result.get("is_streaming", False)
+        self._notify_if_active()
 
     def _resync_async(self) -> None:
         """Fire-and-forget resync on a background thread.
