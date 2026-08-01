@@ -193,6 +193,19 @@ MODELS_JSON: str = """
         "quantization_level": "none"
       }
     },
+    {
+      "name": "kimi-k3",
+      "modified_at": "2026-07-19T00:00:00.000000000+00:00",
+      "size": 0,
+      "digest": "0000000000000000000000000000000000000000000000000000000000000000",
+      "details": {
+        "format": "gguf",
+        "family": "kimi",
+        "families": null,
+        "parameter_size": "2.8T",
+        "quantization_level": "none"
+      }
+    },
         {
       "name": "claude-opus-4-6",
       "modified_at": "2026-01-01T00:00:00.000000000+00:00",
@@ -372,6 +385,7 @@ def map_ollama_to_model(ollama_model: str) -> str:
         "kimi-k2p5": "accounts/fireworks/models/kimi-k2p5",
         "kimi-k2p6": "accounts/fireworks/models/kimi-k2p6",
         "kimi-k2p7-code": "accounts/fireworks/models/kimi-k2p7-code",
+        "kimi-k3": "accounts/fireworks/models/kimi-k3",
         "glm-5p1": "accounts/fireworks/models/glm-5p1",
         "glm-5p2": "accounts/fireworks/models/glm-5p2",
         # Legacy placeholder mappings (for backwards compatibility)
