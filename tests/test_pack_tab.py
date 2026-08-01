@@ -58,9 +58,6 @@ ATTACH_RESPONSE = {
 
 
 class TestConstruction:
-    def test_skip_db_storage_is_true(self, pack_tab: PackTab) -> None:
-        assert PackTab.skip_db_storage is True
-
     def test_starts_with_empty_graph_chat_state(self, pack_tab: PackTab) -> None:
         assert pack_tab.chat_state.to_dict().get("graph", {}).get("nodes") == {}
 

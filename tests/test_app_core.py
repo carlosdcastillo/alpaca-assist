@@ -371,22 +371,21 @@ class TestAppCoreTabLifecycle:
         """get_active_tab_id() should return None if not set."""
         assert core.get_active_tab_id() is None
 
-    def test_delete_tab_skips_db_storage_for_pack_tabs(self, core):
-        """A Pack tab's skip_db_storage=True must stop delete_tab from
+    def test_delete_tab_stores_pack_tabs_too(self, core):
+        """Closing a Pack tab stores it in history exactly like a regular
 
-        storing a dead local snapshot — reviving it later would silently
-        create a disconnected local ChatTab instead of resuming the
-        still-running remote session.
+        tab — webview_api.revive_conversation is tab_type-aware and
+        reconnects to the still-running remote daemon instead of
+        creating a disconnected local ChatTab.
         """
         tab_id = "pack-tab-1"
         pack_tab = MagicMock()
-        pack_tab.skip_db_storage = True
         core.tabs[tab_id] = pack_tab
 
         with patch.object(core, "store_tab_in_database") as mock_store:
             core.delete_tab(tab_id)
 
-        mock_store.assert_not_called()
+        mock_store.assert_called_once_with(pack_tab)
         pack_tab.cleanup_resources.assert_called_once()
         assert tab_id not in core.tabs
 
@@ -422,7 +421,6 @@ class TestAppCoreTabLifecycle:
 
         assert tab_id in core.tabs
         assert core.tabs[tab_id] is tab
-        assert tab.skip_db_storage is True
         assert tab.host == "user@host"
         assert tab.session_id == "sess-1"
         assert tab.title == "My Pack"

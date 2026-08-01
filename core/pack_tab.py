@@ -16,13 +16,11 @@ against the real code rather than assumed:
 
 AppCore.tabs is a plain dict[str, ChatTab] accessed everywhere via duck
 typing (no isinstance checks anywhere in webview_api.py), so a PackTab
-instance slots in next to ordinary ChatTabs with no special-casing beyond
-the one intentional exception: AppCore.delete_tab checks
-`skip_db_storage` before storing a closed tab's conversation in the local
-database, since a Pack tab's local DB row would be a dead snapshot that
-can never be meaningfully revived (reviving it would silently create a
-disconnected local ChatTab instead of resuming the still-running remote
-session).
+instance slots in next to ordinary ChatTabs with no special-casing.
+Closing one stores its conversation in the local database exactly like a
+regular tab; webview_api.revive_conversation checks the stored
+`tab_type` and, for "pack", reconnects to the still-running remote
+daemon instead of creating a disconnected local ChatTab.
 """
 from __future__ import annotations
 
@@ -52,8 +50,6 @@ FOLD_RENDER_TIMEOUT = 2.0
 
 class PackTab:
     """A tab proxying to a real ChatTab running in a remote pack_daemon.py."""
-
-    skip_db_storage = True
 
     def __init__(
         self,

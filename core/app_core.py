@@ -379,17 +379,17 @@ class AppCore:
     def delete_tab(self, tab_id: str) -> None:
         """Delete a tab and store in database if it has content.
 
-        Pack tabs are the one exception (skip_db_storage=True): storing
-        one would create a dead local snapshot that, if later revived,
-        would silently create a disconnected local ChatTab instead of
-        resuming the still-running remote session. Closing a Pack tab
-        always just detaches — the remote daemon keeps running.
+        Pack tabs are stored the same as ordinary tabs — their
+        get_serializable_data() includes tab_type/host/session_id, and
+        webview_api.revive_conversation uses that to reconnect to the
+        still-running remote daemon instead of creating a plain local
+        ChatTab. Closing a Pack tab only detaches locally; the remote
+        daemon keeps running either way.
         """
         if tab_id not in self.tabs:
             return
         tab = self.tabs[tab_id]
-        if not getattr(tab, "skip_db_storage", False):
-            self.store_tab_in_database(tab)
+        self.store_tab_in_database(tab)
         tab.cleanup_resources()
         del self.tabs[tab_id]
 

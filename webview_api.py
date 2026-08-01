@@ -379,11 +379,20 @@ class WebViewAPI:
                 return {"success": False, "error": "Conversation not found"}
             title = tab_data.get("name") or tab_data.get("title") or "Chat"
             # Reuse the permanent conversation_id — don't allocate a new one.
-            result = self.create_tab_and_notify_js(
-                title,
-                auto_switch=True,
-                conversation_id=conv_id,
-            )
+            if tab_data.get("tab_type") == "pack":
+                result = self.create_pack_tab_and_notify_js(
+                    tab_data.get("host", ""),
+                    tab_data.get("session_id", ""),
+                    title,
+                    auto_switch=True,
+                    conversation_id=conv_id,
+                )
+            else:
+                result = self.create_tab_and_notify_js(
+                    title,
+                    auto_switch=True,
+                    conversation_id=conv_id,
+                )
             if not result["success"]:
                 return result
             tab_id = result["tab_id"]
