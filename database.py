@@ -36,6 +36,32 @@ class ConversationDatabase:
                 )
                 """,
             )
+            # Added after the table already shipped — migrate existing DBs
+            # rather than relying on CREATE TABLE, which only runs once.
+            # A plain column (rather than parsing chat_data's JSON blob on
+            # every history list load, as find_conversation_by_tab_id
+            # already warns against for hot paths) so History can show
+            # which conversations are Pack tabs without a full scan.
+            existing_columns = {
+                row[1] for row in cursor.execute("PRAGMA table_info(conversations)")
+            }
+            if "tab_type" not in existing_columns:
+                cursor.execute("ALTER TABLE conversations ADD COLUMN tab_type TEXT")
+                # One-time backfill for rows stored before this column
+                # existed — a full-table JSON parse is fine here (runs
+                # once per DB, not on every history load).
+                for row_id, chat_data_json in cursor.execute(
+                    "SELECT id, chat_data FROM conversations",
+                ).fetchall():
+                    try:
+                        tab_type = json.loads(chat_data_json).get("tab_type")
+                    except json.JSONDecodeError:
+                        continue
+                    if tab_type:
+                        cursor.execute(
+                            "UPDATE conversations SET tab_type = ? WHERE id = ?",
+                            (tab_type, row_id),
+                        )
             cursor.execute(
                 """
                 CREATE TABLE IF NOT EXISTS sequences (
@@ -70,12 +96,12 @@ class ConversationDatabase:
                 raise RuntimeError("Failed to allocate conversation ID")
             return int(row[0])
 
-    def get_conversations(self) -> list[tuple[int, str, str, str, bool]]:
+    def get_conversations(self) -> list[tuple[int, str, str, str, bool, str | None]]:
         """Get all conversations ordered by closed_date descending."""
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.cursor()
             cursor.execute(
-                "\n                SELECT id, title, created_date, closed_date, summary_generated\n                FROM conversations\n                ORDER BY closed_date DESC\n            ",
+                "\n                SELECT id, title, created_date, closed_date, summary_generated, tab_type\n                FROM conversations\n                ORDER BY closed_date DESC\n            ",
             )
             return cursor.fetchall()
 
@@ -113,12 +139,12 @@ class ConversationDatabase:
     def search_conversations(
         self,
         search_term: str,
-    ) -> list[tuple[int, str, str, str, bool]]:
+    ) -> list[tuple[int, str, str, str, bool, str | None]]:
         """Search conversations by title."""
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.cursor()
             cursor.execute(
-                "\n                SELECT id, title, created_date, closed_date, summary_generated\n                FROM conversations\n                WHERE title LIKE ?\n                ORDER BY closed_date DESC\n            ",
+                "\n                SELECT id, title, created_date, closed_date, summary_generated, tab_type\n                FROM conversations\n                WHERE title LIKE ?\n                ORDER BY closed_date DESC\n            ",
                 (f"%{search_term}%",),
             )
             return cursor.fetchall()
@@ -185,12 +211,13 @@ class ConversationDatabase:
             cursor.execute(
                 """
                 INSERT OR REPLACE INTO conversations
-                    (id, title, chat_data, created_date, closed_date, summary_generated)
+                    (id, title, chat_data, created_date, closed_date, summary_generated, tab_type)
                 VALUES (
                     ?,
                     ?,
                     ?,
                     COALESCE((SELECT created_date FROM conversations WHERE id = ?), ?),
+                    ?,
                     ?,
                     ?
                 )
@@ -203,6 +230,7 @@ class ConversationDatabase:
                     fallback_date,
                     datetime.now().isoformat(),
                     int(chat_data.get("summary_generated", False)),
+                    chat_data.get("tab_type"),
                 ),
             )
             conn.commit()

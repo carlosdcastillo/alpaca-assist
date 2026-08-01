@@ -356,6 +356,7 @@ class WebViewAPI:
                     "title": row[1],
                     "created_date": row[2],
                     "closed_date": row[3],
+                    "tab_type": row[5],
                 }
                 for row in rows
             ]

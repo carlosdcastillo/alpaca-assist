@@ -1031,7 +1031,7 @@ class AlpacaApp {
     list.innerHTML = "";
     for (const conv of conversations) {
       const row = document.createElement("div");
-      row.className = "history-row";
+      row.className = conv.tab_type === "pack" ? "history-row pack" : "history-row";
       row.dataset.convId = conv.id;
 
       const closedDate = this._formatHistoryDate(conv.closed_date);

@@ -95,3 +95,25 @@ class TestReviveConversationRoutesPackTabs:
             api.revive_conversation(42)
 
         revived_tab.load_from_data.assert_called_once_with(tab_data)
+
+
+class TestGetHistoryReportsTabType:
+    """History rows must carry tab_type so the UI can badge Pack
+
+    conversations, matching the chain-link glyph already used for open
+    Pack tabs in the tab bar.
+    """
+
+    def test_pack_and_regular_rows_both_report_their_tab_type(self) -> None:
+        mock_app = Mock()
+        mock_app.core.db.get_conversations.return_value = [
+            (1, "Remote Chat", "2026-01-01", "2026-01-02", 0, "pack"),
+            (2, "Local Chat", "2026-01-01", "2026-01-02", 0, None),
+        ]
+        api = WebViewAPI(mock_app)
+
+        result = api.get_history()
+
+        by_title = {c["title"]: c["tab_type"] for c in result["conversations"]}
+        assert by_title["Remote Chat"] == "pack"
+        assert by_title["Local Chat"] is None

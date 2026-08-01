@@ -305,13 +305,32 @@ class TestConversationRetrieval:
 
         assert len(conversations) == 1
         conv = conversations[0]
-        # Tuple is: (id, title, created_date, closed_date, summary_generated)
-        assert len(conv) == 5
+        # Tuple is: (id, title, created_date, closed_date, summary_generated, tab_type)
+        assert len(conv) == 6
         assert isinstance(conv[0], int)
         assert isinstance(conv[1], str)
         assert isinstance(conv[2], str)
         assert isinstance(conv[3], str)
         assert isinstance(conv[4], int)
+        assert conv[5] is None
+
+    def test_get_conversations_reports_pack_tab_type(
+        self,
+        mock_db: ConversationDatabase,
+    ) -> None:
+        """History rows must be able to tell Pack conversations apart from
+
+        regular ones without parsing chat_data's JSON blob on every list
+        load (find_conversation_by_tab_id already flags that as unsafe
+        for a hot path).
+        """
+        _store(mock_db, "Local", {"questions": [], "answers": []})
+        _store(mock_db, "Remote", {"tab_type": "pack", "host": "user@host"})
+
+        conversations = {conv[1]: conv[5] for conv in mock_db.get_conversations()}
+
+        assert conversations["Local"] is None
+        assert conversations["Remote"] == "pack"
 
 
 class TestConversationDeletion:
@@ -626,6 +645,57 @@ class TestDatabaseMigration:
         result = mock_db.get_conversation(conversation_id)
 
         assert result is not None
+
+    def test_adds_tab_type_column_to_a_pre_existing_database(
+        self,
+        temp_db_path: Path,
+    ) -> None:
+        """A DB file created before the tab_type column existed must be
+
+        migrated in place on the next open, with existing rows intact,
+        and existing Pack conversations backfilled from their chat_data
+        blob rather than only picking up tab_type for rows written after
+        the migration.
+        """
+        with sqlite3.connect(str(temp_db_path)) as conn:
+            conn.execute(
+                """
+                CREATE TABLE conversations (
+                    id INTEGER PRIMARY KEY,
+                    title TEXT NOT NULL,
+                    chat_data TEXT NOT NULL,
+                    created_date TEXT NOT NULL,
+                    closed_date TEXT NOT NULL,
+                    summary_generated INTEGER DEFAULT 0,
+                    original_id INTEGER DEFAULT NULL
+                )
+                """,
+            )
+            conn.execute(
+                "INSERT INTO conversations "
+                "(id, title, chat_data, created_date, closed_date) "
+                "VALUES (1, 'Pre-migration Local', '{}', '2026-01-01', '2026-01-01')",
+            )
+            conn.execute(
+                "INSERT INTO conversations "
+                "(id, title, chat_data, created_date, closed_date) "
+                "VALUES (2, 'Pre-migration Pack', "
+                "'{\"tab_type\": \"pack\", \"host\": \"user@host\"}', "
+                "'2026-01-01', '2026-01-01')",
+            )
+            conn.commit()
+
+        db = ConversationDatabase(str(temp_db_path))
+
+        by_title = {c[1]: c[5] for c in db.get_conversations()}
+        assert len(by_title) == 2
+        assert by_title["Pre-migration Local"] is None
+        assert by_title["Pre-migration Pack"] == "pack"
+
+        # And the migrated column is actually usable going forward.
+        _store(db, "New Pack Tab", {"tab_type": "pack"})
+        by_title = {c[1]: c[5] for c in db.get_conversations()}
+        assert by_title["New Pack Tab"] == "pack"
 
 
 class TestDatabasePerformance:

@@ -1887,6 +1887,13 @@ mark.find-current {
     white-space: nowrap;
 }
 
+/* Pack tab badge — same glyph and rationale as .tab.pack in the tab bar. */
+.history-row.pack .history-row-title::before {
+    content: '\1F517';
+    margin-right: 4px;
+    font-size: 11px;
+}
+
 .history-row-date {
     font-size: 11px;
     color: var(--text-secondary);
