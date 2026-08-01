@@ -41,6 +41,10 @@ describe("PythonAPI", () => {
         tab_id: "tab-2-def456",
       }),
       resolve_pack_session_lost: jest.fn().mockResolvedValue({ success: true }),
+      get_pack_hosts: jest.fn().mockResolvedValue({
+        success: true,
+        hosts: [{ hostname: "192.168.0.58", display_name: "Deimos" }],
+      }),
       close_tab: jest.fn().mockResolvedValue({ success: true }),
       get_tabs: jest.fn().mockResolvedValue({ success: true, tabs: [] }),
       switch_tab: jest.fn().mockResolvedValue({ success: true }),
@@ -239,6 +243,15 @@ describe("PythonAPI", () => {
         "user@host",
         "Pack Tab",
       );
+    });
+
+    it("get_pack_hosts() should call Python and return the host list", async () => {
+      const result = await api.get_pack_hosts();
+
+      expect(mockPythonAPI.get_pack_hosts).toHaveBeenCalledWith();
+      expect(result.hosts).toEqual([
+        { hostname: "192.168.0.58", display_name: "Deimos" },
+      ]);
     });
 
     it("resolve_pack_session_lost() should call Python with tabId and the choice", async () => {

@@ -27,5 +27,11 @@ DEFAULT_PREFERENCES: dict[str, Any] = {
 # MCP configuration
 MCP_SERVERS_FILE: str = "mcp_servers.json"
 
+# Known remote hosts offered as quick-picks when creating a Pack tab — a
+# JSON array of {"hostname": <ssh target>, "display_name": <label>}
+# entries. Missing/empty file just means no quick-picks; "New Pack
+# Tab..." still accepts any host typed by hand.
+PACK_FILE: str = "pack.json"
+
 # Skills directory
 _DEFAULT_SKILLS_DIR = str(Path.home() / ".raven" / "skills")

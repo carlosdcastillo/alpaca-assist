@@ -95,6 +95,44 @@ class WebViewAPI:
             logger.error(f"Error creating tab: {e}")
             return {"success": False, "error": str(e)}
 
+    def get_pack_hosts(self) -> dict[str, Any]:
+        """Return the quick-pick host list from pack.json, if any.
+
+        A JSON array of {"hostname": <ssh target>, "display_name": <label>}
+        entries; display_name falls back to hostname when omitted, and
+        entries without a hostname are skipped. Missing file or malformed
+        content just yields an empty list — "New Pack Tab..." always
+        falls back to letting the user type a host by hand.
+        """
+        import os
+
+        from core.config import PACK_FILE
+
+        try:
+            if not os.path.exists(PACK_FILE):
+                return {"success": True, "hosts": []}
+            with open(PACK_FILE) as f:
+                raw = json.load(f)
+            if not isinstance(raw, list):
+                return {"success": True, "hosts": []}
+            hosts = []
+            for entry in raw:
+                if not isinstance(entry, dict):
+                    continue
+                hostname = entry.get("hostname")
+                if not hostname:
+                    continue
+                hosts.append(
+                    {
+                        "hostname": str(hostname),
+                        "display_name": str(entry.get("display_name") or hostname),
+                    },
+                )
+            return {"success": True, "hosts": hosts}
+        except Exception as e:
+            logger.error(f"Error reading pack file: {e}")
+            return {"success": True, "hosts": []}
+
     def create_pack_tab(self, host: str, title: str = "Pack Tab") -> dict[str, Any]:
         """Create a new Pack tab — a tab whose backend runs on `host` over SSH.
 

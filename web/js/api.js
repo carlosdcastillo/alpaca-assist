@@ -70,6 +70,10 @@ class PythonAPI {
     return this.call("create_pack_tab", host, title);
   }
 
+  async get_pack_hosts() {
+    return this.call("get_pack_hosts");
+  }
+
   async resolve_pack_session_lost(tabId, recreate) {
     return this.call("resolve_pack_session_lost", tabId, recreate);
   }

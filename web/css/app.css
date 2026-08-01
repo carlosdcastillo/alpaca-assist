@@ -1218,7 +1218,8 @@ a[href^="alpaca://conv/"] {
     white-space: pre-wrap;
 }
 
-.message-dialog-input {
+.message-dialog-input,
+.message-dialog-select {
     display: none;
     width: 100%;
     margin-top: 12px;
@@ -1231,7 +1232,8 @@ a[href^="alpaca://conv/"] {
     box-sizing: border-box;
 }
 
-.message-dialog-input.active {
+.message-dialog-input.active,
+.message-dialog-select.active {
     display: block;
 }
 

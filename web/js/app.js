@@ -504,10 +504,21 @@ class AlpacaApp {
         await this.tabManager.createTab();
         break;
       case "new-pack-tab": {
-        const host = await this._showPrompt(
+        const hostsResult = await this.api.get_pack_hosts();
+        const knownHosts =
+          hostsResult && hostsResult.success ? hostsResult.hosts || [] : [];
+        const selectOptions = knownHosts.map((h) => ({
+          value: h.hostname,
+          label: h.display_name,
+        }));
+        const host = await this._showMessageDialog(
           "Remote host (user@host):",
-          "",
-          "New Pack Tab",
+          {
+            title: "New Pack Tab",
+            cancelText: "Cancel",
+            withInput: true,
+            selectOptions,
+          },
         );
         if (host && host.trim()) {
           await this.tabManager.createPackTab(host.trim());
@@ -2055,11 +2066,18 @@ class AlpacaApp {
    *
    * @param {string} message
    * @param {{title?: string, okText?: string, cancelText?: string|null,
-   *   withInput?: boolean, inputDefault?: string}} opts
+   *   withInput?: boolean, inputDefault?: string,
+   *   selectOptions?: {value: string, label: string}[],
+   *   selectCustomLabel?: string}} opts
    *   cancelText: null (default) shows only an OK button (alert-style).
    *   Pass a label to also show a Cancel button (confirm-style).
    *   withInput shows a text field (prompt-style); the resolved value is
    *   then the input's string (or null if cancelled) instead of a boolean.
+   *   selectOptions shows a dropdown of quick-pick {value, label} pairs
+   *   instead of the text field, plus a trailing selectCustomLabel entry
+   *   that reveals the text field for a one-off value; the resolved
+   *   value is whichever of the two was actually chosen (a value string,
+   *   never a label). Ignored when empty/omitted.
    * @returns {Promise<boolean|string|null>}
    */
   _showMessageDialog(message, opts = {}) {
@@ -2069,7 +2087,11 @@ class AlpacaApp {
       cancelText = null,
       withInput = false,
       inputDefault = "",
+      selectOptions = [],
+      selectCustomLabel = "Custom…",
     } = opts;
+    const hasSelect = selectOptions.length > 0;
+    const resolvesToText = withInput || hasSelect;
     return new Promise((resolve) => {
       document.getElementById("message-dialog-title").textContent = title;
       document.getElementById("message-dialog-text").textContent = message;
@@ -2077,21 +2099,56 @@ class AlpacaApp {
       const okBtn = document.getElementById("message-dialog-ok-btn");
       const cancelBtn = document.getElementById("message-dialog-cancel-btn");
       const input = document.getElementById("message-dialog-input");
+      const select = document.getElementById("message-dialog-select");
       okBtn.textContent = okText;
       cancelBtn.style.display = cancelText !== null ? "" : "none";
       cancelBtn.textContent = cancelText || "Cancel";
-      input.classList.toggle("active", withInput);
-      input.value = withInput ? inputDefault : "";
+
+      select.classList.toggle("active", hasSelect);
+      select.innerHTML = "";
+      if (hasSelect) {
+        for (const { value, label } of selectOptions) {
+          const option = document.createElement("option");
+          option.value = value;
+          option.textContent = label;
+          select.appendChild(option);
+        }
+        const customOption = document.createElement("option");
+        customOption.value = "__custom__";
+        customOption.textContent = selectCustomLabel;
+        select.appendChild(customOption);
+        select.value = selectOptions[0].value;
+      }
+
+      const showInputNow = withInput && !hasSelect;
+      input.classList.toggle("active", showInputNow || (hasSelect && select.value === "__custom__"));
+      input.value = resolvesToText ? inputDefault : "";
 
       const overlay = document.getElementById("message-dialog-overlay");
+
+      const onSelectChange = () => {
+        const isCustom = select.value === "__custom__";
+        input.classList.toggle("active", isCustom);
+        if (isCustom) input.focus();
+      };
+      if (hasSelect) select.addEventListener("change", onSelectChange);
 
       const cleanup = (confirmed) => {
         okBtn.removeEventListener("click", onOk);
         cancelBtn.removeEventListener("click", onCancel);
         input.removeEventListener("keydown", onInputKeydown);
+        if (hasSelect) select.removeEventListener("change", onSelectChange);
         overlay.classList.remove("active");
         this._messageDialogDismiss = null;
-        resolve(withInput ? (confirmed ? input.value : null) : confirmed);
+        if (!resolvesToText) {
+          resolve(confirmed);
+          return;
+        }
+        if (!confirmed) {
+          resolve(null);
+          return;
+        }
+        resolve(hasSelect && select.value !== "__custom__" ? select.value : input.value);
       };
       const onOk = () => cleanup(true);
       const onCancel = () => cleanup(false);
@@ -2101,11 +2158,17 @@ class AlpacaApp {
 
       okBtn.addEventListener("click", onOk);
       cancelBtn.addEventListener("click", onCancel);
-      if (withInput) input.addEventListener("keydown", onInputKeydown);
+      if (resolvesToText) input.addEventListener("keydown", onInputKeydown);
       this._messageDialogDismiss = onCancel;
 
       overlay.classList.add("active");
-      (withInput ? input : okBtn).focus();
+      if (hasSelect) {
+        select.focus();
+      } else if (withInput) {
+        input.focus();
+      } else {
+        okBtn.focus();
+      }
     });
   }
 
