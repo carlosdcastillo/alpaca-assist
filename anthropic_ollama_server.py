@@ -831,6 +831,7 @@ class OllamaRequestHandler(BaseHTTPRequestHandler):
                     "model",
                     DEFAULT_MODEL,
                 )
+                conversation_id = request_data.get("conversation_id")
 
                 # Extract tool call token from headers for secure tag-based detection
                 tool_call_token = self.headers.get("X-Tool-Call-Token")
@@ -867,6 +868,7 @@ class OllamaRequestHandler(BaseHTTPRequestHandler):
                     model,
                     tool_call_token,
                     request_system,
+                    conversation_id,
                 )
             except json.JSONDecodeError:
                 self.send_error(400, "Invalid JSON")
@@ -882,6 +884,7 @@ class OllamaRequestHandler(BaseHTTPRequestHandler):
         model: str = "claude-3-5-sonnet-20240620",
         tool_call_token: str | None = None,
         request_system: str | None = None,
+        conversation_id: int | str | None = None,
     ):
         """Handle requests with optional tools."""
         anthropic_tools = None
@@ -910,6 +913,7 @@ class OllamaRequestHandler(BaseHTTPRequestHandler):
             system=system_blocks,
             tools=anthropic_tools,
             tool_choice=tool_choice,
+            conversation_id=conversation_id,
         )
         self._process_stream(stream, tool_call_token)
 
@@ -987,6 +991,7 @@ class ClaudeClient:
         system: str | list[dict[str, Any]] | None = None,
         tools: list[dict] | None = None,
         tool_choice: dict | None = None,
+        conversation_id: int | str | None = None,
     ) -> Generator[dict[str, Any], None, None]:
         """
         Send a streaming completion request to Claude 3.7 Sonnet
@@ -998,6 +1003,11 @@ class ClaudeClient:
             temperature: The sampling temperature (0-1)
             system: Optional system prompt to set context
             tools: Optional list of tools in Anthropic format
+            conversation_id: Unused here — Anthropic's own cache is a
+                distributed hash lookup with no replica affinity to pin
+                (see FireworksClient.stream_complete, which does need it).
+                Accepted for signature parity with FireworksClient since
+                both are called interchangeably via get_client_for_model().
 
         Yields:
             Chunks of the response as they are received
@@ -1116,6 +1126,7 @@ class FireworksClient:
         system: str | list[dict[str, Any]] | None = None,
         tools: list[dict] | None = None,
         tool_choice: dict | None = None,
+        conversation_id: int | str | None = None,
     ) -> Generator[dict[str, Any], None, None]:
         url = f"{self.base_url}/messages"
 
@@ -1142,7 +1153,25 @@ class FireworksClient:
             payload["tools"] = tools
         if tool_choice:
             payload["tool_choice"] = tool_choice
-        response = requests.post(url, headers=self.headers, json=payload, stream=True)
+        # Fireworks' prompt cache is local to whichever replica wrote it —
+        # unlike Anthropic's own hash-keyed distributed cache, there's no
+        # affinity by default, so a multi-call tool loop (each request
+        # potentially hitting a different replica) gets near-zero cache
+        # hits despite resending an otherwise-identical prefix. Pinning
+        # all calls for one conversation to the same replica is what
+        # makes the cache_control breakpoints upstream actually pay off.
+        request_headers = self.headers
+        if conversation_id is not None:
+            request_headers = {
+                **self.headers,
+                "x-session-affinity": str(conversation_id),
+            }
+        response = requests.post(
+            url,
+            headers=request_headers,
+            json=payload,
+            stream=True,
+        )
         if response.status_code != 200:
             print(f"Error: {response.status_code}")
             print(response.text)

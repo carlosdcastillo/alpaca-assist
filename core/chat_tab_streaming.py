@@ -203,6 +203,7 @@ class StreamingHandler:
                 "model": self._chat.preferences.get("model", DEFAULT_MODEL),
                 "messages": messages,
                 "stream": True,
+                "conversation_id": self._chat.conversation_id,
             }
 
             # Add tools if available
@@ -307,6 +308,7 @@ class StreamingHandler:
                 ),
                 "messages": messages,
                 "stream": True,
+                "conversation_id": self._chat.conversation_id,
             }
 
             # Add tools if available
