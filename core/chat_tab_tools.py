@@ -23,6 +23,7 @@ from typing import Any
 from typing import TYPE_CHECKING
 
 import utils
+from core.tool_output_gate import gate_tool_call_arguments
 from core.tool_output_gate import gate_tool_output
 
 if TYPE_CHECKING:
@@ -184,10 +185,20 @@ class ToolHandler:
                 else f"{server_name}_{actual_tool_name}_{uuid.uuid4().hex[:8]}"
             )
 
-            # Persist tool call to ChatState
+            # Persist tool call to ChatState. Gate oversized arguments before
+            # storage — the call has already executed with the real,
+            # unmodified arguments above; only the stored/replayed copy is
+            # capped, since (unlike results) a tool_use_call block is never
+            # stubbed by KEEP_LAST_N_TOOL_PAIRS regardless of age.
+            gated_tool_json = gate_tool_call_arguments(
+                tool_json,
+                self._chat.tab_id,
+                tc_store_id,
+                tool_name,
+            )
             self._chat.chat_state.add_tool_call_to_answer(
                 answer_index,
-                tool_json,
+                gated_tool_json,
                 tc_store_id,
             )
             logger.debug(f"[TOOL] Tool call persisted with id={tc_store_id}")
