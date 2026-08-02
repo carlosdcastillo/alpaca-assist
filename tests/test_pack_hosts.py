@@ -112,8 +112,97 @@ class TestGetPackHosts:
         api_in: WebViewAPI,
         tmp_path,
     ) -> None:
-        (tmp_path / "pack.json").write_text("not valid json {{[")
+        (tmp_path / "pack.json").write_text("not valid json {{")
 
         result = api_in.get_pack_hosts()
 
         assert result == {"success": True, "hosts": []}
+
+
+class TestLookupPackDisplayName:
+    """The status-bar badge uses _lookup_pack_display_name to resolve a
+    pack host's IP/hostname into the human-friendly label from pack.json.
+
+    Callers must be able to use the return value directly as a label
+    without their own fallback — the only case with nothing to show is no
+    hostname at all.
+    """
+
+    def test_returns_display_name_for_known_host(
+        self,
+        api_in: WebViewAPI,
+        tmp_path,
+    ) -> None:
+        (tmp_path / "pack.json").write_text(
+            json.dumps(
+                [{"hostname": "192.168.0.58", "display_name": "Deimos"}],
+            ),
+        )
+
+        assert api_in._lookup_pack_display_name("192.168.0.58") == "Deimos"
+
+    def test_returns_hostname_itself_for_unknown_host(
+        self,
+        api_in: WebViewAPI,
+        tmp_path,
+    ) -> None:
+        (tmp_path / "pack.json").write_text(
+            json.dumps(
+                [{"hostname": "192.168.0.58", "display_name": "Deimos"}],
+            ),
+        )
+
+        assert api_in._lookup_pack_display_name("10.0.0.99") == "10.0.0.99"
+
+    def test_returns_hostname_itself_when_file_missing(
+        self,
+        api_in: WebViewAPI,
+    ) -> None:
+        assert api_in._lookup_pack_display_name("192.168.0.58") == "192.168.0.58"
+
+    def test_returns_none_for_none_input(self, api_in: WebViewAPI) -> None:
+        assert api_in._lookup_pack_display_name(None) is None
+
+
+class TestReadPackHostsCaching:
+    """_read_pack_hosts caches by (path, mtime) so the frequent status-bar
+    poll doesn't re-read pack.json on every call, but still picks up edits
+    made while the app is running.
+    """
+
+    def test_repeated_reads_without_changes_return_equal_data(
+        self,
+        api_in: WebViewAPI,
+        tmp_path,
+    ) -> None:
+        (tmp_path / "pack.json").write_text(
+            json.dumps([{"hostname": "192.168.0.58", "display_name": "Deimos"}]),
+        )
+
+        first = api_in.get_pack_hosts()
+        second = api_in.get_pack_hosts()
+
+        assert first == second
+
+    def test_edit_after_read_is_picked_up_on_next_call(
+        self,
+        api_in: WebViewAPI,
+        tmp_path,
+    ) -> None:
+        pack_file = tmp_path / "pack.json"
+        pack_file.write_text(
+            json.dumps([{"hostname": "192.168.0.58", "display_name": "Deimos"}]),
+        )
+        assert api_in._lookup_pack_display_name("192.168.0.58") == "Deimos"
+
+        pack_file.write_text(
+            json.dumps([{"hostname": "192.168.0.58", "display_name": "Renamed"}]),
+        )
+        # Force a distinct mtime — some filesystems have coarse (1s)
+        # mtime resolution, and two writes in quick succession could
+        # otherwise land on the same timestamp and defeat this test.
+        new_mtime = os.path.getmtime(pack_file) + 5
+        os.utime(pack_file, (new_mtime, new_mtime))
+
+        assert api_in._lookup_pack_display_name("192.168.0.58") == "Renamed"
+

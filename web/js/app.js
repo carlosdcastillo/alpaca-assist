@@ -2495,12 +2495,13 @@ class AlpacaApp {
 
     if (info.is_pack) {
       const host = info.host || "unknown host";
+      const label = info.display_name || host;
       if (info.connected) {
-        badge.textContent = `Pack: ${host}`;
+        badge.textContent = `Pack: ${label}`;
         badge.title = `Connected to ${host}`;
         badge.classList.add("status-connection--connected");
       } else {
-        badge.textContent = `Pack: ${host} (offline)`;
+        badge.textContent = `Pack: ${label} (offline)`;
         badge.title = `Disconnected from ${host}`;
         badge.classList.add("status-connection--disconnected");
       }

@@ -96,6 +96,35 @@ class TestGetStatusInfoPack:
         assert result["host"] == "build-server-01"
         assert result["connected"] is True
         assert result["session_id"] == "sess-123"
+        # No pack.json in this tab's (isolated, empty) cwd — display_name
+        # must still fall back to the raw host, not be missing or None.
+        assert result["display_name"] == "build-server-01"
+
+    def test_pack_tab_reports_display_name_from_pack_json(
+        self,
+        api,
+        core,
+        tmp_path,
+    ) -> None:
+        import json
+
+        (tmp_path / "pack.json").write_text(
+            json.dumps([{"hostname": "192.168.0.58", "display_name": "Deimos"}]),
+        )
+        tab = Mock()
+        tab.chat_state = _FakeChatState("")
+        tab.last_invocation_metrics = None
+        tab.session_output_tokens = 0
+        tab.session_input_tokens = 0
+        tab.session_cached_input_tokens = 0
+        tab.host = "192.168.0.58"
+        tab.offline = False
+        tab.session_id = "sess-123"
+        core.tabs["tab-pack"] = tab
+
+        result = api.get_status_info("tab-pack")
+
+        assert result["display_name"] == "Deimos"
 
     def test_pack_tab_reports_disconnected_when_offline(self, api, core) -> None:
         tab = Mock()

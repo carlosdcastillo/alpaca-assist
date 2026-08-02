@@ -17,6 +17,19 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+# {absolute pack.json path: (mtime, parsed hosts)} — module-level rather
+# than an instance attribute since WebViewAPI uses __slots__ and this data
+# isn't per-instance anyway. get_status_info's status-bar poll can call
+# this up to once/second while a Pack tab is streaming; keyed on
+# (path, mtime) so edits made to pack.json while the app is running are
+# still picked up without needing an app restart, but a steady file
+# doesn't get re-read/re-parsed on every single poll. Keyed on the
+# resolved absolute path, not just mtime, since PACK_FILE is cwd-relative
+# — a bare mtime key would risk serving another file's stale cached
+# content if cwd ever changed between calls (e.g. in tests, each using a
+# different tmp dir) and the two files' mtimes happened to coincide.
+_pack_hosts_cache: dict[str, tuple[float, list[dict[str, str]]]] = {}
+
 
 class WebViewAPI:
     """Bidirectional bridge using JS polling for UI updates.
@@ -104,18 +117,40 @@ class WebViewAPI:
         content just yields an empty list — "New Pack Tab..." always
         falls back to letting the user type a host by hand.
         """
+        try:
+            return {"success": True, "hosts": self._read_pack_hosts()}
+        except Exception as e:
+            logger.error(f"Error reading pack file: {e}")
+            return {"success": True, "hosts": []}
+
+    @staticmethod
+    def _read_pack_hosts() -> list[dict[str, str]]:
+        """Parse pack.json into a list of {hostname, display_name} dicts.
+
+        Cached by (path, mtime) — get_status_info's status-bar poll can
+        call this (via _lookup_pack_display_name) up to once/second while a
+        Pack tab is streaming, and re-parsing a steady file on every single
+        poll is wasted work. Keying on mtime rather than caching forever
+        means edits to pack.json while the app is running are still picked
+        up on the next call after they land, not just after a restart.
+        """
         import os
 
         from core.config import PACK_FILE
 
-        try:
-            if not os.path.exists(PACK_FILE):
-                return {"success": True, "hosts": []}
-            with open(PACK_FILE) as f:
-                raw = json.load(f)
-            if not isinstance(raw, list):
-                return {"success": True, "hosts": []}
-            hosts = []
+        if not os.path.exists(PACK_FILE):
+            return []
+
+        abspath = os.path.abspath(PACK_FILE)
+        mtime = os.path.getmtime(PACK_FILE)
+        cached = _pack_hosts_cache.get(abspath)
+        if cached is not None and cached[0] == mtime:
+            return cached[1]
+
+        with open(PACK_FILE) as f:
+            raw = json.load(f)
+        hosts: list[dict[str, str]] = []
+        if isinstance(raw, list):
             for entry in raw:
                 if not isinstance(entry, dict):
                     continue
@@ -128,10 +163,25 @@ class WebViewAPI:
                         "display_name": str(entry.get("display_name") or hostname),
                     },
                 )
-            return {"success": True, "hosts": hosts}
-        except Exception as e:
-            logger.error(f"Error reading pack file: {e}")
-            return {"success": True, "hosts": []}
+        _pack_hosts_cache[abspath] = (mtime, hosts)
+        return hosts
+
+    def _lookup_pack_display_name(self, hostname: str | None) -> str | None:
+        """Return the best label to show for *hostname*: its display_name
+        from pack.json if listed there, otherwise the hostname itself, or
+        None if no hostname was given at all. Callers can always use the
+        return value directly as a label without needing their own
+        fallback — the only case with nothing to show is no input.
+        """
+        if not hostname:
+            return None
+        try:
+            for entry in self._read_pack_hosts():
+                if entry["hostname"] == hostname:
+                    return entry["display_name"]
+        except Exception:
+            logger.warning(f"Could not read pack.json to resolve display name for {hostname!r}")
+        return hostname
 
     def create_pack_tab(self, host: str, title: str = "Pack Tab") -> dict[str, Any]:
         """Create a new Pack tab — a tab whose backend runs on `host` over SSH.
@@ -374,6 +424,11 @@ class WebViewAPI:
                 pack_info["host"] = getattr(tab, "host", None)
                 pack_info["connected"] = not getattr(tab, "offline", True)
                 pack_info["session_id"] = getattr(tab, "session_id", None)
+                # Resolve a human-friendly display name from pack.json so
+                # the badge shows "Pack: Deimos" instead of the raw IP.
+                pack_info["display_name"] = self._lookup_pack_display_name(
+                    pack_info["host"],
+                )
 
             return {
                 "success": True,
