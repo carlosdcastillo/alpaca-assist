@@ -1945,6 +1945,9 @@ class AlpacaApp {
     const tab = this.tabManager.tabs.get(tabId);
     if (tab && tab.isPack) {
       this.tabManager.setTabOffline(tabId, true);
+      if (tabId === this.currentTabId) {
+        this._updateStatusBar();
+      }
     }
 
     // Show a toast so errors from background tabs are never silently dropped.
@@ -1963,6 +1966,7 @@ class AlpacaApp {
     this.tabManager.setTabOffline(tabId, false);
     if (tabId !== this.currentTabId) return;
     await this._reloadConversationDisplay();
+    this._updateStatusBar();
   }
 
   /**
@@ -2405,6 +2409,7 @@ class AlpacaApp {
     if (!this.currentTabId) {
       statusText.textContent = "";
       tokenCount.textContent = "⚪ Idle";
+      this._updateConnectionBadge(null);
       return;
     }
 
@@ -2417,6 +2422,9 @@ class AlpacaApp {
 
     const result = await this.api.get_status_info(this.currentTabId);
     if (!result || !result.success) return;
+
+    // Connection badge: local vs pack, host, and connectivity state.
+    this._updateConnectionBadge(result);
 
     // Left: conversation size + token info
     const leftParts = [
@@ -2448,6 +2456,59 @@ class AlpacaApp {
       rightParts.push(`📚 ${result.skill_count} skills`);
     }
     tokenCount.textContent = rightParts.join("  ");
+  }
+
+  /**
+   * Render the Local/Pack connection badge in the status bar.
+   *
+   * @param {object|null} info - result from get_status_info, or null to reset
+   */
+  _updateConnectionBadge(info) {
+    let badge = document.getElementById("status-connection");
+    if (!badge) {
+      badge = document.createElement("span");
+      badge.id = "status-connection";
+      badge.className = "status-connection";
+      const statusBar = document.getElementById("status-bar");
+      const statusText = document.getElementById("status-text");
+      if (statusBar && statusText) {
+        statusBar.insertBefore(badge, statusText);
+      } else {
+        return;
+      }
+    }
+
+    badge.classList.remove(
+      "status-connection--local",
+      "status-connection--connected",
+      "status-connection--disconnected",
+    );
+
+    if (!info) {
+      badge.textContent = "";
+      badge.title = "";
+      badge.style.display = "none";
+      return;
+    }
+
+    badge.style.display = "";
+
+    if (info.is_pack) {
+      const host = info.host || "unknown host";
+      if (info.connected) {
+        badge.textContent = `Pack: ${host}`;
+        badge.title = `Connected to ${host}`;
+        badge.classList.add("status-connection--connected");
+      } else {
+        badge.textContent = `Pack: ${host} (offline)`;
+        badge.title = `Disconnected from ${host}`;
+        badge.classList.add("status-connection--disconnected");
+      }
+    } else {
+      badge.textContent = "Local";
+      badge.title = "Running on this machine";
+      badge.classList.add("status-connection--local");
+    }
   }
 
   /**

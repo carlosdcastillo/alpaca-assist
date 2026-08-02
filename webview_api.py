@@ -366,6 +366,15 @@ class WebViewAPI:
 
             skill_count = len(self._app.core.skill_manager.skills)
 
+            # Local vs. Pack context for the status bar badge. PackTab
+            # instances carry host/offline/session_id; plain ChatTabs don't.
+            is_pack = hasattr(tab, "host")
+            pack_info: dict[str, Any] = {"is_pack": is_pack}
+            if is_pack:
+                pack_info["host"] = getattr(tab, "host", None)
+                pack_info["connected"] = not getattr(tab, "offline", True)
+                pack_info["session_id"] = getattr(tab, "session_id", None)
+
             return {
                 "success": True,
                 "char_count": char_count,
@@ -376,6 +385,7 @@ class WebViewAPI:
                 "session_output_tokens": session_output_tokens,
                 "latency_ms": latency_ms,
                 "skill_count": skill_count,
+                **pack_info,
             }
         except Exception as e:
             logger.error(f"Error getting status info: {e}")
