@@ -1089,6 +1089,11 @@ a[href^="alpaca://conv/"] {
     /* No font/padding/margin/display changes — overlay must not alter text layout */
 }
 
+[data-theme="light"] .markdown-highlight-overlay .md-code,
+[data-theme="light"] .markdown-highlight-overlay .md-code-block {
+    color: #16a34a;
+}
+
 .markdown-highlight-overlay .md-link-bracket {
     color: #ff79c6; /* Pink - brackets */
 }

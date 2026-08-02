@@ -4,15 +4,15 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Alpaca Assist</title>
+    <meta name="color-scheme" content="dark">
     <script>
         // Set before first paint so there's no dark/light flash on launch.
         // Read from the URL query string instead of a generated file so this
         // works the same whether the app dir is writable or not (e.g. a
         // read-only PyInstaller bundle).
-        document.documentElement.setAttribute(
-            "data-theme",
-            new URLSearchParams(window.location.search).get("theme") || "dark",
-        );
+        const _theme = new URLSearchParams(window.location.search).get("theme") || "dark";
+        document.documentElement.setAttribute("data-theme", _theme);
+        document.querySelector('meta[name="color-scheme"]').content = _theme;
     </script>
     <link rel="stylesheet" href="css/themes.css">
     <link rel="stylesheet" href="css/app.css">
