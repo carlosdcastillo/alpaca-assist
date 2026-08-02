@@ -541,7 +541,7 @@ html, body {
 }
 
 .message-content p + p {
-    text-indent: 1.5em;
+    text-indent: 0;
 }
 
 .message-content p:last-child {
@@ -1525,7 +1525,7 @@ a[href^="alpaca://conv/"] {
 }
 
 .answer p + p {
-    text-indent: 1.5em;
+    text-indent: 0;
 }
 
 .answer p:last-child {
