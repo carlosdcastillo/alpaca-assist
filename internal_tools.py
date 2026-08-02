@@ -1137,7 +1137,7 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "internal_run_shell_command",
-            "description": "Execute a shell command (no shell interpretation — argv passed directly to the process, so ;/&&/backticks/etc. are literal arguments, not operators).",
+            "description": "Execute a command. No shell interpretation — argv passed directly to the process, so pipes, redirects, &&/;, and backticks are literal characters, not operators, and 'grep foo | wc -l' will not work as written. For pipes, redirects, or chaining multiple commands, wrap the whole sequence in bash -c, e.g. command='bash -c \"grep foo file | wc -l\"' — bash itself does the shell parsing, so this works normally.",
             "parameters": {
                 "type": "object",
                 "properties": {
