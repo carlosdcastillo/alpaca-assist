@@ -93,6 +93,30 @@ class TestConnect:
         assert "myhost" in argv
         assert any("abc123" in part for part in argv)
 
+    def test_connect_with_model_appends_it_to_the_remote_command(
+        self,
+        fake_popen: FakePopen,
+    ) -> None:
+        t = PackTransport("myhost", "abc123")
+        with patch("core.pack_transport.subprocess.Popen", return_value=fake_popen) as mock_popen:
+            t.connect(model="kimi-k3")
+        t.close()
+
+        argv = mock_popen.call_args[0][0]
+        assert argv[-1].endswith("pack_bridge.py abc123 kimi-k3")
+
+    def test_connect_without_model_omits_the_trailing_argument(
+        self,
+        fake_popen: FakePopen,
+    ) -> None:
+        t = PackTransport("myhost", "abc123")
+        with patch("core.pack_transport.subprocess.Popen", return_value=fake_popen) as mock_popen:
+            t.connect()
+        t.close()
+
+        argv = mock_popen.call_args[0][0]
+        assert argv[-1].endswith("pack_bridge.py abc123")
+
 
 class TestRequestResponse:
     def test_successful_round_trip(

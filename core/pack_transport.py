@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import itertools
 import logging
+import shlex
 import subprocess
 import threading
 from collections.abc import Callable
@@ -68,8 +69,15 @@ class PackTransport:
         """
         self._disconnect_handlers.append(handler)
 
-    def connect(self) -> None:
+    def connect(self, model: str | None = None) -> None:
         """Spawn the ssh subprocess and start reading.
+
+        model is only meaningful the first time a given session_id's
+        daemon is ever spawned — pack_bridge.py forwards it to
+        pack_daemon.py's --model flag, which seeds first-launch
+        preferences (see pack_daemon.py's docstring). Attaching to an
+        already-running daemon ignores it; that daemon has its own
+        preferences already.
 
         Raises PackTransportError only if the ssh binary itself can't be
         spawned locally (rare). Actual connection failures (unreachable
@@ -79,6 +87,8 @@ class PackTransport:
         instead — ssh itself may take the full ConnectTimeout to fail.
         """
         remote_cmd = REMOTE_BRIDGE_COMMAND.format(session_id=self.session_id)
+        if model:
+            remote_cmd += f" {shlex.quote(model)}"
         argv = ["ssh", *SSH_OPTIONS, self.host, remote_cmd]
         try:
             self._process = subprocess.Popen(

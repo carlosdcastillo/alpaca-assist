@@ -6,16 +6,18 @@ session id, then relays this process's own stdio to the daemon's Unix
 domain socket. The local side runs this via:
 
     ssh -o BatchMode=yes -o ConnectTimeout=8 <host> \
-        "python3 ~/pywebview_demo/pack_bridge.py <session_id>"
+        "python3 ~/pywebview_demo/pack_bridge.py <session_id> [model]"
 
 so from the local side's point of view, the ssh subprocess's stdin/stdout
 *is* the persistent JSON-RPC channel to the remote ChatTab, regardless of
 whether this invocation started a fresh daemon or reattached to one that
 was already running (e.g. because a previous SSH link dropped without the
-daemon dying — the whole point of Pack tabs).
+daemon dying — the whole point of Pack tabs). The optional model arg is
+forwarded to a freshly-spawned daemon's --model flag; it's meaningless
+(and ignored) when reattaching to one already running.
 
 Usage:
-    python3 pack_bridge.py <session_id>
+    python3 pack_bridge.py <session_id> [model]
 
 Race safety: two near-simultaneous invocations for the same session id
 serialize on a flock() around the launch decision only (not the relay
@@ -55,10 +57,12 @@ def _probe_connect(sock_path: Path) -> socket.socket | None:
         return None
 
 
-def _launch_or_attach(session_id: str) -> socket.socket:
+def _launch_or_attach(session_id: str, model: str | None = None) -> socket.socket:
     """Idempotently ensure a daemon is running for `session_id`, return a
 
-    fresh connected socket to it.
+    fresh connected socket to it. model is only used if this call is the
+    one that actually spawns a fresh daemon — an already-running one
+    keeps whatever preferences it already has.
     """
     session_dir = Path.home() / ".alpaca_pack" / session_id
     session_dir.mkdir(parents=True, exist_ok=True)
@@ -79,9 +83,12 @@ def _launch_or_attach(session_id: str) -> socket.socket:
 
         repo_root = Path(__file__).resolve().parent
         log_path = session_dir / "daemon.log"
+        daemon_argv = [sys.executable, str(repo_root / "pack_daemon.py"), session_id]
+        if model:
+            daemon_argv += ["--model", model]
         with open(log_path, "ab") as log_file:
             subprocess.Popen(
-                [sys.executable, str(repo_root / "pack_daemon.py"), session_id],
+                daemon_argv,
                 stdin=subprocess.DEVNULL,
                 stdout=log_file,
                 stderr=subprocess.STDOUT,
@@ -146,13 +153,14 @@ def _relay(sock: socket.socket) -> None:
 
 
 def main() -> None:
-    if len(sys.argv) != 2:
-        print("usage: pack_bridge.py <session_id>", file=sys.stderr)
+    if len(sys.argv) not in (2, 3):
+        print("usage: pack_bridge.py <session_id> [model]", file=sys.stderr)
         sys.exit(2)
     session_id = sys.argv[1]
+    model = sys.argv[2] if len(sys.argv) == 3 else None
 
     try:
-        sock = _launch_or_attach(session_id)
+        sock = _launch_or_attach(session_id, model)
     except Exception as e:
         print(f"pack_bridge: {e}", file=sys.stderr)
         sys.exit(1)

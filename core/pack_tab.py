@@ -115,7 +115,7 @@ class PackTab:
     def _connect(self, model: str | None) -> None:
         with self._connect_lock:
             try:
-                self._transport.connect()
+                self._transport.connect(model=model)
                 self._resync(timeout=ATTACH_TIMEOUT)
                 self.offline = False
                 self._notify_if_active()

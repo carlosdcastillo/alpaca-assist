@@ -66,6 +66,48 @@ class TestConstruction:
         assert pack_tab.is_streaming is False
 
 
+class TestConnect:
+    def test_connect_forwards_model_to_the_transport(
+        self,
+        pack_tab: PackTab,
+    ) -> None:
+        """Regression test: AppCore.create_pack_tab/PackTab.connect_async's
+
+        model parameter used to be accepted and silently dropped — a
+        freshly created Pack tab always got whatever DEFAULT_MODEL
+        happened to be, regardless of what was selected locally. model
+        must actually reach PackTransport.connect so pack_bridge.py can
+        forward it to a freshly-spawned daemon's --model flag.
+        """
+        pack_tab._transport.send_request.return_value = ATTACH_RESPONSE
+
+        pack_tab.connect_async(model="kimi-k3")
+        deadline = time.monotonic() + 2.0
+        while time.monotonic() < deadline and not pack_tab._transport.connect.called:
+            time.sleep(0.02)
+
+        pack_tab._transport.connect.assert_called_once_with(model="kimi-k3")
+
+    def test_reconnect_does_not_force_a_model(
+        self,
+        pack_tab: PackTab,
+    ) -> None:
+        """Reconnecting an already-offline tab targets a daemon that (if
+
+        still alive) already has its own preferences — there's no local
+        model context to forward here, unlike a fresh connect_async.
+        """
+        pack_tab.offline = True
+        pack_tab._transport.send_request.return_value = ATTACH_RESPONSE
+
+        pack_tab.reconnect_async()
+        deadline = time.monotonic() + 2.0
+        while time.monotonic() < deadline and not pack_tab._transport.connect.called:
+            time.sleep(0.02)
+
+        pack_tab._transport.connect.assert_called_once_with(model=None)
+
+
 class TestHandleUserMessage:
     def test_sets_current_answer_index_before_returning(self, pack_tab: PackTab) -> None:
         transport = pack_tab._transport
