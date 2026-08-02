@@ -931,8 +931,14 @@ class TestToolHandlerPrepareContinuationMessages:
         assert len(breakpoints) == 1
         assert breakpoints[0] is cleared[-1]
 
-    def test_prepare_does_not_clear_historical_turns(self) -> None:
-        """Clearing only applies to the turn currently being continued."""
+    def test_prepare_clears_historical_turns_too(self) -> None:
+        """Clearing applies conversation-wide, not just the current turn.
+
+        A turn that's already complete still has its older pairs cleared if
+        the *global* pair count (across all turns) exceeds the threshold —
+        otherwise a conversation made of many small turns, each under the
+        threshold on its own, would never get bounded at all.
+        """
         mock_chat = Mock()
         mock_chat.chat_state.questions = ["Q1?", "Q2?"]
         total = ToolHandler.KEEP_LAST_N_TOOL_PAIRS + 5
@@ -949,9 +955,55 @@ class TestToolHandlerPrepareContinuationMessages:
 
         tool_results = [m for m in messages if m["role"] == "tool_result"]
         assert len(tool_results) == total
-        assert all(
-            m["content"] != ToolHandler.CLEARED_TOOL_RESULT_STUB for m in tool_results
-        )
+        cleared = [
+            m for m in tool_results if m["content"] == ToolHandler.CLEARED_TOOL_RESULT_STUB
+        ]
+        kept = [m for m in tool_results if m not in cleared]
+        assert len(cleared) == 5
+        assert len(kept) == ToolHandler.KEEP_LAST_N_TOOL_PAIRS
+        # The most recent pairs globally are still the ones kept in full,
+        # even though they all belong to the (only) historical turn here.
+        assert "Result " + str(total - 1) in kept[-1]["content"]
+
+    def test_prepare_clears_across_many_small_turns(self) -> None:
+        """Many turns each under threshold individually still get bounded
+        once their combined pair count crosses it globally.
+        """
+        mock_chat = Mock()
+        n_turns = ToolHandler.KEEP_LAST_N_TOOL_PAIRS + 5
+        mock_chat.chat_state.questions = [f"Q{n}?" for n in range(n_turns)]
+
+        answers = []
+        for n in range(n_turns):
+            answer = Mock()
+            answer.components = self._make_pairs(1)  # one pair per turn
+            # _make_pairs always starts ids at "tool-0" — make them unique
+            # across turns the same way real (server-assigned or uuid4
+            # fallback) tool-call ids would be.
+            from chat_state import ToolCall, ToolResult
+
+            answer.components = [
+                ToolCall(f'{{"tool_call": {{"name": "tool"}}}}', f"turn{n}-tool-0"),
+                ToolResult(f"Result turn{n}", f"turn{n}-tool-0"),
+            ]
+            answers.append(answer)
+        mock_chat.chat_state.answers = answers
+
+        callback = Mock()
+        handler = ToolHandler(mock_chat, callback)
+        messages = handler.prepare_continuation_messages(n_turns - 1)
+
+        tool_results = [m for m in messages if m["role"] == "tool_result"]
+        assert len(tool_results) == n_turns
+        cleared = [
+            m for m in tool_results if m["content"] == ToolHandler.CLEARED_TOOL_RESULT_STUB
+        ]
+        kept = [m for m in tool_results if m not in cleared]
+        assert len(cleared) == 5
+        assert len(kept) == ToolHandler.KEEP_LAST_N_TOOL_PAIRS
+        # tool_use_call blocks are still never cleared, regardless of turn.
+        tool_calls = [m for m in messages if m["role"] == "tool_use_call"]
+        assert len(tool_calls) == n_turns
 
 
 class TestToolHandlerParseForMessage:

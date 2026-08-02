@@ -26,16 +26,16 @@ normal growth. Ordinary turns (a handful of tool calls) are unaffected.
   Pure truncation/clearing.
 - **Not a replacement for `gate_tool_output`.** Per-result size capping
   stays as-is; this addresses repetition count, not single-result size.
-- **Not applied across turns.** Only within a single turn's own tool loop
-  (i.e., the tool-call pairs building up toward one `answer_index`).
 
 ## Mechanism
 
-In `prepare_continuation_messages`, once a turn's `tool_pairs` list exceeds
-a threshold (`KEEP_LAST_N_PAIRS`, suggested default 15-20):
+In `prepare_continuation_messages`, tool-call/result pairs are flattened
+into one chronological list *across the whole conversation* (not reset per
+turn — see "Applied across turns" below), and once that list exceeds a
+threshold (`KEEP_LAST_N_TOOL_PAIRS`, currently 15):
 
-- The most recent `KEEP_LAST_N_PAIRS` pairs are sent with full
-  `tool_result` content, as today.
+- The most recent `KEEP_LAST_N_TOOL_PAIRS` pairs, globally, are sent with
+  full `tool_result` content, as today.
 - Older pairs keep their `tool_use` message (call name + arguments) but
   have their `tool_result` content replaced with a fixed stub, e.g.:
   `"[tool result cleared to reduce context size — result of this call is
@@ -43,11 +43,25 @@ a threshold (`KEEP_LAST_N_PAIRS`, suggested default 15-20):
 - A second `cache_control` breakpoint is placed on the message
   immediately after the clear boundary (in addition to the existing
   breakpoint at the end of the previous completed turn), so subsequent
-  calls within the same turn resume accumulating cache hits against the
-  new, shorter prefix instead of paying full/write price on every call.
+  calls resume accumulating cache hits against the new, shorter prefix
+  instead of paying full/write price on every call.
 
 Threshold is coarse and count-based (not time-based) — deliberately simple
 to avoid interacting with the ~5-minute cache TTL in complicated ways.
+
+### Applied across turns
+
+Originally scoped to only the turn currently being continued, deliberately
+(see git history) — a conversation made of many turns that each individually
+stay under the threshold got no protection at all, since the pair count
+reset to zero at every turn boundary. Extended to a conversation-wide flat
+list instead: pairs are identified by their stable `tc.id` (already unique —
+either server-assigned or a uuid4 fallback), so "kept full" / "cleared"
+membership is computed once globally, then applied per turn when messages
+are rebuilt. A tool call's own arguments (`tool_use` block) are still never
+cleared regardless of which turn or how old — see
+`core/tool_output_gate.py`'s `gate_tool_call_arguments` for the separate
+mechanism that bounds *that* side.
 
 ## What's visible to the customer
 
@@ -98,5 +112,8 @@ for v1.
 - Cache-control breakpoint present exactly once at previous-turn boundary
   (existing behavior) and once at the new clear boundary when clearing
   occurred; absent when it didn't.
-- Multi-turn conversation: clearing in an earlier turn doesn't affect
-  pair content in a later, unrelated turn.
+- Multi-turn conversation: an already-completed turn's pairs get cleared
+  once the *global*, conversation-wide pair count crosses the threshold,
+  even if that turn's own pair count never would have on its own.
+- Many small turns (each under threshold individually) still get bounded
+  once their combined count crosses it globally.

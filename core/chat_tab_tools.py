@@ -497,15 +497,60 @@ class ToolHandler:
         """
         from chat_state import ToolCall, ToolResult
 
-        messages: list[dict[str, Any]] = []
-
         # Get chat history
         questions = self._chat.chat_state.questions.copy()
         answers = self._chat.chat_state.answers.copy()
         _qi = getattr(self._chat.chat_state, "question_images", None)
         all_images: list[list[str]] = list(_qi) if isinstance(_qi, list) else []
 
-        # Build message history up to current answer
+        # First pass: pair up each turn's tool calls/results (unchanged logic),
+        # and also flatten them into one chronological, conversation-wide list.
+        # Clearing decisions below are made against that flat list rather than
+        # per turn, so a conversation with many turns that each only have a
+        # few tool calls still gets bounded overall — previously only the
+        # turn currently being continued was ever considered, so accumulated
+        # history across completed turns was never cleared at all, no matter
+        # how large the conversation got. See TOOL_RESULT_CLEARING.md.
+        per_turn_pairs: list[list[tuple[Any, Any]]] = []
+        all_pairs: list[tuple[Any, Any]] = []
+        for i, (q, a) in enumerate(zip(questions, answers)):
+            if i > answer_index:
+                break
+            tc_list: list[Any] = []
+            tr_by_id: dict[str, Any] = {}
+            for component in a.components:
+                if isinstance(component, ToolCall):
+                    tc_list.append(component)
+                elif isinstance(component, ToolResult):
+                    tr_by_id[component.id] = component
+            tool_pairs: list[tuple[Any, Any]] = []
+            used_ids: set[str] = set()
+            for tc in tc_list:
+                tr = tr_by_id.get(tc.id)
+                if tr and tc.id not in used_ids:
+                    tool_pairs.append((tc, tr))
+                    used_ids.add(tc.id)
+            per_turn_pairs.append(tool_pairs)
+            all_pairs.extend(tool_pairs)
+
+        # Pairs never get *removed* from the kept-full set once past the
+        # global boundary below except by aging further back as more pairs
+        # accumulate, and stubbed content only ever grows by appending
+        # identical stub text — so the cleared region stays cache-stable
+        # across calls exactly as it did in the single-turn version.
+        n_total = len(all_pairs)
+        global_clear_boundary = max(0, n_total - self.KEEP_LAST_N_TOOL_PAIRS)
+        keep_full_ids = {tc.id for tc, _tr in all_pairs[global_clear_boundary:]}
+        last_cleared_id = (
+            all_pairs[global_clear_boundary - 1][0].id
+            if global_clear_boundary > 0
+            else None
+        )
+
+        # Second pass: build the actual message list in chronological order,
+        # using the global full/stub membership computed above instead of a
+        # per-turn boundary.
+        messages: list[dict[str, Any]] = []
         for i, (q, a) in enumerate(zip(questions, answers)):
             if i > answer_index:
                 break
@@ -519,13 +564,9 @@ class ToolHandler:
                 user_msg["images"] = imgs
             messages.append(user_msg)
 
-            # Two-pass approach for component ordering
             pre_texts: list[str] = []
             post_texts: list[str] = []
-            tc_list: list[Any] = []
-            tr_by_id: dict[str, Any] = {}
             seen_tc = False
-
             for component in a.components:
                 if isinstance(component, str):
                     if not seen_tc:
@@ -535,36 +576,18 @@ class ToolHandler:
                 elif isinstance(component, ToolCall):
                     seen_tc = True
                     post_texts = []  # Reset post-text on new ToolCall
-                    tc_list.append(component)
-                elif isinstance(component, ToolResult):
-                    tr_by_id[component.id] = component
-
-            # Pair TCs with TRs in TC arrival order
-            tool_pairs: list[tuple[Any, Any]] = []
-            used_ids: set[str] = set()
-            for tc in tc_list:
-                tr = tr_by_id.get(tc.id)
-                if tr and tc.id not in used_ids:
-                    tool_pairs.append((tc, tr))
-                    used_ids.add(tc.id)
 
             # Pre-tool assistant text
             pre_text = "".join(pre_texts).strip()
             if pre_text:
                 messages.append({"role": "assistant", "content": pre_text})
 
-            # Tool call / result pairs. For the turn currently being
-            # continued (i == answer_index), coarsely clear the result
-            # content of pairs older than the last KEEP_LAST_N_TOOL_PAIRS —
-            # bounds resend growth in long tool loops. See
-            # TOOL_RESULT_CLEARING.md. Historical (already-completed)
-            # turns are left untouched.
-            is_current_turn = i == answer_index
-            n_pairs = len(tool_pairs)
-            clear_boundary = (
-                max(0, n_pairs - self.KEEP_LAST_N_TOOL_PAIRS) if is_current_turn else 0
-            )
-            for pair_index, (tc, tr) in enumerate(tool_pairs):
+            # Tool call / result pairs, coarsely cleared against the global
+            # (conversation-wide) boundary computed above — bounds resend
+            # growth whether it comes from one long single-turn tool loop or
+            # from many turns each with a handful of tool calls. See
+            # TOOL_RESULT_CLEARING.md.
+            for tc, tr in per_turn_pairs[i]:
                 call_data = self._parse_for_message(tc.content, tc.id)
                 if call_data:
                     messages.append(
@@ -574,10 +597,10 @@ class ToolHandler:
                             "call": call_data,
                         },
                     )
-                    if pair_index < clear_boundary:
-                        result_content = self.CLEARED_TOOL_RESULT_STUB
-                    else:
+                    if tc.id in keep_full_ids:
                         result_content = f"Tool execution result:\n{tr.content}"
+                    else:
+                        result_content = self.CLEARED_TOOL_RESULT_STUB
                     result_msg: dict[str, Any] = {
                         "role": "tool_result",
                         "content": result_content,
@@ -585,10 +608,10 @@ class ToolHandler:
                     }
                     # Second cache breakpoint: the cleared region only ever
                     # grows by appending identical stub content, so marking
-                    # its end lets later continuation requests in this turn
-                    # keep hitting cache against it instead of paying full
-                    # price for it on every round-trip.
-                    if clear_boundary > 0 and pair_index == clear_boundary - 1:
+                    # its end lets later continuation requests keep hitting
+                    # cache against it instead of paying full price for it
+                    # on every round-trip.
+                    if tc.id == last_cleared_id:
                         result_msg["cache_control"] = True
                     messages.append(result_msg)
 
