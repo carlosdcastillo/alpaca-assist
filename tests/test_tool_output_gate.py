@@ -150,7 +150,7 @@ class TestSweepOrphanedOutputDirs:
 
 class TestGateToolCallArguments:
     """Oversized tool-call arguments should be gated before storage; unlike
-    results they're never stubbed by KEEP_LAST_N_TOOL_PAIRS regardless of
+    results they're never stubbed by the byte-budget clearing regardless of
     age, so this is the only relief they get.
     """
 

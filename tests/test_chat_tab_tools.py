@@ -860,7 +860,7 @@ class TestToolHandlerPrepareContinuationMessages:
         assert len(tool_results) == 2
 
     @staticmethod
-    def _make_pairs(count: int) -> list[Any]:
+    def _make_pairs(count: int, result_size: int = 20) -> list[Any]:
         from chat_state import ToolCall, ToolResult
 
         components: list[Any] = []
@@ -871,17 +871,26 @@ class TestToolHandlerPrepareContinuationMessages:
                     f"tool-{n}",
                 ),
             )
-            components.append(ToolResult(f"Result {n}", f"tool-{n}"))
+            components.append(ToolResult("R" * result_size + f" {n}", f"tool-{n}"))
         return components
 
-    def test_prepare_below_threshold_does_not_clear(self) -> None:
-        """Pair count under the threshold: no clearing, unchanged output."""
+    @staticmethod
+    def _pair_bytes(index: int, result_size: int = 20) -> int:
+        """Byte size _make_pairs produces for pair `index` — computed the
+        same way prepare_continuation_messages accounts for it, so tests
+        can derive exact budget boundaries instead of guessing them.
+        """
+        call_content = f'{{"tool_call": {{"name": "tool{index}"}}}}'
+        result_content = "R" * result_size + f" {index}"
+        return len(call_content.encode("utf-8")) + len(result_content.encode("utf-8"))
+
+    def test_prepare_below_budget_does_not_clear(self) -> None:
+        """Total pair bytes under the budget: no clearing, unchanged output."""
         mock_chat = Mock()
         mock_chat.chat_state.questions = ["Question?"]
+        count = 5
         mock_answer = Mock()
-        mock_answer.components = self._make_pairs(
-            ToolHandler.KEEP_LAST_N_TOOL_PAIRS,
-        )
+        mock_answer.components = self._make_pairs(count)  # a few dozen bytes each
         mock_chat.chat_state.answers = [mock_answer]
 
         callback = Mock()
@@ -889,21 +898,32 @@ class TestToolHandlerPrepareContinuationMessages:
         messages = handler.prepare_continuation_messages(0)
 
         tool_results = [m for m in messages if m["role"] == "tool_result"]
-        assert len(tool_results) == ToolHandler.KEEP_LAST_N_TOOL_PAIRS
+        assert len(tool_results) == count
         assert all(
             ToolHandler.CLEARED_TOOL_RESULT_STUB not in m["content"]
             for m in tool_results
         )
         assert all("cache_control" not in m for m in tool_results)
 
-    def test_prepare_above_threshold_clears_older_pairs(self) -> None:
-        """Pairs beyond the last N get their result content stubbed."""
+    def test_prepare_above_budget_clears_older_pairs(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Pairs older than the byte budget get their result content
+        stubbed — the number kept follows actual size, not a fixed count.
+        """
         mock_chat = Mock()
         mock_chat.chat_state.questions = ["Question?"]
-        total = ToolHandler.KEEP_LAST_N_TOOL_PAIRS + 5
+        total = 10
+        keep_last = 4
         mock_answer = Mock()
-        mock_answer.components = self._make_pairs(total)
+        mock_answer.components = self._make_pairs(total, result_size=500)
         mock_chat.chat_state.answers = [mock_answer]
+
+        # A budget that exactly covers the most recent `keep_last` pairs.
+        pair_sizes = [self._pair_bytes(n, result_size=500) for n in range(total)]
+        budget = sum(pair_sizes[-keep_last:])
+        monkeypatch.setattr(ToolHandler, "KEEP_TOOL_CONTEXT_BUDGET_BYTES", budget)
 
         callback = Mock()
         handler = ToolHandler(mock_chat, callback)
@@ -920,34 +940,74 @@ class TestToolHandlerPrepareContinuationMessages:
             if m["content"] == ToolHandler.CLEARED_TOOL_RESULT_STUB
         ]
         kept = [m for m in tool_results if m not in cleared]
-        assert len(cleared) == 5
-        assert len(kept) == ToolHandler.KEEP_LAST_N_TOOL_PAIRS
+        assert len(cleared) == total - keep_last
+        assert len(kept) == keep_last
         # The most recent pairs must be the ones kept at full fidelity.
-        assert "Result 5" in kept[0]["content"]
-        assert "Result " + str(total - 1) in kept[-1]["content"]
+        assert f" {total - keep_last}" in kept[0]["content"]
+        assert f" {total - 1}" in kept[-1]["content"]
 
         # Second cache breakpoint sits on the last cleared pair's result.
         breakpoints = [m for m in tool_results if m.get("cache_control")]
         assert len(breakpoints) == 1
         assert breakpoints[0] is cleared[-1]
 
-    def test_prepare_clears_historical_turns_too(self) -> None:
+    def test_prepare_always_keeps_most_recent_pair_even_if_oversized(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Even a budget smaller than a single pair still keeps the single
+        most recent pair in full — the model must never lose direct
+        visibility into what it just did.
+        """
+        mock_chat = Mock()
+        mock_chat.chat_state.questions = ["Question?"]
+        total = 3
+        mock_answer = Mock()
+        mock_answer.components = self._make_pairs(total, result_size=5000)
+        mock_chat.chat_state.answers = [mock_answer]
+
+        monkeypatch.setattr(ToolHandler, "KEEP_TOOL_CONTEXT_BUDGET_BYTES", 10)
+
+        callback = Mock()
+        handler = ToolHandler(mock_chat, callback)
+        messages = handler.prepare_continuation_messages(0)
+
+        tool_results = [m for m in messages if m["role"] == "tool_result"]
+        cleared = [
+            m
+            for m in tool_results
+            if m["content"] == ToolHandler.CLEARED_TOOL_RESULT_STUB
+        ]
+        kept = [m for m in tool_results if m not in cleared]
+        assert len(kept) == 1
+        assert len(cleared) == total - 1
+        assert f" {total - 1}" in kept[0]["content"]
+
+    def test_prepare_clears_historical_turns_too(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
         """Clearing applies conversation-wide, not just the current turn.
 
         A turn that's already complete still has its older pairs cleared if
-        the *global* pair count (across all turns) exceeds the threshold —
-        otherwise a conversation made of many small turns, each under the
-        threshold on its own, would never get bounded at all.
+        the *global* byte budget (across all turns) is exceeded — otherwise
+        a conversation made of many small turns, each under budget on its
+        own, would never get bounded at all.
         """
         mock_chat = Mock()
         mock_chat.chat_state.questions = ["Q1?", "Q2?"]
-        total = ToolHandler.KEEP_LAST_N_TOOL_PAIRS + 5
+        total = 10
+        keep_last = 4
 
         historical_answer = Mock()
-        historical_answer.components = self._make_pairs(total)
+        historical_answer.components = self._make_pairs(total, result_size=500)
         current_answer = Mock()
         current_answer.components = ["Just text, no tools."]
         mock_chat.chat_state.answers = [historical_answer, current_answer]
+
+        pair_sizes = [self._pair_bytes(n, result_size=500) for n in range(total)]
+        budget = sum(pair_sizes[-keep_last:])
+        monkeypatch.setattr(ToolHandler, "KEEP_TOOL_CONTEXT_BUDGET_BYTES", budget)
 
         callback = Mock()
         handler = ToolHandler(mock_chat, callback)
@@ -959,35 +1019,45 @@ class TestToolHandlerPrepareContinuationMessages:
             m for m in tool_results if m["content"] == ToolHandler.CLEARED_TOOL_RESULT_STUB
         ]
         kept = [m for m in tool_results if m not in cleared]
-        assert len(cleared) == 5
-        assert len(kept) == ToolHandler.KEEP_LAST_N_TOOL_PAIRS
+        assert len(cleared) == total - keep_last
+        assert len(kept) == keep_last
         # The most recent pairs globally are still the ones kept in full,
         # even though they all belong to the (only) historical turn here.
-        assert "Result " + str(total - 1) in kept[-1]["content"]
+        assert f" {total - 1}" in kept[-1]["content"]
 
-    def test_prepare_clears_across_many_small_turns(self) -> None:
-        """Many turns each under threshold individually still get bounded
-        once their combined pair count crosses it globally.
+    def test_prepare_clears_across_many_small_turns(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Many turns each individually tiny still get bounded once their
+        combined byte size crosses the budget globally.
         """
+        from chat_state import ToolCall, ToolResult
+
         mock_chat = Mock()
-        n_turns = ToolHandler.KEEP_LAST_N_TOOL_PAIRS + 5
+        n_turns = 10
+        keep_last = 3
+        result_size = 500
         mock_chat.chat_state.questions = [f"Q{n}?" for n in range(n_turns)]
 
         answers = []
+        pair_sizes = []
         for n in range(n_turns):
             answer = Mock()
-            answer.components = self._make_pairs(1)  # one pair per turn
-            # _make_pairs always starts ids at "tool-0" — make them unique
-            # across turns the same way real (server-assigned or uuid4
-            # fallback) tool-call ids would be.
-            from chat_state import ToolCall, ToolResult
-
+            call_content = '{"tool_call": {"name": "tool"}}'
+            result_content = "R" * result_size + f" turn{n}"
             answer.components = [
-                ToolCall(f'{{"tool_call": {{"name": "tool"}}}}', f"turn{n}-tool-0"),
-                ToolResult(f"Result turn{n}", f"turn{n}-tool-0"),
+                ToolCall(call_content, f"turn{n}-tool-0"),
+                ToolResult(result_content, f"turn{n}-tool-0"),
             ]
+            pair_sizes.append(
+                len(call_content.encode("utf-8")) + len(result_content.encode("utf-8")),
+            )
             answers.append(answer)
         mock_chat.chat_state.answers = answers
+
+        budget = sum(pair_sizes[-keep_last:])
+        monkeypatch.setattr(ToolHandler, "KEEP_TOOL_CONTEXT_BUDGET_BYTES", budget)
 
         callback = Mock()
         handler = ToolHandler(mock_chat, callback)
@@ -999,8 +1069,8 @@ class TestToolHandlerPrepareContinuationMessages:
             m for m in tool_results if m["content"] == ToolHandler.CLEARED_TOOL_RESULT_STUB
         ]
         kept = [m for m in tool_results if m not in cleared]
-        assert len(cleared) == 5
-        assert len(kept) == ToolHandler.KEEP_LAST_N_TOOL_PAIRS
+        assert len(cleared) == n_turns - keep_last
+        assert len(kept) == keep_last
         # tool_use_call blocks are still never cleared, regardless of turn.
         tool_calls = [m for m in messages if m["role"] == "tool_use_call"]
         assert len(tool_calls) == n_turns

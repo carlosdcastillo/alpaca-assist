@@ -9,13 +9,13 @@ file back via the read_file_range MCP tool if it needs more than the preview.
 
 Tool *calls* get the same treatment via gate_tool_call_arguments, at a lower
 threshold (CALL_ARG_GATE_THRESHOLD_BYTES): unlike results, a tool_use_call
-block is never stubbed by KEEP_LAST_N_TOOL_PAIRS regardless of age (see
-ToolHandler.prepare_continuation_messages), so an oversized argument — e.g.
-a write_file call with a huge `content`, or a shell command with something
-large inlined into it — would otherwise be resent in full on every
-subsequent call for the rest of the conversation with no relief at all. The
-tool has already executed with the real, full arguments by the time this
-runs; only the stored/replayed copy is capped.
+block is never stubbed by the byte-budget clearing in
+ToolHandler.prepare_continuation_messages regardless of age, so an
+oversized argument — e.g. a write_file call with a huge `content`, or a
+shell command with something large inlined into it — would otherwise be
+resent in full on every subsequent call for the rest of the conversation
+with no relief at all. The tool has already executed with the real, full
+arguments by the time this runs; only the stored/replayed copy is capped.
 
 Temp files are deleted when their owning tab closes (cleanup_tab_output_dir)
 and orphaned directories from a previous run that didn't exit cleanly are

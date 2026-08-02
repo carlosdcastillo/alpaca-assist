@@ -31,23 +31,40 @@ normal growth. Ordinary turns (a handful of tool calls) are unaffected.
 
 In `prepare_continuation_messages`, tool-call/result pairs are flattened
 into one chronological list *across the whole conversation* (not reset per
-turn — see "Applied across turns" below), and once that list exceeds a
-threshold (`KEEP_LAST_N_TOOL_PAIRS`, currently 15):
+turn — see "Applied across turns" below). The list is walked backward from
+the most recent pair, accumulating actual byte size (call args + result)
+until a budget (`KEEP_TOOL_CONTEXT_BUDGET_BYTES`, currently 24KB) is
+exceeded:
 
-- The most recent `KEEP_LAST_N_TOOL_PAIRS` pairs, globally, are sent with
-  full `tool_result` content, as today.
-- Older pairs keep their `tool_use` message (call name + arguments) but
-  have their `tool_result` content replaced with a fixed stub, e.g.:
-  `"[tool result cleared to reduce context size — result of this call is
-  no longer shown; re-run the tool if you need this again]"`
+- Pairs within the budget, walking backward from most recent, are sent
+  with full `tool_result` content, as today. The single most recent pair
+  always stays full regardless of its own size, so the model never loses
+  direct visibility into what it just did.
+- Older pairs (past the budget) keep their `tool_use` message (call name +
+  arguments) but have their `tool_result` content replaced with a fixed
+  stub, e.g.: `"[tool result cleared to reduce context size — result of
+  this call is no longer shown; re-run the tool if you need this again]"`
 - A second `cache_control` breakpoint is placed on the message
   immediately after the clear boundary (in addition to the existing
   breakpoint at the end of the previous completed turn), so subsequent
   calls resume accumulating cache hits against the new, shorter prefix
   instead of paying full/write price on every call.
 
-Threshold is coarse and count-based (not time-based) — deliberately simple
-to avoid interacting with the ~5-minute cache TTL in complicated ways.
+**Bytes, not pair count.** The original version counted pairs
+(`KEEP_LAST_N_TOOL_PAIRS`, a fixed number regardless of content size).
+Real pair sizes vary by 100x+ — a few dozen bytes for something like
+`read_file_range` vs. tens of KB for a gated `write_file` result — so a
+fixed count gave wildly inconsistent actual resend cost depending on which
+tools happened to be recent. A byte budget bounds the thing that actually
+matters, and self-adjusts: a run of small pairs is barely touched, a run
+of large ones gets clamped down hard. 24KB sits between the two per-item
+gate thresholds — smaller than `GATE_THRESHOLD_BYTES` (32KB, so one
+maximally-sized result can't dominate the window alone), larger than
+`CALL_ARG_GATE_THRESHOLD_BYTES` (16KB, so a couple of sizeable recent
+calls can still coexist in it).
+
+Budget is size-based (not time-based) — deliberately simple to avoid
+interacting with the ~5-minute cache TTL in complicated ways.
 
 ### Applied across turns
 
@@ -87,10 +104,13 @@ for v1.
 
 ## Where implemented
 
-- `core/chat_tab_tools.py` — `prepare_continuation_messages` (clearing
-  logic + second cache_control breakpoint).
-- No changes to `core/tool_output_gate.py`, `chat_state.py`,
-  `anthropic_ollama_server.py`, or the web UI.
+- `core/chat_tab_tools.py` — `prepare_continuation_messages` (byte-budget
+  clearing logic + second cache_control breakpoint) and `handle_tool_call`
+  (wires `gate_tool_call_arguments` in at storage time).
+- `core/tool_output_gate.py` — `gate_tool_call_arguments`, the equivalent
+  cap for the call-argument side, which this mechanism never touches
+  regardless of age (see that module's docstring).
+- No changes to `chat_state.py`, `anthropic_ollama_server.py`, or the web UI.
 
 ## Risk / difficulty (recap)
 
@@ -104,16 +124,18 @@ for v1.
 
 ## Suggested test coverage
 
-- Turn with pair count under threshold: no clearing, output unchanged
-  (regression guard).
-- Turn with pair count over threshold: older pairs' `tool_result` content
-  replaced with stub, `tool_use` blocks unchanged, most recent
-  `KEEP_LAST_N_PAIRS` pairs unchanged.
+- Turn with total pair bytes under the budget: no clearing, output
+  unchanged (regression guard).
+- Turn with total pair bytes over the budget: older pairs' `tool_result`
+  content replaced with stub, `tool_use` blocks unchanged, the most recent
+  pairs that fit the budget stay unchanged.
+- A budget smaller than even a single pair: the single most recent pair
+  still stays full, everything else clears.
 - Cache-control breakpoint present exactly once at previous-turn boundary
   (existing behavior) and once at the new clear boundary when clearing
   occurred; absent when it didn't.
 - Multi-turn conversation: an already-completed turn's pairs get cleared
-  once the *global*, conversation-wide pair count crosses the threshold,
-  even if that turn's own pair count never would have on its own.
-- Many small turns (each under threshold individually) still get bounded
-  once their combined count crosses it globally.
+  once the *global*, conversation-wide byte budget is exceeded, even if
+  that turn's own pairs never would have crossed it alone.
+- Many small turns (each under budget individually) still get bounded
+  once their combined size crosses it globally.

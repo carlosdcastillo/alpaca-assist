@@ -50,13 +50,24 @@ class ToolHandler:
     # first; only a genuinely hung tool should ever hit this ceiling.
     TOOL_EXECUTION_TIMEOUT_SECONDS = 310.0
 
-    # Coarse tool-result clearing: once a single turn's tool-call loop
-    # exceeds this many call/result pairs, older pairs have their result
+    # Coarse tool-result clearing: pairs older than this byte budget (walked
+    # backward from the most recent, conversation-wide) have their result
     # content replaced with a stub on subsequent continuation requests.
-    # Bounds worst-case resend growth in long tool loops; see
-    # TOOL_RESULT_CLEARING.md. Deliberately coarse and count-based (not
-    # time-based) to avoid interacting with the prompt-cache TTL.
-    KEEP_LAST_N_TOOL_PAIRS = 15
+    # Bounds worst-case resend growth. Bytes, not pair count — real pair
+    # sizes vary by 100x+ (a few dozen bytes for a read_file_range call vs.
+    # tens of KB for a gated write_file result), so a fixed count gives
+    # wildly inconsistent actual resend cost depending on which tools
+    # happened to be recent; a byte budget bounds the thing that actually
+    # matters. 24KB sits between the two per-item gate thresholds below —
+    # smaller than GATE_THRESHOLD_BYTES (32KB) so one maximally-sized
+    # result can't dominate the whole window by itself, larger than
+    # CALL_ARG_GATE_THRESHOLD_BYTES (16KB) so a couple of sizeable recent
+    # calls can still coexist in it. Comfortably covers many small pairs
+    # (typical read_file_range/search calls run well under 1KB) without
+    # ever being touched, and only starts binding once the tail is
+    # actually large. See TOOL_RESULT_CLEARING.md. Deliberately size-based
+    # (not time-based) to avoid interacting with the prompt-cache TTL.
+    KEEP_TOOL_CONTEXT_BUDGET_BYTES = 24 * 1024
     CLEARED_TOOL_RESULT_STUB = (
         "[tool result cleared to reduce context size — result of this call "
         "is no longer shown; re-run the tool if you need this again]"
@@ -189,7 +200,7 @@ class ToolHandler:
             # storage — the call has already executed with the real,
             # unmodified arguments above; only the stored/replayed copy is
             # capped, since (unlike results) a tool_use_call block is never
-            # stubbed by KEEP_LAST_N_TOOL_PAIRS regardless of age.
+            # stubbed by the byte-budget clearing below regardless of age.
             gated_tool_json = gate_tool_call_arguments(
                 tool_json,
                 self._chat.tab_id,
@@ -533,18 +544,30 @@ class ToolHandler:
             per_turn_pairs.append(tool_pairs)
             all_pairs.extend(tool_pairs)
 
-        # Pairs never get *removed* from the kept-full set once past the
-        # global boundary below except by aging further back as more pairs
-        # accumulate, and stubbed content only ever grows by appending
-        # identical stub text — so the cleared region stays cache-stable
-        # across calls exactly as it did in the single-turn version.
+        # Walk backward from the most recent pair, accumulating actual byte
+        # size (call args + result) until KEEP_TOOL_CONTEXT_BUDGET_BYTES is
+        # exceeded — everything from that point forward stays full,
+        # everything before it gets cleared. The single most recent pair
+        # always stays full regardless of its own size, so the model never
+        # loses direct visibility into what it just did. Pairs never get
+        # *removed* from the kept-full set except by aging further back as
+        # more pairs accumulate, and stubbed content only ever grows by
+        # appending identical stub text — so the cleared region stays
+        # cache-stable across calls exactly as it did in the pair-count
+        # version.
         n_total = len(all_pairs)
-        global_clear_boundary = max(0, n_total - self.KEEP_LAST_N_TOOL_PAIRS)
-        keep_full_ids = {tc.id for tc, _tr in all_pairs[global_clear_boundary:]}
+        budget = self.KEEP_TOOL_CONTEXT_BUDGET_BYTES
+        first_kept_index = n_total
+        for idx in range(n_total - 1, -1, -1):
+            tc, tr = all_pairs[idx]
+            pair_bytes = len(tc.content.encode("utf-8")) + len(tr.content.encode("utf-8"))
+            if idx != n_total - 1 and pair_bytes > budget:
+                break
+            budget -= pair_bytes
+            first_kept_index = idx
+        keep_full_ids = {tc.id for tc, _tr in all_pairs[first_kept_index:]}
         last_cleared_id = (
-            all_pairs[global_clear_boundary - 1][0].id
-            if global_clear_boundary > 0
-            else None
+            all_pairs[first_kept_index - 1][0].id if first_kept_index > 0 else None
         )
 
         # Second pass: build the actual message list in chronological order,
