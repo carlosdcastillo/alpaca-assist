@@ -5,6 +5,7 @@ This server mimics the Ollama API endpoints but uses Claude for inference.
 import base64
 import datetime
 import json
+import math
 import os
 import random
 import sys
@@ -626,9 +627,28 @@ class OllamaRequestHandler(BaseHTTPRequestHandler):
         output_tokens: int | None = None
         cached_tokens: int = 0
         start_time = time.time()
+        stream_error: Exception | None = None
+
+        def _events_tolerating_mid_stream_failure():
+            """Stop iteration cleanly on a mid-stream error instead of
+
+            propagating it — a network hiccup, malformed event, or the
+            provider dropping the connection must still fall through to
+            the token-accounting code below. Everything generated before
+            the failure was already billed; losing it from our own count
+            entirely (the previous behavior) made the discrepancy between
+            what we report and what the provider actually bills far worse
+            than a partial/estimated count does.
+            """
+            nonlocal stream_error
+            try:
+                yield from stream
+            except Exception as e:
+                stream_error = e
+                print(f"⚠️ Stream processing error after {count} chunks: {e}")
 
         if stream:
-            for event in stream:
+            for event in _events_tolerating_mid_stream_failure():
                 print(event)
                 val: dict[str, Any] = event
 
@@ -747,14 +767,37 @@ class OllamaRequestHandler(BaseHTTPRequestHandler):
                         cached_tokens = _cw + _cr
 
         elapsed_ms = int((time.time() - start_time) * 1000)
+
+        # output_tokens only ever gets set from the terminal message_delta
+        # event above. If the stream ended — cleanly or via the exception
+        # handled by _events_tolerating_mid_stream_failure — without one,
+        # estimate it from what we actually received rather than reporting
+        # nothing for this call. Silently dropping a call's accounting
+        # entirely (the previous behavior: no metrics at all unless BOTH
+        # values were cleanly present) is worse than an approximate count,
+        # since the provider bills for it either way.
+        estimated_output = False
+        if output_tokens is None and response_body:
+            output_tokens = math.ceil(len(response_body) / 4.0)
+            estimated_output = True
+
         invocation_metrics: dict | None = None
-        if input_tokens is not None and output_tokens is not None:
+        if input_tokens is not None or output_tokens is not None:
             invocation_metrics = {
-                "input_token_count": input_tokens,
+                "input_token_count": input_tokens or 0,
                 "cached_input_token_count": cached_tokens,
-                "output_token_count": output_tokens,
+                "output_token_count": output_tokens or 0,
                 "invocation_latency_ms": elapsed_ms,
             }
+            if estimated_output or stream_error is not None:
+                print(
+                    f"⚠️ Partial/estimated invocation_metrics "
+                    f"(estimated_output={estimated_output}, "
+                    f"stream_error={stream_error!r}): {invocation_metrics}",
+                )
+
+        if stream_error is not None:
+            stop_reason = "error"
 
         self._send_completion_chunk(
             count,
