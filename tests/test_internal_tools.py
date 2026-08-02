@@ -475,7 +475,7 @@ class TestSearchFilesForText:
 
 
 class TestRunShellCommand:
-    def test_runs_allowed_command(self) -> None:
+    def test_runs_command(self) -> None:
         result = run_shell_command({"command": "python --version"})
         assert _ok(result)
         assert "Python" in _text(result)
@@ -484,11 +484,6 @@ class TestRunShellCommand:
         result = run_shell_command({})
         assert "Error" in _text(result)
         assert "command" in _text(result).lower()
-
-    def test_disallowed_command_rejected(self) -> None:
-        result = run_shell_command({"command": "rm -rf /"})
-        text = _text(result)
-        assert "allowlist" in text.lower()
 
 
 # ---------------------------------------------------------------------------

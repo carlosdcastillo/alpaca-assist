@@ -1137,7 +1137,7 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "internal_run_shell_command",
-            "description": "Execute an allowlisted shell command. Allowed: python, pip, git, node, npm, npx, cargo, rustc, make, cmake. Extend via config file.",
+            "description": "Execute a shell command (no shell interpretation — argv passed directly to the process, so ;/&&/backticks/etc. are literal arguments, not operators).",
             "parameters": {
                 "type": "object",
                 "properties": {

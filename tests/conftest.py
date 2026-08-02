@@ -24,10 +24,9 @@ if TYPE_CHECKING:
     from chat_state import ChatState
     from tool_call_detector import ToolCallDetector
     from agent_skills import SkillManager
-    from shell_executor import ShellExecutor, AllowlistManager
+    from shell_executor import ShellExecutor
 from unittest.mock import MagicMock
 from unittest.mock import Mock
-from unittest.mock import patch
 
 import pytest
 import pytest_asyncio
@@ -262,20 +261,6 @@ def shell_executor() -> "ShellExecutor":
     from shell_executor import ShellExecutor
 
     return ShellExecutor()
-
-
-@pytest.fixture
-def allowlist_manager(temp_dir: Path) -> Generator["AllowlistManager", None, None]:
-    """Create an AllowlistManager with a temporary config."""
-    from shell_executor import AllowlistManager
-
-    with patch.object(
-        AllowlistManager,
-        "_get_config_path",
-        return_value=temp_dir / "allowlist.json",
-    ):
-        manager = AllowlistManager()
-        yield manager
 
 
 # =============================================================================

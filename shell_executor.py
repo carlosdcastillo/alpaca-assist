@@ -1,7 +1,11 @@
 """
-Cross-platform shell command executor with allowlist security.
+Cross-platform shell command executor.
+
+No shell interpretation (subprocess runs with shell=False, argv passed
+directly), so ;/&&/backticks/etc. in a command string are literal
+arguments rather than operators — that is the actual injection boundary
+here, not a command allowlist.
 """
-import json
 import os
 import platform
 import shlex
@@ -9,9 +13,7 @@ import shutil
 import subprocess
 import time
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Any
-from typing import Optional
 
 
 DEFAULT_TIMEOUT = 60
@@ -20,19 +22,6 @@ MAX_TIMEOUT = 300
 # control. The real context boundary is core.tool_output_gate, which sits
 # downstream of this and needs the full output to gate correctly.
 MAX_OUTPUT_SIZE = 5 * 1024 * 1024  # 5MB
-
-DEFAULT_ALLOWLIST = {
-    "python": ["python3", "py"],
-    "pip": ["pip3"],
-    "git": [],
-    "node": ["nodejs"],
-    "npm": [],
-    "npx": [],
-    "cargo": [],
-    "rustc": [],
-    "make": [],
-    "cmake": [],
-}
 
 
 @dataclass
@@ -86,70 +75,7 @@ class ExecutionResult:
         return "\n".join(lines)
 
 
-class AllowlistManager:
-    def __init__(self):
-        self.allowlist = self._load_allowlist()
-
-    def _get_config_path(self) -> Path:
-        if platform.system() == "Windows":
-            base = os.environ.get("APPDATA", os.path.expanduser("~"))
-            return Path(base) / "mcp-shell" / "allowlist.json"
-        else:
-            return Path.home() / ".config" / "mcp-shell" / "allowlist.json"
-
-    def _load_allowlist(self) -> dict[str, list[str]]:
-        allowlist = dict(DEFAULT_ALLOWLIST)
-        config_path = self._get_config_path()
-
-        if config_path.exists():
-            try:
-                with open(config_path, encoding="utf-8") as f:
-                    user_config = json.load(f)
-
-                # Add additional commands
-                for cmd, aliases in user_config.get("additional_commands", {}).items():
-                    if isinstance(aliases, list):
-                        allowlist[cmd] = aliases
-                    elif isinstance(aliases, dict):
-                        allowlist[cmd] = aliases.get("aliases", [])
-
-                # Remove disabled commands
-                for cmd in user_config.get("disabled_commands", []):
-                    allowlist.pop(cmd, None)
-
-            except (json.JSONDecodeError, OSError):
-                pass  # Use defaults on error
-
-        return allowlist
-
-    def is_allowed(self, command_name: str) -> bool:
-        cmd = command_name.lower()
-        # Remove extension on Windows
-        if platform.system() == "Windows":
-            for ext in [".exe", ".bat", ".cmd", ".com"]:
-                if cmd.endswith(ext):
-                    cmd = cmd[: -len(ext)]
-                    break
-
-        # Check direct match
-        if cmd in self.allowlist:
-            return True
-
-        # Check aliases
-        for main_cmd, aliases in self.allowlist.items():
-            if cmd in [a.lower() for a in aliases]:
-                return True
-
-        return False
-
-    def get_allowed_commands(self) -> list[str]:
-        return sorted(self.allowlist.keys())
-
-
 class ShellExecutor:
-    def __init__(self):
-        self.allowlist_manager = AllowlistManager()
-
     def _parse_command(self, command: str) -> list[str]:
         if platform.system() == "Windows":
             return self._split_windows_command(command)
@@ -224,14 +150,6 @@ class ShellExecutor:
             tokens.append("".join(current))
         return tokens
 
-    def _extract_base_command(self, args: list[str]) -> str:
-        if not args:
-            return ""
-        cmd = args[0]
-        # Strip path
-        cmd = os.path.basename(cmd)
-        return cmd
-
     def _resolve_executable(self, cmd: str) -> str | None:
         return shutil.which(cmd)
 
@@ -279,20 +197,6 @@ class ShellExecutor:
                 stderr="",
                 duration=time.time() - start_time,
                 error_message="Empty command",
-            )
-
-        # Extract and validate base command
-        base_cmd = self._extract_base_command(args)
-        if not self.allowlist_manager.is_allowed(base_cmd):
-            allowed = ", ".join(self.allowlist_manager.get_allowed_commands())
-            return ExecutionResult(
-                command=command,
-                cwd=cwd,
-                exit_code="BLOCKED",
-                stdout="",
-                stderr="",
-                duration=time.time() - start_time,
-                error_message=f"Command '{base_cmd}' is not in the allowlist.\nAllowed commands: {allowed}",
             )
 
         # Resolve executable path
