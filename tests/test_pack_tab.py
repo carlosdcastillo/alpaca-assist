@@ -65,6 +65,19 @@ class TestConstruction:
         assert pack_tab.offline is False
         assert pack_tab.is_streaming is False
 
+    def test_starts_with_zeroed_token_stats(self, pack_tab: PackTab) -> None:
+        """webview_api.get_status_info() reads these via getattr(tab, ...,
+
+        0) for any tab — PackTab must carry real zero-valued attributes
+        from construction, not just fall back to the getattr default,
+        so a freshly created (not-yet-attached) tab shows 0 rather than
+        the crude chars/4 estimate.
+        """
+        assert pack_tab.session_output_tokens == 0
+        assert pack_tab.session_input_tokens == 0
+        assert pack_tab.session_cached_input_tokens == 0
+        assert pack_tab.last_invocation_metrics is None
+
 
 class TestConnect:
     def test_connect_forwards_model_to_the_transport(
@@ -178,6 +191,61 @@ class TestMutatingMethods:
 
         assert result["popped"] is True
         assert transport.send_request.call_count == 2
+
+
+class TestTokenStats:
+    def test_apply_token_stats_updates_present_fields(self, pack_tab: PackTab) -> None:
+        pack_tab._apply_token_stats(
+            {
+                "session_output_tokens": 100,
+                "session_input_tokens": 200,
+                "session_cached_input_tokens": 10,
+                "last_invocation_metrics": {"output_token_count": 100},
+            },
+        )
+
+        assert pack_tab.session_output_tokens == 100
+        assert pack_tab.session_input_tokens == 200
+        assert pack_tab.session_cached_input_tokens == 10
+        assert pack_tab.last_invocation_metrics == {"output_token_count": 100}
+
+    def test_apply_token_stats_ignores_absent_fields_rather_than_resetting(
+        self,
+        pack_tab: PackTab,
+    ) -> None:
+        """Not every caller sends every field — a payload missing a key
+
+        must leave whatever value is already there alone, not reset it
+        to 0 (which would make the count visibly regress on a partial
+        update instead of just staying stale until the next full one).
+        """
+        pack_tab.session_output_tokens = 500
+
+        pack_tab._apply_token_stats({"session_input_tokens": 999})
+
+        assert pack_tab.session_output_tokens == 500
+        assert pack_tab.session_input_tokens == 999
+
+    def test_resync_picks_up_token_stats_from_the_attach_response(
+        self,
+        pack_tab: PackTab,
+    ) -> None:
+        """Reattaching (app restart, revival from history, reconnect
+
+        after an offline blip) must show the remote ChatTab's real
+        cumulative usage immediately, not 0 until the next turn happens
+        to complete.
+        """
+        pack_tab._transport.send_request.return_value = {
+            **ATTACH_RESPONSE,
+            "session_output_tokens": 4321,
+            "session_input_tokens": 8765,
+        }
+
+        pack_tab._resync()
+
+        assert pack_tab.session_output_tokens == 4321
+        assert pack_tab.session_input_tokens == 8765
 
 
 class TestSessionLostRecreate:
@@ -342,6 +410,37 @@ class TestNotificationHandlers:
         assert pack_tab.is_streaming is False
         app_core.api.on_streaming_end.assert_called_once_with("tab-1", 2)
 
+    def test_on_streaming_end_applies_token_stats_synchronously(
+        self,
+        pack_tab: PackTab,
+    ) -> None:
+        """Regression test: PackTab never had session_output_tokens etc.
+
+        of its own — nothing pushed them from the remote ChatTab, so
+        webview_api.get_status_info()'s getattr(tab, "session_output_tokens",
+        0) always saw 0, and the status bar fell back to a crude chars/4
+        estimate for every Pack tab on every turn. Applied before the
+        async resync (which only refreshes chat_state) so the status bar
+        is right immediately, not after an extra RPC round trip.
+        """
+        pack_tab._transport.send_request.return_value = ATTACH_RESPONSE
+
+        pack_tab._on_streaming_end(
+            {
+                "tab_id": "remote-daemon-tab-99",
+                "answer_index": 2,
+                "session_output_tokens": 1234,
+                "session_input_tokens": 5678,
+                "session_cached_input_tokens": 90,
+                "last_invocation_metrics": {"output_token_count": 1234},
+            },
+        )
+
+        assert pack_tab.session_output_tokens == 1234
+        assert pack_tab.session_input_tokens == 5678
+        assert pack_tab.session_cached_input_tokens == 90
+        assert pack_tab.last_invocation_metrics == {"output_token_count": 1234}
+
     def test_on_streaming_end_resyncs_the_chat_state_mirror(
         self,
         pack_tab: PackTab,
@@ -405,6 +504,24 @@ class TestNotificationHandlers:
 
         assert pack_tab.is_streaming is False
         app_core.api.on_error.assert_called_once_with("tab-1", "boom", "x")
+
+    def test_on_error_applies_token_stats(self, pack_tab: PackTab) -> None:
+        """A turn can end via error mid-generation with partial output
+
+        already billed by the provider — that partial count must still
+        reach the status bar, not just the clean streaming_end path.
+        """
+        pack_tab._transport.send_request.return_value = ATTACH_RESPONSE
+
+        pack_tab._on_error(
+            {
+                "tab_id": "remote-daemon-tab-99",
+                "message": "boom",
+                "session_output_tokens": 42,
+            },
+        )
+
+        assert pack_tab.session_output_tokens == 42
 
     def test_on_inject_tool_fold_uses_local_tab_id_for_the_real_push(
         self,

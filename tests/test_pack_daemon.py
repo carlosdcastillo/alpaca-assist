@@ -154,6 +154,69 @@ class TestPackDaemonAdapter:
         conn.send_notification.assert_not_called()
 
 
+class TestPackDaemonAdapterTokenStats:
+    """Regression coverage: webview_api.get_status_info() reads
+
+    session_output_tokens/session_input_tokens/session_cached_input_tokens/
+    last_invocation_metrics as plain attributes on whatever tab object is
+    in core.tabs. PackTab (the local proxy) never had these on its own —
+    nothing pushed them across the wire — so the status bar silently fell
+    back to a crude chars/4 estimate for every Pack tab, on every turn.
+    """
+
+    def _tab_with_stats(self) -> MagicMock:
+        tab = MagicMock()
+        tab.session_output_tokens = 1234
+        tab.session_input_tokens = 5678
+        tab.session_cached_input_tokens = 90
+        tab.last_invocation_metrics = {"output_token_count": 1234}
+        return tab
+
+    def test_token_stats_empty_before_set_tab(self) -> None:
+        adapter = PackDaemonAdapter()
+
+        assert adapter._token_stats() == {}
+
+    def test_token_stats_reads_the_real_tabs_live_attributes(self) -> None:
+        adapter = PackDaemonAdapter()
+        adapter.set_tab(self._tab_with_stats())
+
+        stats = adapter._token_stats()
+
+        assert stats["session_output_tokens"] == 1234
+        assert stats["session_input_tokens"] == 5678
+        assert stats["session_cached_input_tokens"] == 90
+        assert stats["last_invocation_metrics"] == {"output_token_count": 1234}
+
+    def test_on_streaming_end_notification_includes_token_stats(self) -> None:
+        adapter = PackDaemonAdapter()
+        adapter.set_tab(self._tab_with_stats())
+        conn = MagicMock()
+        adapter.set_connection(conn)
+
+        adapter.on_streaming_end("tab-1", 0)
+
+        params = conn.send_notification.call_args[0][1]
+        assert params["session_output_tokens"] == 1234
+        assert params["answer_index"] == 0
+
+    def test_on_error_notification_includes_token_stats(self) -> None:
+        """A turn can end via error mid-generation with partial output
+
+        already billed — the partial count must still reach the local
+        side, not just the clean streaming_end path.
+        """
+        adapter = PackDaemonAdapter()
+        adapter.set_tab(self._tab_with_stats())
+        conn = MagicMock()
+        adapter.set_connection(conn)
+
+        adapter.on_error("tab-1", "boom")
+
+        params = conn.send_notification.call_args[0][1]
+        assert params["session_output_tokens"] == 1234
+
+
 class TestMakeDispatcher:
     def _tab(self) -> MagicMock:
         tab = MagicMock()
@@ -181,6 +244,22 @@ class TestMakeDispatcher:
         assert result["title"] == "Pack Tab"
         assert result["is_streaming"] is False
         assert result["state"] == {"chat_state": {}, "name": "Pack Tab"}
+
+    def test_attach_includes_token_stats_once_the_adapter_has_a_tab(self) -> None:
+        """A reattach (or history revival) must show the real cumulative
+
+        usage the remote ChatTab already has, not zero until the next
+        turn happens to complete.
+        """
+        tab = self._tab()
+        tab.session_output_tokens = 4321
+        adapter = PackDaemonAdapter()
+        adapter.set_tab(tab)
+        dispatch = make_dispatcher(tab, adapter, resumed=True, core=self._core())
+
+        result = dispatch("attach", {})
+
+        assert result["session_output_tokens"] == 4321
 
     def test_only_the_first_attach_reports_resumed_false(self) -> None:
         """resumed=False means "this process found nothing persisted when

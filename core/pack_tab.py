@@ -75,6 +75,17 @@ class PackTab:
         # Set by _apply_resync_result when the daemon reports resumed=False
         # while we still hold real local content — see resolve_session_lost.
         self._pending_recreate_state: dict[str, Any] | None = None
+        # Mirrors the real remote ChatTab's own attributes of the same
+        # name — webview_api.get_status_info() reads these via plain
+        # getattr(tab, ...) for both tab kinds, so PackTab must carry
+        # them locally. Updated from the attach response (see
+        # _apply_resync_result) and from PackDaemonAdapter's
+        # on_streaming_end/on_error notifications, which is the only
+        # place these numbers actually change on the remote side.
+        self.session_output_tokens = 0
+        self.session_input_tokens = 0
+        self.session_cached_input_tokens = 0
+        self.last_invocation_metrics: dict[str, Any] | None = None
 
         self._transport = self._build_transport()
 
@@ -186,6 +197,24 @@ class PackTab:
         self._load_state(result.get("state", {}))
         self.title = result.get("title", self.title)
         self.is_streaming = result.get("is_streaming", False)
+        self._apply_token_stats(result)
+
+    def _apply_token_stats(self, payload: dict[str, Any]) -> None:
+        """Adopt the remote ChatTab's live token-usage totals, if present
+
+        (sent by the attach response and by on_streaming_end/on_error —
+        see PackDaemonAdapter._token_stats). Absent/partial payloads
+        leave whatever we already have untouched rather than resetting
+        to 0, since not every caller sends every field.
+        """
+        if "session_output_tokens" in payload:
+            self.session_output_tokens = payload["session_output_tokens"]
+        if "session_input_tokens" in payload:
+            self.session_input_tokens = payload["session_input_tokens"]
+        if "session_cached_input_tokens" in payload:
+            self.session_cached_input_tokens = payload["session_cached_input_tokens"]
+        if "last_invocation_metrics" in payload:
+            self.last_invocation_metrics = payload["last_invocation_metrics"]
 
     def _has_local_content(self) -> bool:
         data = self.chat_state.to_dict()
@@ -282,6 +311,10 @@ class PackTab:
 
     def _on_streaming_end(self, params: dict[str, Any]) -> None:
         self.is_streaming = False
+        # Applied synchronously (unlike chat_state, which only catches up
+        # via the async resync below) so the status bar reflects real
+        # usage the moment a turn ends, not after an extra RPC round trip.
+        self._apply_token_stats(params)
         api = self._app_core.api
         if api is not None:
             api.on_streaming_end(self.tab_id, params["answer_index"])
@@ -300,6 +333,7 @@ class PackTab:
 
     def _on_error(self, params: dict[str, Any]) -> None:
         self.is_streaming = False
+        self._apply_token_stats(params)
         api = self._app_core.api
         if api is not None:
             api.on_error(self.tab_id, params["message"], params.get("details", ""))

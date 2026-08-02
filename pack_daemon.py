@@ -63,16 +63,43 @@ class PackDaemonAdapter:
         self._conn: PackConnection | None = None
         self._fold_rendered_events: dict[str, threading.Event] = {}
         self._answer_index: dict[str, int] = {}
+        self._tab: Any | None = None
 
     def set_connection(self, conn: PackConnection | None) -> None:
         with self._lock:
             self._conn = conn
+
+    def set_tab(self, tab: Any) -> None:
+        """Give the adapter a reference to the real ChatTab so
+
+        on_streaming_end/on_error can relay its live token-usage totals —
+        session_output_tokens etc. are plain ChatTab attributes read
+        directly by webview_api.get_status_info() for local tabs, but
+        PackTab (the local proxy) never carries them on its own; nothing
+        else ever pushes these numbers across the wire.
+        """
+        self._tab = tab
 
     def _notify(self, method: str, params: dict[str, Any]) -> None:
         with self._lock:
             conn = self._conn
         if conn is not None:
             conn.send_notification(method, params)
+
+    def _token_stats(self) -> dict[str, Any]:
+        tab = self._tab
+        if tab is None:
+            return {}
+        return {
+            "session_output_tokens": getattr(tab, "session_output_tokens", 0),
+            "session_input_tokens": getattr(tab, "session_input_tokens", 0),
+            "session_cached_input_tokens": getattr(
+                tab,
+                "session_cached_input_tokens",
+                0,
+            ),
+            "last_invocation_metrics": getattr(tab, "last_invocation_metrics", None),
+        }
 
     def on_streaming_start(self, tab_id: str, answer_index: int) -> None:
         self._notify(
@@ -83,7 +110,7 @@ class PackDaemonAdapter:
     def on_streaming_end(self, tab_id: str, answer_index: int) -> None:
         self._notify(
             "on_streaming_end",
-            {"tab_id": tab_id, "answer_index": answer_index},
+            {"tab_id": tab_id, "answer_index": answer_index, **self._token_stats()},
         )
 
     def on_content_update(self, tab_id: str, update: Any) -> None:
@@ -95,7 +122,12 @@ class PackDaemonAdapter:
     def on_error(self, tab_id: str, message: str, details: str = "") -> None:
         self._notify(
             "on_error",
-            {"tab_id": tab_id, "message": message, "details": details},
+            {
+                "tab_id": tab_id,
+                "message": message,
+                "details": details,
+                **self._token_stats(),
+            },
         )
 
     def update_tab_title(self, tab_id: str, title: str) -> None:
@@ -226,6 +258,7 @@ def make_dispatcher(
                 "title": tab.title,
                 "is_streaming": tab.is_streaming,
                 "resumed": resumed,
+                **adapter._token_stats(),
             }
             # resumed answers "did this process find a persisted session
             # when it started" — true only for the very first attach.
@@ -419,6 +452,7 @@ def main() -> None:
         _tab_id, tab = core.create_tab("Pack Tab")
 
     core.start_autosave()
+    adapter.set_tab(tab)
 
     dispatch = make_dispatcher(tab, adapter, resumed, core)
 
