@@ -8,6 +8,7 @@ Return format mirrors mcp_manager.call_tool(): {"content": [...], "isError": boo
 """
 from __future__ import annotations
 
+import base64
 import datetime
 import hashlib
 import json
@@ -15,6 +16,7 @@ import os
 import sqlite3
 from typing import Any
 
+import image_tool_result
 from database import CONVERSATIONS_DB
 from rg_wrapper import RipgrepError
 from rg_wrapper import RipgrepWrapper
@@ -270,6 +272,106 @@ def read_file_range(arguments: dict[str, Any]) -> dict[str, Any]:
         return _err(f"Error reading file: {e}")
     except Exception as e:
         return _err(f"Error reading file: {e}")
+
+
+# Long-edge cap for what gets sent to the model — matches Anthropic's own
+# documented vision guidance; sending more pixels than this doesn't
+# improve what the model can make out and only inflates the payload.
+VIEW_IMAGE_MAX_DIMENSION = 1568
+VIEW_IMAGE_JPEG_QUALITY = 85
+# Hard ceiling on the final encoded payload, after downscaling/re-encoding
+# has already been tried. Not a soft preview like gate_tool_output's text
+# truncation — there's no such thing as a useful partial image, so this is
+# a refuse-outright backstop, not a trim.
+VIEW_IMAGE_MAX_ENCODED_BYTES = 5 * 1024 * 1024
+
+
+def view_image(arguments: dict[str, Any]) -> dict[str, Any]:
+    """Load an image file and return it for the model to actually see.
+
+    Unlike read_file, this doesn't just report bytes on disk exist — it
+    decodes the image, downscales it if needed, and returns it in a form
+    core/tool_output_gate.py and anthropic_ollama_server.py both know to
+    turn into a real image content block instead of raw marker text (see
+    image_tool_result.py for why that's a text-string sentinel rather than
+    a structural change to how tool results are stored).
+
+    Remote (TRAMP) paths aren't supported — tramp_handler.read_file only
+    returns text, and adding binary transfer to it is out of scope here.
+    """
+    try:
+        filepath = _get_filepath(arguments)
+    except ValueError as e:
+        return _err(str(e))
+    tramp, _tramp_error = _get_tramp()
+    if tramp and tramp.is_tramp_path(filepath):
+        return _err(
+            "Error: view_image does not support remote (TRAMP) paths — "
+            "only local files.",
+        )
+    ok, msg = _file_exists(filepath, None)
+    if not ok:
+        return _err(msg)
+
+    try:
+        from PIL import Image
+        import io
+
+        with open(filepath, "rb") as f:
+            raw_bytes = f.read()
+
+        try:
+            img = Image.open(io.BytesIO(raw_bytes))
+            img.load()
+        except Exception as e:
+            return _err(f"Error: '{filepath}' could not be read as an image: {e}")
+
+        orig_format = img.format or "?"
+        orig_size = img.size
+
+        if max(img.size) > VIEW_IMAGE_MAX_DIMENSION:
+            img.thumbnail(
+                (VIEW_IMAGE_MAX_DIMENSION, VIEW_IMAGE_MAX_DIMENSION),
+                Image.LANCZOS,
+            )
+
+        # Keep PNG for anything with real transparency (re-encoding as
+        # JPEG would flatten it onto black); everything else goes to JPEG,
+        # which is dramatically smaller for photo-like screenshots.
+        has_alpha = img.mode in ("RGBA", "LA") or (
+            img.mode == "P" and "transparency" in img.info
+        )
+        buf = io.BytesIO()
+        if has_alpha:
+            img.save(buf, format="PNG", optimize=True)
+            mime_type = "image/png"
+        else:
+            if img.mode != "RGB":
+                img = img.convert("RGB")
+            img.save(buf, format="JPEG", quality=VIEW_IMAGE_JPEG_QUALITY)
+            mime_type = "image/jpeg"
+
+        encoded_bytes = buf.getvalue()
+        if len(encoded_bytes) > VIEW_IMAGE_MAX_ENCODED_BYTES:
+            return _err(
+                f"Error: '{filepath}' is still {len(encoded_bytes)} bytes after "
+                "downscaling and can't be shown — try a smaller image or crop "
+                "the region you need first.",
+            )
+
+        b64_data = base64.b64encode(encoded_bytes).decode("ascii")
+        resized_note = (
+            f", downscaled to {img.size[0]}x{img.size[1]}"
+            if img.size != orig_size
+            else ""
+        )
+        description = (
+            f"Loaded '{filepath}' ({orig_size[0]}x{orig_size[1]} {orig_format}"
+            f"{resized_note}, {len(encoded_bytes)} bytes as {mime_type})."
+        )
+        return _ok(image_tool_result.encode_image_result(mime_type, b64_data, description))
+    except Exception as e:
+        return _err(f"Error loading image: {e}")
 
 
 def write_file(arguments: dict[str, Any]) -> dict[str, Any]:
@@ -934,6 +1036,7 @@ _HANDLERS: dict[str, Any] = {
     "list_files": list_files,
     "read_file": read_file,
     "read_file_range": read_file_range,
+    "view_image": view_image,
     "write_file": write_file,
     "modify_file": modify_file,
     "search_files_for_text": search_files_for_text,
@@ -1031,6 +1134,28 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
                             f"Last line to read, inclusive (default: start_line + "
                             f"{READ_FILE_RANGE_MAX_LINES - 1}; clamped to that span)"
                         ),
+                    },
+                },
+                "required": ["file_path"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "internal_view_image",
+            "description": (
+                "Load an image file (e.g. a screenshot you just took) so you can "
+                "actually see it, not just confirm it exists on disk. Downscales "
+                "large images automatically. Local paths only, no TRAMP/remote "
+                "support."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "file_path": {
+                        "type": "string",
+                        "description": "Local path to the image file",
                     },
                 },
                 "required": ["file_path"],

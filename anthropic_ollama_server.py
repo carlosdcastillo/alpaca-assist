@@ -23,6 +23,8 @@ from zoneinfo import ZoneInfo
 import requests
 import yaml
 
+import image_tool_result
+
 SYSTEM_PROMPT = """
 You are a highly skilled software engineer with extensive knowledge in many programming languages, frameworks, design patterns, and best practices. You are also an eloquent and professional writer who communicates clearly and effectively.
 
@@ -448,10 +450,27 @@ def _build_anthropic_messages(
             )
 
         elif role == "tool_result":
+            result_text = item.get("content", "")
+            image_result = image_tool_result.parse_image_result(result_text)
+            if image_result is not None:
+                mime_type, img_b64, description = image_result
+                result_content: list[dict[str, Any]] = [
+                    {
+                        "type": "image",
+                        "source": {
+                            "type": "base64",
+                            "media_type": mime_type,
+                            "data": img_b64,
+                        },
+                    },
+                    {"type": "text", "text": description},
+                ]
+            else:
+                result_content = [{"type": "text", "text": result_text}]
             tool_result_block: dict[str, Any] = {
                 "type": "tool_result",
                 "tool_use_id": item["id"],
-                "content": [{"type": "text", "text": item.get("content", "")}],
+                "content": result_content,
             }
             if wants_cache:
                 tool_result_block["cache_control"] = {"type": "ephemeral"}

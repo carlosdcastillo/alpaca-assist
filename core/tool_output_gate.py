@@ -29,6 +29,8 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
+import image_tool_result
+
 GATE_THRESHOLD_BYTES = 32 * 1024
 CALL_ARG_GATE_THRESHOLD_BYTES = 16 * 1024
 PREVIEW_MAX_LINES = 100
@@ -57,7 +59,15 @@ def gate_tool_output(
     tests/callers can monkeypatch the module constant), it is written in
     full to a per-tab temp file and a truncated preview with a pointer to
     that file is returned instead.
+
+    Never truncates a view_image result (see image_tool_result.py):
+    unlike text, a truncated base64 payload is corrupt, not a useful
+    preview, so there's nothing sensible to gate down to. view_image
+    already bounds its own output size by downscaling before it gets
+    here — this is a deliberate bypass of the size check, not a gap in it.
     """
+    if image_tool_result.parse_image_result(text) is not None:
+        return text
     if threshold is None:
         threshold = GATE_THRESHOLD_BYTES
     encoded = text.encode("utf-8")

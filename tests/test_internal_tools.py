@@ -14,6 +14,7 @@ from unittest.mock import patch
 
 import pytest
 
+import image_tool_result
 import internal_tools
 from internal_tools import call_tool
 from internal_tools import get_time
@@ -61,6 +62,7 @@ class TestToolSchemas:
         "internal_list_files",
         "internal_read_file",
         "internal_read_file_range",
+        "internal_view_image",
         "internal_write_file",
         "internal_modify_file",
         "internal_search_files_for_text",
@@ -71,8 +73,8 @@ class TestToolSchemas:
         "internal_dump_conversations",
     }
 
-    def test_exactly_twelve_schemas(self) -> None:
-        assert len(TOOL_SCHEMAS) == 12
+    def test_exactly_thirteen_schemas(self) -> None:
+        assert len(TOOL_SCHEMAS) == 13
 
     def test_schema_names_match_expected(self) -> None:
         names = {s["function"]["name"] for s in TOOL_SCHEMAS}
@@ -284,6 +286,121 @@ class TestReadFileRange:
         p.write_text("x" * (2 * 1024 * 1024) + "\nlast line", encoding="utf-8")
         result = read_file_range({"file_path": str(p), "start_line": 2, "end_line": 2})
         assert "last line" in _text(result)
+
+
+# ---------------------------------------------------------------------------
+# view_image
+# ---------------------------------------------------------------------------
+
+
+def _make_png(tmp_path: Path, name: str, size: tuple[int, int], mode: str = "RGB") -> Path:
+    from PIL import Image
+
+    p = tmp_path / name
+    color = (255, 0, 0, 128) if mode == "RGBA" else (255, 0, 0)
+    Image.new(mode, size, color).save(p, format="PNG")
+    return p
+
+
+class TestViewImage:
+    def test_loads_small_png(self, tmp_path: Path) -> None:
+        from internal_tools import view_image
+
+        p = _make_png(tmp_path, "small.png", (100, 80))
+        result = view_image({"file_path": str(p)})
+        assert _ok(result)
+        parsed = image_tool_result.parse_image_result(_text(result))
+        assert parsed is not None
+        mime_type, b64_data, description = parsed
+        # Opaque RGB source gets re-encoded as JPEG (smaller for photo-like
+        # content); only images with real transparency stay PNG.
+        assert mime_type == "image/jpeg"
+        assert len(b64_data) > 0
+        assert "100x80" in description
+
+    def test_preserves_transparency_as_png(self, tmp_path: Path) -> None:
+        from internal_tools import view_image
+
+        p = _make_png(tmp_path, "alpha.png", (50, 50), mode="RGBA")
+        result = view_image({"file_path": str(p)})
+        assert _ok(result)
+        parsed = image_tool_result.parse_image_result(_text(result))
+        assert parsed is not None
+        mime_type, _b64_data, _description = parsed
+        assert mime_type == "image/png"
+
+    def test_downscales_oversized_image(self, tmp_path: Path) -> None:
+        from internal_tools import view_image
+        from internal_tools import VIEW_IMAGE_MAX_DIMENSION
+
+        p = _make_png(tmp_path, "huge.png", (3000, 2000))
+        result = view_image({"file_path": str(p)})
+        assert _ok(result)
+        parsed = image_tool_result.parse_image_result(_text(result))
+        assert parsed is not None
+        _mime_type, b64_data, description = parsed
+        assert "downscaled" in description
+        # Decode and confirm the actual encoded image respects the cap.
+        import base64
+        import io
+
+        from PIL import Image
+
+        decoded = Image.open(io.BytesIO(base64.b64decode(b64_data)))
+        assert max(decoded.size) <= VIEW_IMAGE_MAX_DIMENSION
+
+    def test_small_image_not_downscaled(self, tmp_path: Path) -> None:
+        from internal_tools import view_image
+
+        p = _make_png(tmp_path, "small.png", (100, 80))
+        result = view_image({"file_path": str(p)})
+        parsed = image_tool_result.parse_image_result(_text(result))
+        assert parsed is not None
+        _mime_type, _b64_data, description = parsed
+        assert "downscaled" not in description
+
+    def test_nonexistent_file_errors(self, tmp_path: Path) -> None:
+        from internal_tools import view_image
+
+        result = view_image({"file_path": str(tmp_path / "missing.png")})
+        assert result["isError"] is True
+        assert "does not exist" in _text(result)
+
+    def test_missing_file_path_errors(self) -> None:
+        from internal_tools import view_image
+
+        result = view_image({})
+        assert result["isError"] is True
+
+    def test_non_image_file_errors_cleanly(self, tmp_path: Path) -> None:
+        from internal_tools import view_image
+
+        p = tmp_path / "notanimage.png"
+        p.write_text("this is definitely not image bytes", encoding="utf-8")
+        result = view_image({"file_path": str(p)})
+        assert result["isError"] is True
+        assert "could not be read as an image" in _text(result)
+
+    def test_tramp_path_rejected(self, tmp_path: Path) -> None:
+        from internal_tools import view_image
+
+        result = view_image({"file_path": "/ssh:user@host:/tmp/screenshot.png"})
+        assert result["isError"] is True
+        assert "TRAMP" in _text(result) or "remote" in _text(result).lower()
+
+    def test_result_survives_gate_tool_output_unchanged(self, tmp_path: Path) -> None:
+        """The whole reason gate_tool_output must special-case the image
+        sentinel: without that, a large-enough encoded image would get
+        byte-truncated here and the base64 would come out corrupt.
+        """
+        from core.tool_output_gate import gate_tool_output
+        from internal_tools import view_image
+
+        p = _make_png(tmp_path, "img.png", (200, 200))
+        result = view_image({"file_path": str(p)})
+        raw_text = _text(result)
+        gated = gate_tool_output(raw_text, "tab-1", "tool-1", "view_image", threshold=10)
+        assert gated == raw_text
 
 
 # ---------------------------------------------------------------------------
