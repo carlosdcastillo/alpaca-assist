@@ -331,7 +331,7 @@ class TestViewImage:
 
     def test_downscales_oversized_image(self, tmp_path: Path) -> None:
         from internal_tools import view_image
-        from internal_tools import VIEW_IMAGE_MAX_DIMENSION
+        from internal_tools import VIEW_IMAGE_DIMENSION_STEPS
 
         p = _make_png(tmp_path, "huge.png", (3000, 2000))
         result = view_image({"file_path": str(p)})
@@ -340,14 +340,15 @@ class TestViewImage:
         assert parsed is not None
         _mime_type, b64_data, description = parsed
         assert "downscaled" in description
-        # Decode and confirm the actual encoded image respects the cap.
+        # Decode and confirm the actual encoded image respects the largest
+        # (first-tried) dimension step.
         import base64
         import io
 
         from PIL import Image
 
         decoded = Image.open(io.BytesIO(base64.b64decode(b64_data)))
-        assert max(decoded.size) <= VIEW_IMAGE_MAX_DIMENSION
+        assert max(decoded.size) <= VIEW_IMAGE_DIMENSION_STEPS[0]
 
     def test_small_image_not_downscaled(self, tmp_path: Path) -> None:
         from internal_tools import view_image
@@ -401,6 +402,108 @@ class TestViewImage:
         raw_text = _text(result)
         gated = gate_tool_output(raw_text, "tab-1", "tool-1", "view_image", threshold=10)
         assert gated == raw_text
+
+    def test_falls_back_to_smaller_step_when_first_does_not_fit(self) -> None:
+        """Regression guard for a real bug in the first version of this
+        fallback: an already-small source image skipped every step past
+        the first because of incorrect "already smaller than this step"
+        branching, so it never actually retried at a smaller size even
+        when the first attempt didn't fit. thumbnail() is a safe no-op on
+        an already-small image, so every step must always be tried.
+
+        Rather than guess a budget against real JPEG compression behavior
+        (fragile — noise doesn't compress predictably), measure the actual
+        encoded sizes at the two dimension steps directly, then pick a
+        budget strictly between them: too small for the first step to
+        hit at any quality, but achievable at the second. If the fallback
+        didn't actually retry at a smaller size, this budget would be
+        unreachable and the function would return None.
+        """
+        from internal_tools import _encode_image_under_limit
+        from internal_tools import VIEW_IMAGE_DIMENSION_STEPS
+        from internal_tools import VIEW_IMAGE_JPEG_QUALITY_STEPS
+        from PIL import Image
+        import io
+        import random
+
+        random.seed(0)
+        # Must be larger than the *first two* dimension steps, or
+        # thumbnail() is a no-op for both and they'd encode identically —
+        # nothing to actually compare.
+        size = (2000, 2000)
+        img = Image.new("RGB", size)
+        img.putdata([tuple(random.randint(0, 255) for _ in range(3)) for _ in range(size[0] * size[1])])
+
+        def encoded_size(max_dim: int, quality: int) -> int:
+            candidate = img.copy()
+            candidate.thumbnail((max_dim, max_dim), Image.LANCZOS)
+            buf = io.BytesIO()
+            candidate.save(buf, format="JPEG", quality=quality)
+            return len(buf.getvalue())
+
+        first_dim, second_dim = VIEW_IMAGE_DIMENSION_STEPS[0], VIEW_IMAGE_DIMENSION_STEPS[1]
+        smallest_quality = VIEW_IMAGE_JPEG_QUALITY_STEPS[-1]
+        size_at_first_step = encoded_size(first_dim, smallest_quality)
+        size_at_second_step = encoded_size(second_dim, smallest_quality)
+        assert size_at_second_step < size_at_first_step, (
+            "test setup assumption broken: a smaller dimension step should "
+            "encode smaller — can't construct a meaningful budget without this"
+        )
+
+        budget = (size_at_first_step + size_at_second_step) // 2
+        fitted = _encode_image_under_limit(img, budget)
+        assert fitted is not None
+        _encoded, _mime, final_size = fitted
+        assert max(final_size) <= second_dim
+        assert max(final_size) < first_dim
+
+    def test_refusal_message_does_not_suggest_unsupported_actions(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """The model has no crop/resize tool of its own — telling it to
+        'try a smaller image or crop the region' is actionable-*sounding*
+        advice with no real tool behind it, exactly the kind of thing that
+        drove the real 117-call repeat loop investigated separately. When
+        every fallback step still doesn't fit, the message must say so
+        plainly and explicitly rule out retrying, not suggest self-service
+        actions that don't exist.
+        """
+        import internal_tools
+
+        p = _make_png(tmp_path, "img.png", (200, 200))
+        # No step can possibly fit an impossible budget — forces the
+        # genuine "nothing worked" refusal path.
+        monkeypatch.setattr(internal_tools, "VIEW_IMAGE_MAX_ENCODED_BYTES", 1)
+
+        result = internal_tools.view_image({"file_path": str(p)})
+        assert result["isError"] is True
+        text = _text(result)
+        assert "not supported" in text
+        assert "retrying" in text or "retry" in text
+        assert "crop" not in text.lower()
+
+    def test_encode_under_limit_returns_none_when_nothing_fits(self) -> None:
+        from internal_tools import _encode_image_under_limit
+        from PIL import Image
+
+        img = Image.new("RGB", (100, 100), (255, 0, 0))
+        assert _encode_image_under_limit(img, 1) is None
+
+    def test_encode_under_limit_thumbnail_is_safe_noop_on_small_source(self) -> None:
+        """thumbnail() must never enlarge — confirms the no-special-casing
+        simplification is actually safe for a source already smaller than
+        every dimension step.
+        """
+        from internal_tools import _encode_image_under_limit
+        from PIL import Image
+
+        img = Image.new("RGB", (50, 50), (0, 255, 0))
+        fitted = _encode_image_under_limit(img, 5 * 1024 * 1024)
+        assert fitted is not None
+        _encoded, _mime, final_size = fitted
+        assert final_size == (50, 50)
 
 
 # ---------------------------------------------------------------------------

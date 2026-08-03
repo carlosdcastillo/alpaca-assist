@@ -277,13 +277,61 @@ def read_file_range(arguments: dict[str, Any]) -> dict[str, Any]:
 # Long-edge cap for what gets sent to the model — matches Anthropic's own
 # documented vision guidance; sending more pixels than this doesn't
 # improve what the model can make out and only inflates the payload.
-VIEW_IMAGE_MAX_DIMENSION = 1568
-VIEW_IMAGE_JPEG_QUALITY = 85
-# Hard ceiling on the final encoded payload, after downscaling/re-encoding
-# has already been tried. Not a soft preview like gate_tool_output's text
-# truncation — there's no such thing as a useful partial image, so this is
-# a refuse-outright backstop, not a trim.
+# Tried largest-first, smallest-last, paired with a quality step for
+# formats where that applies (JPEG only — PNG is lossless, so only the
+# dimension shrinks help there). Multiple steps rather than one fixed
+# attempt so the "still too big" refusal below is genuinely rare — an
+# image that fails even at the smallest/lowest-quality step is a real
+# limit, not this tool giving up early.
+VIEW_IMAGE_DIMENSION_STEPS = (1568, 1280, 1024, 768, 512)
+VIEW_IMAGE_JPEG_QUALITY_STEPS = (85, 70, 50)
+# Hard ceiling on the final encoded payload, checked only after every
+# downscale/quality combination above has been tried. Not a soft preview
+# like gate_tool_output's text truncation — there's no such thing as a
+# useful partial image, so this is a refuse-outright backstop, not a trim.
 VIEW_IMAGE_MAX_ENCODED_BYTES = 5 * 1024 * 1024
+
+
+def _encode_image_under_limit(
+    img: Any,
+    max_bytes: int,
+) -> tuple[bytes, str, tuple[int, int]] | None:
+    """Try progressively smaller dimensions (and, for JPEG, quality) until
+    the encoded result fits under max_bytes. Returns (encoded_bytes,
+    mime_type, final_pixel_size), or None if nothing tried fit.
+    """
+    from PIL import Image
+    import io
+
+    has_alpha = img.mode in ("RGBA", "LA") or (
+        img.mode == "P" and "transparency" in img.info
+    )
+    if not has_alpha and img.mode != "RGB":
+        img = img.convert("RGB")
+
+    for max_dim in VIEW_IMAGE_DIMENSION_STEPS:
+        # thumbnail() only ever shrinks, never enlarges, so this is safe
+        # (a harmless no-op) even when the source is already smaller than
+        # max_dim — no need to special-case that; every step is always
+        # worth trying, including on an already-small source that still
+        # doesn't fit under budget at a higher quality/step.
+        candidate = img.copy()
+        candidate.thumbnail((max_dim, max_dim), Image.LANCZOS)
+
+        buf = io.BytesIO()
+        if has_alpha:
+            candidate.save(buf, format="PNG", optimize=True)
+            encoded = buf.getvalue()
+            if len(encoded) <= max_bytes:
+                return encoded, "image/png", candidate.size
+        else:
+            for quality in VIEW_IMAGE_JPEG_QUALITY_STEPS:
+                buf = io.BytesIO()
+                candidate.save(buf, format="JPEG", quality=quality)
+                encoded = buf.getvalue()
+                if len(encoded) <= max_bytes:
+                    return encoded, "image/jpeg", candidate.size
+    return None
 
 
 def view_image(arguments: dict[str, Any]) -> dict[str, Any]:
@@ -315,12 +363,13 @@ def view_image(arguments: dict[str, Any]) -> dict[str, Any]:
 
     try:
         from PIL import Image
-        import io
 
         with open(filepath, "rb") as f:
             raw_bytes = f.read()
 
         try:
+            import io
+
             img = Image.open(io.BytesIO(raw_bytes))
             img.load()
         except Exception as e:
@@ -329,40 +378,25 @@ def view_image(arguments: dict[str, Any]) -> dict[str, Any]:
         orig_format = img.format or "?"
         orig_size = img.size
 
-        if max(img.size) > VIEW_IMAGE_MAX_DIMENSION:
-            img.thumbnail(
-                (VIEW_IMAGE_MAX_DIMENSION, VIEW_IMAGE_MAX_DIMENSION),
-                Image.LANCZOS,
-            )
-
-        # Keep PNG for anything with real transparency (re-encoding as
-        # JPEG would flatten it onto black); everything else goes to JPEG,
-        # which is dramatically smaller for photo-like screenshots.
-        has_alpha = img.mode in ("RGBA", "LA") or (
-            img.mode == "P" and "transparency" in img.info
-        )
-        buf = io.BytesIO()
-        if has_alpha:
-            img.save(buf, format="PNG", optimize=True)
-            mime_type = "image/png"
-        else:
-            if img.mode != "RGB":
-                img = img.convert("RGB")
-            img.save(buf, format="JPEG", quality=VIEW_IMAGE_JPEG_QUALITY)
-            mime_type = "image/jpeg"
-
-        encoded_bytes = buf.getvalue()
-        if len(encoded_bytes) > VIEW_IMAGE_MAX_ENCODED_BYTES:
+        fitted = _encode_image_under_limit(img, VIEW_IMAGE_MAX_ENCODED_BYTES)
+        if fitted is None:
             return _err(
-                f"Error: '{filepath}' is still {len(encoded_bytes)} bytes after "
-                "downscaling and can't be shown — try a smaller image or crop "
-                "the region you need first.",
+                f"Error: '{filepath}' cannot be shown — even at the smallest "
+                "size and quality this tool tries, it's still over the "
+                f"{VIEW_IMAGE_MAX_ENCODED_BYTES} byte limit for what can be "
+                "sent to the model. This image is not supported; there is no "
+                "way to view part of an image — unlike text files, an image "
+                "can't be read in segments or ranges, so a partial view "
+                "wouldn't be meaningful and retrying this same file will not "
+                "help. Tell the user the image couldn't be shown rather than "
+                "retrying.",
             )
+        encoded_bytes, mime_type, final_size = fitted
 
         b64_data = base64.b64encode(encoded_bytes).decode("ascii")
         resized_note = (
-            f", downscaled to {img.size[0]}x{img.size[1]}"
-            if img.size != orig_size
+            f", downscaled to {final_size[0]}x{final_size[1]}"
+            if final_size != orig_size
             else ""
         )
         description = (
