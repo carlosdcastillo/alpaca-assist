@@ -413,9 +413,16 @@ html, body {
 }
 
 .new-tab-caret {
-    font-size: 10px;
-    line-height: 1;
-    opacity: 0.6;
+    /* Font-independent triangle drawn with borders so it renders identically
+       on every platform (the ▾ glyph was invisible in the Windows webview font). */
+    display: inline-block;
+    width: 0;
+    height: 0;
+    font-size: 0;
+    border-left: 4px solid transparent;
+    border-right: 4px solid transparent;
+    border-top: 5px solid currentColor;
+    opacity: 0.85;
 }
 
 .new-tab-btn:hover,
@@ -447,13 +454,34 @@ html, body {
     background: var(--bg-secondary);
     border: 1px solid var(--border-color);
     border-radius: 4px;
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45);
     z-index: 1000;
     padding: 4px 0;
 }
 
 .new-tab-dropdown.open .new-tab-menu {
     display: block;
+}
+
+/* The toolbar "+ New Tab" button opens the same Local/Pack menu. */
+.toolbar-new-tab-dropdown {
+    position: relative;
+    display: inline-flex;
+}
+
+.toolbar-new-tab-dropdown.open .new-tab-menu {
+    display: block;
+}
+
+/* The toolbar button sits at the left edge, so its menu opens left-aligned. */
+#toolbar-new-tab-menu {
+    right: auto;
+    left: 0;
+}
+
+/* Space the caret from the "New Tab" label inside the toolbar button. */
+#toolbar-new-tab .new-tab-caret {
+    margin-left: 6px;
 }
 
 .new-tab-menu-item {

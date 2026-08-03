@@ -94,10 +94,24 @@
 
         <!-- Toolbar -->
         <div class="toolbar" id="toolbar">
-            <button class="toolbar-btn" id="toolbar-new-tab" title="New Tab (Ctrl+N)">
-                <span class="toolbar-icon">+</span>
-                <span class="toolbar-text">New Tab</span>
-            </button>
+            <div class="toolbar-new-tab-dropdown" id="toolbar-new-tab-dropdown">
+                <button class="toolbar-btn" id="toolbar-new-tab" title="New Tab (Ctrl+N)" aria-haspopup="true" aria-expanded="false">
+                    <span class="toolbar-icon">+</span>
+                    <span class="toolbar-text">New Tab</span>
+                    <span class="new-tab-caret"></span>
+                </button>
+                <div class="new-tab-menu" id="toolbar-new-tab-menu" role="menu">
+                    <button class="new-tab-menu-item" data-action="new-tab" role="menuitem">
+                        <span class="new-tab-menu-icon">🖥</span>
+                        <span>Local Tab</span>
+                        <span class="new-tab-menu-shortcut">Ctrl+N</span>
+                    </button>
+                    <button class="new-tab-menu-item" data-action="new-pack-tab" role="menuitem">
+                        <span class="new-tab-menu-icon">📦</span>
+                        <span>Pack Tab</span>
+                    </button>
+                </div>
+            </div>
             <button class="toolbar-btn" id="toolbar-close-tab" title="Close Tab (Ctrl+W)">
                 <span class="toolbar-icon">×</span>
                 <span class="toolbar-text">Close Tab</span>
@@ -135,7 +149,7 @@
                     aria-expanded="false"
                     aria-label="More new-tab options"
                 >
-                    <span class="new-tab-caret">▾</span>
+                    <span class="new-tab-caret"></span>
                 </button>
                 <div class="new-tab-menu" id="new-tab-menu" role="menu">
                     <button class="new-tab-menu-item" data-action="new-tab" role="menuitem">

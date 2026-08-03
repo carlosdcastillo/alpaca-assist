@@ -122,64 +122,71 @@ class AlpacaApp {
       });
     });
 
-    // New tab button — clicking (or keyboard-activating) the plus button
-    // opens a local tab immediately; the caret is a separate, independently
-    // focusable button that opens a sub-menu with Local/Pack choices.
-    // Two sibling <button> elements rather than one button with clickable
-    // inner <span>s: a <button> can't contain another <button>, and — the
-    // reason this matters — listeners placed on inner spans never fire for
-    // keyboard activation. Tabbing to a button and pressing Enter/Space
-    // dispatches a click whose target is the button itself, which doesn't
-    // bubble back down into children, so a span-only listener is
-    // unreachable from the keyboard even though it works fine with a mouse.
-    const newTabDropdown = document.getElementById("new-tab-dropdown");
-    const newTabBtn = document.getElementById("new-tab-btn");
-    const newTabCaretBtn = document.getElementById("new-tab-caret-btn");
-    const newTabMenu = document.getElementById("new-tab-menu");
-
-    const closeNewTabMenu = () => {
-      newTabDropdown.classList.remove("open");
-      newTabCaretBtn.setAttribute("aria-expanded", "false");
+    // New-tab dropdowns: both the top-left toolbar "+ New Tab" button and the
+    // tab-strip split button (its plus and caret) open the same Local/Pack
+    // menu. Ctrl+N still creates a local tab directly for the fast path.
+    //
+    // Two sibling <button> elements (plus + caret) rather than one button with
+    // clickable inner <span>s: a <button> can't contain another <button>, and
+    // listeners on inner spans never fire for keyboard activation (Enter/Space
+    // dispatches a click whose target is the button itself and doesn't bubble
+    // down into children), so a span-only listener is unreachable by keyboard.
+    const newTabDropdowns = [];
+    const setupNewTabDropdown = (dropdown, triggers, menu) => {
+      if (!dropdown || !menu) return;
+      const close = () => {
+        dropdown.classList.remove("open");
+        triggers.forEach((b) => b && b.setAttribute("aria-expanded", "false"));
+      };
+      const toggle = () => {
+        const willOpen = !dropdown.classList.contains("open");
+        newTabDropdowns.forEach((d) => d.close()); // close any other open one
+        dropdown.classList.toggle("open", willOpen);
+        triggers.forEach(
+          (b) => b && b.setAttribute("aria-expanded", String(willOpen)),
+        );
+      };
+      triggers.forEach(
+        (btn) =>
+          btn &&
+          btn.addEventListener("click", (e) => {
+            e.stopPropagation();
+            toggle();
+          }),
+      );
+      menu.querySelectorAll(".new-tab-menu-item").forEach((item) => {
+        item.addEventListener("click", (e) => {
+          e.stopPropagation();
+          close();
+          this._handleMenuAction(item.dataset.action);
+        });
+      });
+      newTabDropdowns.push({ close });
     };
 
-    // The plus button creates a local tab (preserves old behaviour).
-    newTabBtn.addEventListener("click", (e) => {
-      e.stopPropagation();
-      closeNewTabMenu();
-      this.tabManager.createTab();
-    });
+    setupNewTabDropdown(
+      document.getElementById("new-tab-dropdown"),
+      [
+        document.getElementById("new-tab-btn"),
+        document.getElementById("new-tab-caret-btn"),
+      ],
+      document.getElementById("new-tab-menu"),
+    );
+    setupNewTabDropdown(
+      document.getElementById("toolbar-new-tab-dropdown"),
+      [document.getElementById("toolbar-new-tab")],
+      document.getElementById("toolbar-new-tab-menu"),
+    );
 
-    // The caret button toggles the sub-menu.
-    newTabCaretBtn.addEventListener("click", (e) => {
-      e.stopPropagation();
-      const willOpen = !newTabDropdown.classList.contains("open");
-      newTabDropdown.classList.toggle("open", willOpen);
-      newTabCaretBtn.setAttribute("aria-expanded", String(willOpen));
-    });
-
-    // Sub-menu items
-    newTabMenu.querySelectorAll(".new-tab-menu-item").forEach((item) => {
-      item.addEventListener("click", (e) => {
-        e.stopPropagation();
-        const action = item.dataset.action;
-        closeNewTabMenu();
-        this._handleMenuAction(action);
-      });
-    });
-
-    // Close the sub-menu when clicking elsewhere
+    // Close any open new-tab dropdown on outside-click or Escape.
     document.addEventListener("click", (e) => {
-      if (!e.target.closest(".new-tab-dropdown")) {
-        closeNewTabMenu();
+      if (!e.target.closest(".new-tab-dropdown, .toolbar-new-tab-dropdown")) {
+        newTabDropdowns.forEach((d) => d.close());
       }
     });
-
-    // Close the sub-menu on Escape, and return focus to the button that
-    // opened it — standard disclosure-menu behavior for keyboard users.
     document.addEventListener("keydown", (e) => {
-      if (e.key === "Escape" && newTabDropdown.classList.contains("open")) {
-        closeNewTabMenu();
-        newTabCaretBtn.focus();
+      if (e.key === "Escape") {
+        newTabDropdowns.forEach((d) => d.close());
       }
     });
 
@@ -763,13 +770,8 @@ class AlpacaApp {
    * Bind toolbar button events
    */
   _bindToolbarEvents() {
-    // New Tab button
-    const newTabBtn = document.getElementById("toolbar-new-tab");
-    if (newTabBtn) {
-      newTabBtn.addEventListener("click", () => {
-        this.tabManager.createTab();
-      });
-    }
+    // New Tab button: opens the Local/Pack dropdown, wired in _bindEvents via
+    // setupNewTabDropdown, so there is nothing to bind here.
 
     // Close Tab button
     const closeTabBtn = document.getElementById("toolbar-close-tab");
