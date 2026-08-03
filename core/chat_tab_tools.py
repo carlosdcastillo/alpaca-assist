@@ -22,6 +22,7 @@ from collections.abc import Callable
 from typing import Any
 from typing import TYPE_CHECKING
 
+import image_tool_result
 import utils
 from core.tool_output_gate import gate_tool_call_arguments
 from core.tool_output_gate import gate_tool_output
@@ -68,6 +69,16 @@ class ToolHandler:
     # actually large. See TOOL_RESULT_CLEARING.md. Deliberately size-based
     # (not time-based) to avoid interacting with the prompt-cache TTL.
     KEEP_TOOL_CONTEXT_BUDGET_BYTES = 24 * 1024
+
+    # Image results (internal_view_image) are exempt from the byte budget
+    # above and kept by count instead — a single downscaled screenshot
+    # still typically encodes to several times the whole text budget by
+    # itself, so counting it there would evict everything around it on the
+    # very next call (see TOOL_RESULT_CLEARING.md's "Images" section). 2
+    # matches the before/after-screenshot pattern this tool is actually
+    # used for.
+    KEEP_LAST_N_IMAGES = 2
+
     CLEARED_TOOL_RESULT_STUB = (
         "[tool result cleared to reduce context size — result of this call "
         "is no longer shown; re-run the tool if you need this again]"
@@ -555,20 +566,62 @@ class ToolHandler:
         # appending identical stub text — so the cleared region stays
         # cache-stable across calls exactly as it did in the pair-count
         # version.
+        #
+        # Image results (internal_view_image, see image_tool_result.py) are
+        # deliberately invisible to this walk — skipped entirely rather than
+        # counted. A single downscaled screenshot still typically encodes to
+        # several times the whole text budget by itself, so counting it here
+        # would blow the budget out in one step and stub every *other* pair
+        # around it too, including small, unrelated, otherwise-easily-kept
+        # text results. Images get their own, independent retention rule
+        # below instead.
         n_total = len(all_pairs)
         budget = self.KEEP_TOOL_CONTEXT_BUDGET_BYTES
-        first_kept_index = n_total
+        text_keep_ids: set[str] = set()
+        newest_text_seen = False
         for idx in range(n_total - 1, -1, -1):
             tc, tr = all_pairs[idx]
+            if image_tool_result.parse_image_result(tr.content) is not None:
+                continue
+            is_newest_text = not newest_text_seen
+            newest_text_seen = True
             pair_bytes = len(tc.content.encode("utf-8")) + len(tr.content.encode("utf-8"))
-            if idx != n_total - 1 and pair_bytes > budget:
+            if not is_newest_text and pair_bytes > budget:
                 break
             budget -= pair_bytes
-            first_kept_index = idx
-        keep_full_ids = {tc.id for tc, _tr in all_pairs[first_kept_index:]}
-        last_cleared_id = (
-            all_pairs[first_kept_index - 1][0].id if first_kept_index > 0 else None
-        )
+            text_keep_ids.add(tc.id)
+
+        # Images get their own small keep-count, independent of the text
+        # budget above, so a screenshot stays visible for a few turns after
+        # loading instead of vanishing the moment it's no longer the single
+        # newest pair (which, given its size, is exactly what the shared
+        # byte-budget walk would otherwise do to it immediately). 2 matches
+        # the before/after-screenshot pattern this tool actually gets used
+        # for in practice.
+        image_keep_ids: set[str] = set()
+        images_kept = 0
+        for idx in range(n_total - 1, -1, -1):
+            tc, tr = all_pairs[idx]
+            if image_tool_result.parse_image_result(tr.content) is None:
+                continue
+            if images_kept >= self.KEEP_LAST_N_IMAGES:
+                break
+            image_keep_ids.add(tc.id)
+            images_kept += 1
+
+        keep_full_ids = text_keep_ids | image_keep_ids
+        # Cache breakpoint: the most recent pair, of either kind, that's
+        # actually cleared. A kept image is exactly as stable call-to-call
+        # as a stub is (identical bytes each time, until it eventually ages
+        # out), so it's safe on either side of this marker — the marker
+        # only needs to sit after the last thing that could still be
+        # changing, not at a clean single cutpoint in the pair sequence.
+        last_cleared_id = None
+        for idx in range(n_total - 1, -1, -1):
+            tc, _tr = all_pairs[idx]
+            if tc.id not in keep_full_ids:
+                last_cleared_id = tc.id
+                break
 
         # Second pass: build the actual message list in chronological order,
         # using the global full/stub membership computed above instead of a

@@ -80,6 +80,38 @@ cleared regardless of which turn or how old — see
 `core/tool_output_gate.py`'s `gate_tool_call_arguments` for the separate
 mechanism that bounds *that* side.
 
+### Images
+
+`internal_view_image` results (see `image_tool_result.py`) are excluded
+from the byte-budget walk above entirely, not counted against it. A real
+screenshot, even downscaled and JPEG re-encoded, routinely comes out to
+several times the *entire* 24KB budget by itself — a 1400x900 app window
+encodes to ~76KB. Counting that against the shared budget caused two
+real problems, both found by walking through an actual incident rather
+than by inspection:
+
+- The image was only exempt from the size check while it was the single
+  most recent pair, so it got stubbed the instant anything else was
+  added after it — visible for exactly one round trip, then gone.
+- Because the budget walk is one running total, subtracting one pair
+  several times the size of the whole budget drove it deeply negative,
+  which then failed *every earlier pair's* check too — an image call
+  could silently wipe out unrelated, otherwise-easily-kept small text
+  results that happened to sit before it.
+
+Images instead get their own independent keep-count
+(`KEEP_LAST_N_IMAGES`, currently 2 — matched to the before/after-
+screenshot pattern this tool is actually used for), walked separately
+and unioned into the same `keep_full_ids` set the text walk produces.
+The cache-breakpoint marker is computed as "the most recent pair of
+either kind that ended up cleared," rather than assuming a single clean
+cutpoint in the pair sequence — a kept image can sit chronologically
+before text pairs that get cleared after it, so there's no longer one
+tidy suffix boundary to point at. This is still safe to cache up to:
+a kept image is exactly as stable call-to-call as a stub is (identical
+bytes every time, until it eventually ages out), so it's fine on either
+side of the marker.
+
 ## What's visible to the customer
 
 **Nothing changes in the UI, history, or persisted data.** The
@@ -105,12 +137,17 @@ for v1.
 ## Where implemented
 
 - `core/chat_tab_tools.py` — `prepare_continuation_messages` (byte-budget
-  clearing logic + second cache_control breakpoint) and `handle_tool_call`
-  (wires `gate_tool_call_arguments` in at storage time).
+  clearing logic, the independent image keep-count, and the cache_control
+  breakpoint) and `handle_tool_call` (wires `gate_tool_call_arguments` in
+  at storage time).
 - `core/tool_output_gate.py` — `gate_tool_call_arguments`, the equivalent
   cap for the call-argument side, which this mechanism never touches
-  regardless of age (see that module's docstring).
-- No changes to `chat_state.py`, `anthropic_ollama_server.py`, or the web UI.
+  regardless of age (see that module's docstring); also exempts image
+  results from truncation for the same reason `prepare_continuation_messages`
+  exempts them from the byte budget.
+- `image_tool_result.py` — the sentinel format `prepare_continuation_messages`
+  checks to tell an image result apart from ordinary text.
+- No changes to `chat_state.py` or the web UI.
 
 ## Risk / difficulty (recap)
 
