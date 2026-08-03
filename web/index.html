@@ -123,7 +123,32 @@
             <button class="tab-scroll-btn tab-scroll-left hidden" id="tab-scroll-left" title="Scroll tabs left">‹</button>
             <div class="tabs-container" id="tabs-container"></div>
             <button class="tab-scroll-btn tab-scroll-right hidden" id="tab-scroll-right" title="Scroll tabs right">›</button>
-            <button class="new-tab-btn" id="new-tab-btn" title="New Tab">+</button>
+            <div class="new-tab-dropdown" id="new-tab-dropdown">
+                <button class="new-tab-btn" id="new-tab-btn" title="New Tab (Ctrl+N)">
+                    <span class="new-tab-plus">+</span>
+                </button>
+                <button
+                    class="new-tab-caret-btn"
+                    id="new-tab-caret-btn"
+                    title="More options"
+                    aria-haspopup="true"
+                    aria-expanded="false"
+                    aria-label="More new-tab options"
+                >
+                    <span class="new-tab-caret">▾</span>
+                </button>
+                <div class="new-tab-menu" id="new-tab-menu" role="menu">
+                    <button class="new-tab-menu-item" data-action="new-tab" role="menuitem">
+                        <span class="new-tab-menu-icon">🖥</span>
+                        <span>Local Tab</span>
+                        <span class="new-tab-menu-shortcut">Ctrl+N</span>
+                    </button>
+                    <button class="new-tab-menu-item" data-action="new-pack-tab" role="menuitem">
+                        <span class="new-tab-menu-icon">📦</span>
+                        <span>Pack Tab</span>
+                    </button>
+                </div>
+            </div>
         </div>
 
         <!-- Main Content Area -->

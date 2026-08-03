@@ -122,9 +122,65 @@ class AlpacaApp {
       });
     });
 
-    // New tab button
-    document.getElementById("new-tab-btn").addEventListener("click", () => {
+    // New tab button — clicking (or keyboard-activating) the plus button
+    // opens a local tab immediately; the caret is a separate, independently
+    // focusable button that opens a sub-menu with Local/Pack choices.
+    // Two sibling <button> elements rather than one button with clickable
+    // inner <span>s: a <button> can't contain another <button>, and — the
+    // reason this matters — listeners placed on inner spans never fire for
+    // keyboard activation. Tabbing to a button and pressing Enter/Space
+    // dispatches a click whose target is the button itself, which doesn't
+    // bubble back down into children, so a span-only listener is
+    // unreachable from the keyboard even though it works fine with a mouse.
+    const newTabDropdown = document.getElementById("new-tab-dropdown");
+    const newTabBtn = document.getElementById("new-tab-btn");
+    const newTabCaretBtn = document.getElementById("new-tab-caret-btn");
+    const newTabMenu = document.getElementById("new-tab-menu");
+
+    const closeNewTabMenu = () => {
+      newTabDropdown.classList.remove("open");
+      newTabCaretBtn.setAttribute("aria-expanded", "false");
+    };
+
+    // The plus button creates a local tab (preserves old behaviour).
+    newTabBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      closeNewTabMenu();
       this.tabManager.createTab();
+    });
+
+    // The caret button toggles the sub-menu.
+    newTabCaretBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const willOpen = !newTabDropdown.classList.contains("open");
+      newTabDropdown.classList.toggle("open", willOpen);
+      newTabCaretBtn.setAttribute("aria-expanded", String(willOpen));
+    });
+
+    // Sub-menu items
+    newTabMenu.querySelectorAll(".new-tab-menu-item").forEach((item) => {
+      item.addEventListener("click", (e) => {
+        e.stopPropagation();
+        const action = item.dataset.action;
+        closeNewTabMenu();
+        this._handleMenuAction(action);
+      });
+    });
+
+    // Close the sub-menu when clicking elsewhere
+    document.addEventListener("click", (e) => {
+      if (!e.target.closest(".new-tab-dropdown")) {
+        closeNewTabMenu();
+      }
+    });
+
+    // Close the sub-menu on Escape, and return focus to the button that
+    // opened it — standard disclosure-menu behavior for keyboard users.
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "Escape" && newTabDropdown.classList.contains("open")) {
+        closeNewTabMenu();
+        newTabCaretBtn.focus();
+      }
     });
 
     // Close menus when clicking elsewhere
