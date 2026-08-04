@@ -33,7 +33,7 @@ In `prepare_continuation_messages`, tool-call/result pairs are flattened
 into one chronological list *across the whole conversation* (not reset per
 turn — see "Applied across turns" below). The list is walked backward from
 the most recent pair, accumulating actual byte size (call args + result)
-until a budget (`KEEP_TOOL_CONTEXT_BUDGET_BYTES`, currently 24KB) is
+until a budget (`KEEP_TOOL_CONTEXT_BUDGET_BYTES`, currently 256KB) is
 exceeded:
 
 - Pairs within the budget, walking backward from most recent, are sent
@@ -57,11 +57,15 @@ Real pair sizes vary by 100x+ — a few dozen bytes for something like
 fixed count gave wildly inconsistent actual resend cost depending on which
 tools happened to be recent. A byte budget bounds the thing that actually
 matters, and self-adjusts: a run of small pairs is barely touched, a run
-of large ones gets clamped down hard. 24KB sits between the two per-item
-gate thresholds — smaller than `GATE_THRESHOLD_BYTES` (32KB, so one
-maximally-sized result can't dominate the window alone), larger than
-`CALL_ARG_GATE_THRESHOLD_BYTES` (16KB, so a couple of sizeable recent
-calls can still coexist in it).
+of large ones gets clamped down hard. Originally set to 24KB (deliberately
+smaller than either per-item gate threshold below), but review of real
+tool-loop conversations (60+ round trips of `internal_run_shell_command`/
+`internal_read_file`, individual results routinely tens-to-hundreds of KB)
+showed that budget triggered clearing — and the cache-prefix invalidation
+that comes with it — after essentially one kept pair. Raised to 256KB to
+leave room for dozens of full-size pairs before eviction starts, trading a
+larger worst-case first-time resend for far fewer clear-driven cache
+busts.
 
 Budget is size-based (not time-based) — deliberately simple to avoid
 interacting with the ~5-minute cache TTL in complicated ways.

@@ -59,16 +59,17 @@ class ToolHandler:
     # tens of KB for a gated write_file result), so a fixed count gives
     # wildly inconsistent actual resend cost depending on which tools
     # happened to be recent; a byte budget bounds the thing that actually
-    # matters. 24KB sits between the two per-item gate thresholds below —
-    # smaller than GATE_THRESHOLD_BYTES (32KB) so one maximally-sized
-    # result can't dominate the whole window by itself, larger than
-    # CALL_ARG_GATE_THRESHOLD_BYTES (16KB) so a couple of sizeable recent
-    # calls can still coexist in it. Comfortably covers many small pairs
-    # (typical read_file_range/search calls run well under 1KB) without
-    # ever being touched, and only starts binding once the tail is
-    # actually large. See TOOL_RESULT_CLEARING.md. Deliberately size-based
-    # (not time-based) to avoid interacting with the prompt-cache TTL.
-    KEEP_TOOL_CONTEXT_BUDGET_BYTES = 24 * 1024
+    # matters. Originally 24KB (smaller than either per-item gate
+    # threshold), but real tool-loop conversations routinely produce
+    # individual results in the tens-to-hundreds-of-KB range (shell
+    # command output, read_file) — at 24KB that meant clearing, and the
+    # cache-prefix invalidation that comes with it (see
+    # TOOL_RESULT_CLEARING.md), kicked in after essentially one kept pair.
+    # 256KB leaves room for dozens of full-size pairs before eviction
+    # starts, trading a larger worst-case first-time resend for far fewer
+    # clear-driven cache busts. Deliberately size-based (not time-based)
+    # to avoid interacting with the prompt-cache TTL.
+    KEEP_TOOL_CONTEXT_BUDGET_BYTES = 256 * 1024
 
     # Image results (internal_view_image) are exempt from the byte budget
     # above and kept by count instead — a single downscaled screenshot
