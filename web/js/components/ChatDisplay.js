@@ -22,6 +22,14 @@ class ChatDisplay {
     this.pendingFolds = new Map();
     this.injectedFolds = new Map();
 
+    // Map answer_index -> Map(tool_call_id -> raw tool_result content), so
+    // `alpaca://image/<tool_call_id>` refs in that same answer's own text
+    // can resolve to the actual image (see registerToolResult /
+    // _resolveInlineImageRefs). Scoped per answer_index deliberately —
+    // tool-call ids are model-assigned free text, only guaranteed unique
+    // within the answer that generated them.
+    this.answerToolResults = new Map();
+
     // Track streaming state
     this.isStreaming = false;
     this.currentAnswerIndex = -1;
@@ -342,14 +350,54 @@ class ChatDisplay {
 
     // Strip any legacy fold-placeholder comments before markdown parsing.
     const { textToRender } = this._extractFoldPlaceholders(buffer);
+    const withResolvedImages = this._resolveInlineImageRefs(
+      textToRender,
+      answerIndex,
+    );
     const processedText = isFinal
-      ? textToRender
-      : this._closeOpenFences(textToRender);
+      ? withResolvedImages
+      : this._closeOpenFences(withResolvedImages);
 
     answerElement.innerHTML = DOMPurify.sanitize(marked.parse(processedText));
 
     bufferData.lastRenderLength = buffer.length;
     // Folds are siblings of the text segments in answerWrapper and are unaffected.
+  }
+
+  /**
+   * Record a tool_result's raw content against its real tool-call id, so
+   * `alpaca://image/<id>` refs written in that same answer's text can be
+   * resolved later. Called from both the live streaming path (app.js's
+   * injectToolFold, deriving the id from fold_id) and the historical
+   * re-render path (the component's own `.id` field is used directly).
+   */
+  registerToolResult(answerIndex, toolCallId, content) {
+    if (!toolCallId) return;
+    let map = this.answerToolResults.get(answerIndex);
+    if (!map) {
+      map = new Map();
+      this.answerToolResults.set(answerIndex, map);
+    }
+    map.set(toolCallId, content);
+  }
+
+  /**
+   * Resolve `alpaca://image/<tool_call_id>` markdown image refs to the
+   * matching view_image result's data: URI, using only this same answer's
+   * own tool results (see registerToolResult's docstring for why this is
+   * scoped per-answer rather than a global lookup). Unresolved refs are
+   * left as-is — marked/DOMPurify renders them as a normal broken image
+   * rather than crashing.
+   */
+  _resolveInlineImageRefs(text, answerIndex) {
+    if (!text.includes("alpaca://image/")) return text;
+    const results = this.answerToolResults.get(answerIndex);
+    return text.replace(/alpaca:\/\/image\/([^)\s"'>]+)/g, (match, id) => {
+      const content = results?.get(id);
+      const parsed = content && window.ImageResultUtils?.parse(content);
+      if (!parsed) return match;
+      return `data:${parsed.mimeType};base64,${parsed.base64Data}`;
+    });
   }
 
   /**
@@ -807,6 +855,7 @@ class ChatDisplay {
     this.answerBuffers.clear();
     this.pendingFolds.clear();
     this.injectedFolds.clear();
+    this.answerToolResults.clear();
     this.currentAnswerIndex = -1;
   }
 

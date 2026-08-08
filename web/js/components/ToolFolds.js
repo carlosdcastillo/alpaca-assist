@@ -14,6 +14,8 @@ class ToolFold extends HTMLElement {
     this._bodyText = "";
     this._highlightedBody = "";
     this._isPlainText = false;
+    this._isImage = false;
+    this._imageResult = null;
   }
 
   /**
@@ -122,6 +124,9 @@ class ToolFold extends HTMLElement {
    * Highlight body content with hljs
    */
   _highlightBody() {
+    this._isImage = false;
+    this._imageResult = null;
+
     if (!this._bodyText) {
       this._highlightedBody = "";
       return;
@@ -130,6 +135,14 @@ class ToolFold extends HTMLElement {
     const type = this.getAttribute("data-type") || "call";
 
     if (type === "result") {
+      // A view_image result (see image_tool_result.py) — render the actual
+      // image instead of dumping its base64 payload as a wall of text.
+      const imageResult = window.ImageResultUtils?.parse(this._bodyText);
+      if (imageResult) {
+        this._isImage = true;
+        this._imageResult = imageResult;
+        return;
+      }
       // Try to extract plain text from MCP-style JSON before deciding how to display.
       const extracted = this._extractResultText(this._bodyText);
       if (extracted !== null) {
@@ -313,6 +326,21 @@ class ToolFold extends HTMLElement {
                     white-space: pre-wrap;
                     word-break: break-word;
                 }
+
+                /* view_image result */
+                .image-result img {
+                    display: block;
+                    max-width: 100%;
+                    height: auto;
+                    border-radius: 4px;
+                }
+
+                .image-caption {
+                    margin-top: 6px;
+                    font-family: var(--font-mono, 'Consolas', monospace);
+                    font-size: 12px;
+                    color: var(--text-secondary, #9d9d9d);
+                }
             </style>
             <div class="fold-header">
                 <span class="fold-icon">${type === "call" ? "🔧" : "📦"}</span>
@@ -344,6 +372,32 @@ class ToolFold extends HTMLElement {
       console.log(`[TOOLFOLD DEBUG] _renderBody: no bodyDiv found`);
       return;
     }
+
+    if (this._isImage && this._imageResult) {
+      const { mimeType, base64Data, description } = this._imageResult;
+      // Defensive: this data is server-generated (view_image/Pillow), but
+      // validate before interpolating into an HTML attribute regardless —
+      // a malformed mime type or non-base64 payload falls back to plain
+      // text rather than risk breaking out of the data: URI attribute.
+      const safeMime = /^image\/[a-zA-Z0-9.+-]+$/.test(mimeType)
+        ? mimeType
+        : null;
+      const safeData = /^[A-Za-z0-9+/=]*$/.test(base64Data)
+        ? base64Data
+        : null;
+      if (safeMime && safeData) {
+        const safeDesc = this._escapeHtml(description || "");
+        bodyDiv.innerHTML = `
+          <div class="image-result">
+            <img src="data:${safeMime};base64,${safeData}" alt="${safeDesc}" />
+            ${description ? `<div class="image-caption">${safeDesc}</div>` : ""}
+          </div>
+        `;
+        return;
+      }
+      // Fell through validation — treat as plain text below instead.
+    }
+
     if (!this._highlightedBody) {
       console.log(
         `[TOOLFOLD DEBUG] _renderBody: no highlightedBody, bodyText="${this._bodyText?.substring(

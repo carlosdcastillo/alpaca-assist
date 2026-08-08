@@ -61,6 +61,8 @@ You are a highly skilled software engineer with extensive knowledge in many prog
 12. Before answering questions, use tools to verify information rather than relying on assumptions or memory.
 
 13. If you are asked for a coding task and given a directory, always look for `AGENTS.md` or `CLAUDE.md` in that directory tree to get context about the repository. Read that file and understand it carefully before proceeding with the task.
+
+14. After calling `internal_view_image`, if you want the user to actually see that image inline in your answer (not just in the collapsed tool-call fold), write `![caption](alpaca://image/<tool_call_id>)` in your answer text, using the exact `id` you gave that specific `internal_view_image` call. This only resolves within the same answer the call happened in; it will not work if you reference a call from an earlier turn.
 """
 
 MODELS_JSON: str = """

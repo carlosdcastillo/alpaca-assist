@@ -1776,6 +1776,11 @@ class AlpacaApp {
             ? pairIndexFor.get(component)
             : foldIndex++;
           const foldId = `fold-result-${answerIndex}-r${pairIdx}`;
+          this.chatDisplay.registerToolResult(
+            answerIndex,
+            component.id,
+            component.content,
+          );
           this.chatDisplay.injectFoldWithId(
             answerIndex,
             component.content,
@@ -2084,6 +2089,21 @@ class AlpacaApp {
 
     // Inject the fold via ChatDisplay using the specific fold_id from Python
     if (this.chatDisplay && foldData.fold_id) {
+      // Python builds result fold_ids as `fold-result-{answer_index}-{tool_id}`
+      // (see core/chat_tab_tools.py) — strip the known prefix to recover the
+      // real tool-call id for alpaca://image/<id> resolution, rather than
+      // adding a new field across the local/Pack wire protocol for it.
+      if (foldData.type === "result") {
+        const prefix = `fold-result-${foldData.answer_index}-`;
+        if (foldData.fold_id.startsWith(prefix)) {
+          const toolCallId = foldData.fold_id.slice(prefix.length);
+          this.chatDisplay.registerToolResult(
+            foldData.answer_index,
+            toolCallId,
+            foldData.body,
+          );
+        }
+      }
       this.chatDisplay.injectFoldWithId(
         foldData.answer_index,
         foldData.body,
