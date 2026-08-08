@@ -6,9 +6,9 @@
     ],
     "args": []
   },
-  "ripple": {
+  "your-mcp-server": {
     "command": [
-      "C:/Users/Carlos/Desktop/ripple/target/debug/ripple.exe"
+      "/path/to/your/mcp-server-executable"
     ],
     "args": [
       "serve"
