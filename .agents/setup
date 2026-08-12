@@ -1,0 +1,53 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$repo_root"
+
+system_packages=(
+  python3-venv
+  python3-gi
+  gir1.2-gtk-3.0
+  gir1.2-webkit2-4.1
+  xvfb
+)
+
+missing_packages=()
+for package in "${system_packages[@]}"; do
+  if ! dpkg-query -W -f='${Status}' "$package" 2>/dev/null | grep -q 'install ok installed'; then
+    missing_packages+=("$package")
+  fi
+done
+
+if ((${#missing_packages[@]})); then
+  echo "Installing system packages: ${missing_packages[*]}"
+  sudo apt-get update
+  sudo DEBIAN_FRONTEND=noninteractive apt-get install -y "${missing_packages[@]}"
+fi
+
+if [[ ! -x .venv/bin/python ]]; then
+  echo "Creating Python virtual environment"
+  /usr/bin/python3 -m venv --system-site-packages .venv
+fi
+
+requirements_hash="$(sha256sum requirements.txt | cut -d' ' -f1)"
+requirements_stamp=".venv/.amp-requirements.sha256"
+if [[ ! -f "$requirements_stamp" ]] || [[ "$(cat "$requirements_stamp")" != "$requirements_hash" ]]; then
+  echo "Installing Python dependencies"
+  .venv/bin/python -m pip install --disable-pip-version-check -r requirements.txt
+  printf '%s\n' "$requirements_hash" > "$requirements_stamp"
+else
+  echo "Python dependencies are current"
+fi
+
+node_hash="$(sha256sum package.json package-lock.json | sha256sum | cut -d' ' -f1)"
+node_stamp="node_modules/.amp-dependencies.sha256"
+if [[ ! -f "$node_stamp" ]] || [[ "$(cat "$node_stamp")" != "$node_hash" ]]; then
+  echo "Installing JavaScript test dependencies"
+  npm ci --no-audit --no-fund
+  printf '%s\n' "$node_hash" > "$node_stamp"
+else
+  echo "JavaScript dependencies are current"
+fi
+
+echo "Setup complete"
