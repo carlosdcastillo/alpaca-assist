@@ -119,4 +119,6 @@ API bridge, session restore, streaming, tools, and conversation model).
 
 ## License
 
-Same as the original Alpaca Assist project.
+Alpaca Assist is distributed under the [MIT License](LICENSE). Third-party
+components retain their respective licenses; see
+[THIRD_PARTY_LICENSES](THIRD_PARTY_LICENSES/README.md).
