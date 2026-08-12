@@ -21,5 +21,8 @@
     "jest": "^30.3.0",
     "jest-environment-jsdom": "^30.3.0",
     "jest-junit": "^16.0.0"
+  },
+  "dependencies": {
+    "katex": "^0.16.22"
   }
 }

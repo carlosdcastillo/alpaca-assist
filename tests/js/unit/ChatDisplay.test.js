@@ -21,6 +21,8 @@ global.hljs = {
   getLanguage: jest.fn().mockReturnValue(true),
 };
 
+global.renderMathInElement = jest.fn();
+
 // Load the module - this populates window.ChatDisplay
 require("../../../web/js/components/ChatDisplay.js");
 
@@ -101,6 +103,15 @@ describe("ChatDisplay", () => {
 
       const content = container.querySelector(".message-content");
       expect(content).not.toBeNull();
+    });
+
+    it("should render LaTeX in question content", () => {
+      chatDisplay.addQuestion("Inline $x^2$ math");
+
+      expect(renderMathInElement).toHaveBeenCalledWith(
+        expect.any(HTMLElement),
+        expect.objectContaining({ throwOnError: false }),
+      );
     });
 
     it("should include images if provided", () => {
@@ -236,6 +247,83 @@ describe("ChatDisplay", () => {
 
       const segment = container.querySelector(".answer-segment");
       expect(segment).not.toBeNull();
+    });
+
+    it("should render display and inline LaTeX in answers", () => {
+      chatDisplay.appendToAnswerBuffer(
+        0,
+        "$$I \\propto \\frac{1}{\\lambda^4}$$ and \\(x^2\\)",
+        true,
+      );
+
+      expect(renderMathInElement).toHaveBeenCalledWith(expect.any(HTMLElement), {
+        delimiters: [
+          { left: "$$", right: "$$", display: true },
+          { left: "\\[", right: "\\]", display: true },
+          { left: "\\(", right: "\\)", display: false },
+          { left: "$", right: "$", display: false },
+        ],
+        throwOnError: false,
+        strict: false,
+      });
+    });
+
+    it("should retain unchanged rendered formula nodes across stream updates", () => {
+      const formula = (text) => `
+        <span class="math-wrapper">
+          <span class="katex-display"><span class="katex">
+            <annotation encoding="application/x-tex">${text}</annotation>
+          </span></span>
+        </span>`;
+      const segment = document.createElement("div");
+      segment.innerHTML = `<p>First ${formula("x^2")}</p>`;
+      const originalWrapper = segment.querySelector(".math-wrapper");
+      const next = document.createElement("div");
+      next.innerHTML = `<p>First ${formula("x^2")} and more text</p>`;
+
+      chatDisplay._updateRenderedContent(segment, next);
+
+      expect(segment.querySelector(".math-wrapper")).toBe(originalWrapper);
+      expect(segment.textContent).toContain("and more text");
+    });
+
+    it("should replace a formula node when its source changes", () => {
+      const segment = document.createElement("div");
+      segment.innerHTML =
+        '<span class="old"><span class="katex"><annotation encoding="application/x-tex">x</annotation></span></span>';
+      const oldWrapper = segment.querySelector(".old");
+      const next = document.createElement("div");
+      next.innerHTML =
+        '<span class="new"><span class="katex"><annotation encoding="application/x-tex">x^2</annotation></span></span>';
+
+      chatDisplay._updateRenderedContent(segment, next);
+
+      expect(segment.querySelector(".old")).toBeNull();
+      expect(segment.querySelector(".new")).not.toBe(oldWrapper);
+    });
+
+    it("should preserve bracketed math delimiters through Markdown rendering", () => {
+      chatDisplay.appendToAnswerBuffer(0, "\\[x^2\\] and \\(y^2\\)", true);
+
+      const segment = container.querySelector(".answer-segment");
+      expect(segment.textContent).toContain("\\[x^2\\] and \\(y^2\\)");
+    });
+
+    it("should not alter math-like delimiters inside code", () => {
+      const text = "`\\(inline\\)`\n```text\n\\[block\\]\n```";
+
+      expect(chatDisplay._protectMath(text)).toEqual({
+        protectedText: text,
+        formulas: new Map(),
+      });
+    });
+
+    it("should protect multiline display math before Markdown adds breaks", () => {
+      const math = "$$\ne^{ix} = \\cos(x) + i\\sin(x)\n$$";
+      const { protectedText, formulas } = chatDisplay._protectMath(math);
+
+      expect(protectedText).toBe("ALPACA_MATH_TOKEN_0_END");
+      expect(formulas.get(protectedText)).toBe(math);
     });
 
     it("should track last render length", () => {

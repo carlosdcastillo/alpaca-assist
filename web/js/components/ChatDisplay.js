@@ -139,6 +139,153 @@ class ChatDisplay {
   }
 
   /**
+   * Render TeX delimiters after the Markdown HTML has been sanitized.
+   * KaTeX ignores code/pre elements, so examples containing literal TeX stay
+   * untouched. Invalid or temporarily incomplete streaming expressions remain
+   * readable instead of aborting the rest of the answer render.
+   */
+  _renderMath(element) {
+    if (typeof renderMathInElement !== "function") return;
+
+    renderMathInElement(element, {
+      delimiters: [
+        { left: "$$", right: "$$", display: true },
+        { left: "\\[", right: "\\]", display: true },
+        { left: "\\(", right: "\\)", display: false },
+        { left: "$", right: "$", display: false },
+      ],
+      throwOnError: false,
+      strict: false,
+    });
+  }
+
+  /**
+   * Return a stable key only for the outer span created by KaTeX auto-render.
+   */
+  _renderedMathKey(element) {
+    if (!(element instanceof HTMLElement) || element.tagName !== "SPAN")
+      return null;
+    const rendered = element.firstElementChild;
+    if (
+      element.childElementCount !== 1 ||
+      !rendered?.matches(".katex, .katex-display")
+    )
+      return null;
+    const annotation = rendered.querySelector(
+      'annotation[encoding="application/x-tex"]',
+    );
+    if (!annotation) return null;
+    return `${rendered.matches(".katex-display") ? "display" : "inline"}:$${
+      annotation.textContent
+    }`;
+  }
+
+  /**
+   * Reconcile a detached render into the live DOM without replacing unchanged
+   * nodes. In particular, a stable KaTeX wrapper is never removed or moved,
+   * which prevents WebKit from painting blank/raw formula frames.
+   */
+  _updateRenderedContent(current, next) {
+    if (current.nodeType !== next.nodeType) {
+      current.replaceWith(next);
+      return;
+    }
+
+    if (
+      current.nodeType === Node.TEXT_NODE ||
+      current.nodeType === Node.COMMENT_NODE
+    ) {
+      if (current.nodeValue !== next.nodeValue) current.nodeValue = next.nodeValue;
+      return;
+    }
+
+    if (!(current instanceof HTMLElement) || !(next instanceof HTMLElement))
+      return;
+    if (current.tagName !== next.tagName) {
+      current.replaceWith(next);
+      return;
+    }
+
+    const currentMathKey = this._renderedMathKey(current);
+    if (currentMathKey && currentMathKey === this._renderedMathKey(next)) return;
+    if (currentMathKey) {
+      current.replaceWith(next);
+      return;
+    }
+
+    for (const { name } of Array.from(current.attributes)) {
+      if (!next.hasAttribute(name)) current.removeAttribute(name);
+    }
+    for (const { name, value } of Array.from(next.attributes)) {
+      if (current.getAttribute(name) !== value) current.setAttribute(name, value);
+    }
+
+    this._updateRenderedChildren(current, next);
+  }
+
+  _updateRenderedChildren(current, next) {
+    const nextChildren = Array.from(next.childNodes);
+    for (let index = 0; index < nextChildren.length; index++) {
+      const currentChild = current.childNodes[index];
+      const nextChild = nextChildren[index];
+      if (currentChild) this._updateRenderedContent(currentChild, nextChild);
+      else current.appendChild(nextChild);
+    }
+    while (current.childNodes.length > nextChildren.length) {
+      current.lastChild.remove();
+    }
+  }
+
+  /**
+   * Replace complete math expressions with inert text tokens before Marked can
+   * insert <br> elements into multiline $$...$$ blocks or consume backslashes.
+   * Code spans and fenced code blocks are deliberately left untouched.
+   */
+  _protectMath(text) {
+    const formulas = new Map();
+    let index = 0;
+    const pattern =
+      /(```[\s\S]*?```|~~~[\s\S]*?~~~|`+[^`]*`+)|(\$\$[\s\S]*?\$\$|\\\[[\s\S]*?\\\]|\\\([\s\S]*?\\\)|\$[^$\n]+?\$)/g;
+    const protectedText = text.replace(pattern, (match, code, math) => {
+      if (code || !math) return match;
+      const token = `ALPACA_MATH_TOKEN_${index++}_END`;
+      formulas.set(token, math);
+      return token;
+    });
+    return { protectedText, formulas };
+  }
+
+  _restoreMathTokens(element, formulas) {
+    if (formulas.size === 0) return;
+    const visit = (node) => {
+      if (node.nodeType === Node.TEXT_NODE) {
+        let value = node.nodeValue;
+        if (!value.includes("ALPACA_MATH_TOKEN_")) return;
+        for (const [token, math] of formulas) {
+          value = value.split(token).join(math);
+        }
+        node.nodeValue = value;
+        return;
+      }
+      if (!(node instanceof HTMLElement) || node.matches("code, pre")) return;
+      for (const child of Array.from(node.childNodes)) visit(child);
+    };
+    visit(element);
+  }
+
+  /**
+   * Render Markdown and math off-DOM, then swap it into place in one operation.
+   */
+  _renderMarkdown(element, text) {
+    const next = document.createElement("div");
+    const { protectedText, formulas } = this._protectMath(text);
+    next.innerHTML = DOMPurify.sanitize(marked.parse(protectedText));
+    this._restoreMathTokens(next, formulas);
+    this._renderMath(next);
+    this._updateRenderedChildren(element, next);
+  }
+
+  /**
    * Handle content update from streaming or re-rendering
    */
   appendContent(update) {
@@ -358,7 +505,7 @@ class ChatDisplay {
       ? withResolvedImages
       : this._closeOpenFences(withResolvedImages);
 
-    answerElement.innerHTML = DOMPurify.sanitize(marked.parse(processedText));
+    this._renderMarkdown(answerElement, processedText);
 
     bufferData.lastRenderLength = buffer.length;
     // Folds are siblings of the text segments in answerWrapper and are unaffected.
@@ -876,7 +1023,7 @@ class ChatDisplay {
 
     const contentEl = document.createElement("div");
     contentEl.className = "message-content";
-    contentEl.innerHTML = DOMPurify.sanitize(marked.parse(text));
+    this._renderMarkdown(contentEl, text);
 
     // Add image previews if any
     if (images && images.length > 0) {
