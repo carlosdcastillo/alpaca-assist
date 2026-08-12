@@ -70,6 +70,21 @@ Set `DEBUG=1` to open developer tools and disable the WebView cache:
 DEBUG=1 python webview_app.py     # PowerShell: $env:DEBUG=1; python .\webview_app.py
 ```
 
+### Building a desktop executable
+
+PyInstaller must run on the operating system being targeted. Install the build
+dependencies and build from the repository root:
+
+```bash
+pip install -r requirements-build.txt
+pyinstaller --clean --noconfirm AlpacaAssist.spec
+```
+
+The packaged application is written to `dist/AlpacaAssist` on Windows and
+Linux, or `dist/AlpacaAssist.app` on macOS. The spec embeds the native icon and
+bundles the complete `web/` frontend plus the runtime PNG icon; Windows, macOS,
+and Linux builds select the appropriate `.ico`, `.icns`, or `.png` source.
+
 ### Model backends
 
 LLM access goes through an Ollama-compatible HTTP API.

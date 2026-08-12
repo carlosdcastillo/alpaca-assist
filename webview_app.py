@@ -79,8 +79,15 @@ class ChatApp:
         )
         self.api.set_window(self.window)
 
-        # Note: Window icon setting is disabled due to pywebview Windows issues
-        # The icon is set via HTML favicon in the web UI instead
+    def _get_icon_path(self) -> Path | None:
+        """Get the path to the application icon."""
+        if getattr(sys, "frozen", False):
+            base_path = Path(sys._MEIPASS)  # type: ignore[attr-defined]
+        else:
+            base_path = Path(__file__).parent
+
+        icon_path = base_path / "assets" / "alpaca-assist.png"
+        return icon_path if icon_path.exists() else None
 
     def run(self) -> None:
         """Start the application."""
@@ -90,10 +97,12 @@ class ChatApp:
         # Start webview — blocks until the window is closed
         if self.window is None:
             raise RuntimeError("Window not initialized")
+        icon_path = self._get_icon_path()
         webview.start(
             self._on_start,
             self.window,  # type: ignore[arg-type]
             debug=os.getenv("DEBUG") is not None,
+            icon=str(icon_path) if icon_path else None,
         )
 
         # Window has been closed. Run final save + MCP cleanup now.
