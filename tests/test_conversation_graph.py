@@ -9,7 +9,6 @@ from chat_state import ToolResult
 from conversation_graph import ConversationGraph
 from conversation_graph import EdgeType
 from conversation_graph import is_graph_format
-from conversation_graph import load_conversation
 from conversation_graph import MessageRole
 
 
@@ -438,21 +437,6 @@ class TestMigration:
         g = ConversationGraph.from_chat_state_dict(old)
         # from_chat_state_dict converts legacy dict format {"data": "..."} to plain strings
         assert g.question_images[0] == ["img"]
-
-    def test_load_conversation_auto_detects_old_format(self):
-        old = {
-            "chat_state": {
-                "questions": ["q"],
-                "answers": [{"components": [{"type": "text", "content": "a"}]}],
-            },
-        }
-        g = load_conversation(old)
-        assert g.questions == ["q"]
-
-    def test_load_conversation_auto_detects_new_format(self):
-        g_orig, _ = _linear_graph(1)
-        g2 = load_conversation(g_orig.to_dict())
-        assert g2.questions == g_orig.questions
 
     def test_migration_creates_linear_chain(self):
         old = {

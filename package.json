@@ -1,8 +1,7 @@
 {
-  "name": "pywebview_demo",
+  "name": "alpaca-assist",
   "version": "1.0.0",
-  "description": "This is a PyWebView-based migration of the Alpaca Assist desktop chat application, originally built with Tkinter.",
-  "main": "index.js",
+  "description": "Alpaca Assist desktop chat application built with PyWebView.",
   "directories": {
     "test": "tests"
   },

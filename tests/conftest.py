@@ -275,7 +275,6 @@ async def async_mcp_manager() -> AsyncGenerator[Mock, None]:
     manager.add_server = AsyncMock(return_value=True)
     manager.call_tool = AsyncMock(return_value={"result": "success"})
     manager.disconnect_server = AsyncMock(return_value=True)
-    manager.reconnect_server = AsyncMock(return_value=True)
     manager.shutdown = AsyncMock()
     yield manager
 

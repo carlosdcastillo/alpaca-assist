@@ -181,20 +181,6 @@ class AppCore:
         logger.debug(f"Debug: Final tool count: {len(available_tools)}")
         return available_tools
 
-    def check_mcp_status(self) -> None:
-        """Debug method to check MCP server status."""
-        logger.debug("=== MCP Status Check ===")
-        logger.debug(f"MCP Manager exists: {self.mcp_manager is not None}")
-        logger.debug(f"Event loop exists: {self.event_loop is not None}")
-        logger.debug(
-            f"Server configs: {getattr(self.mcp_manager, 'server_configs', {})}",
-        )
-        if hasattr(self.mcp_manager, "servers"):
-            logger.debug(f"Connected servers: {list(self.mcp_manager.servers.keys())}")
-        tools = self.get_available_mcp_tools()
-        logger.debug(f"Available tools: {len(tools)}")
-        logger.debug("========================")
-
     def call_mcp_tool(
         self,
         server_name: str,

@@ -65,7 +65,7 @@ describe("InputArea", () => {
     // Set up DOM
     document.body.innerHTML = `
       <div id="input-container">
-        <textarea id="message-input"></textarea>
+        <div id="markdown-input-container"></div>
         <div id="input-status"></div>
       </div>
       <button id="send-btn"></button>

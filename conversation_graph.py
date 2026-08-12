@@ -779,12 +779,3 @@ def _now() -> str:
 def is_graph_format(data: dict[str, Any]) -> bool:
     """Return True if *data* is in the new ConversationGraph format."""
     return "graph" in data
-
-
-def load_conversation(data: dict[str, Any]) -> ConversationGraph:
-    """Load a ConversationGraph from any supported format (auto-detects old/new)."""
-    if is_graph_format(data):
-        return ConversationGraph.from_dict(data)
-    # Legacy ChatState format — migrate on load.
-    chat_state_data = data.get("chat_state", data)
-    return ConversationGraph.from_chat_state_dict(chat_state_data)

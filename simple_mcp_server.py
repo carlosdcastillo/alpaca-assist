@@ -96,21 +96,6 @@ def validate_file_exists(filepath: str, tramp):
     return (True, "")
 
 
-def validate_directory_exists(path: str, tramp):
-    """Validate that directory exists for both local and TRAMP paths."""
-    if tramp and tramp.is_tramp_path(path):
-        if not tramp.exists(path):
-            return (False, f"Error: Path '{path}' does not exist")
-        if not tramp.is_dir(path):
-            return (False, f"Error: '{path}' is not a directory")
-    else:
-        if not os.path.exists(path):
-            return (False, f"Error: Path '{path}' does not exist")
-        if not os.path.isdir(path):
-            return (False, f"Error: '{path}' is not a directory")
-    return (True, "")
-
-
 def read_file_content(filepath: str, tramp):
     """Read file content for both local and TRAMP files."""
     if tramp and tramp.is_tramp_path(filepath):

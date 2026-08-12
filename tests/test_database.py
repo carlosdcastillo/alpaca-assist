@@ -464,31 +464,6 @@ class TestConversationSearch:
         assert len(results) == 1
 
 
-class TestConversationExistence:
-    """Tests for conversation existence checks."""
-
-    def test_conversation_exists_true(self, mock_db: ConversationDatabase) -> None:
-        """Test that conversation_exists returns True for existing conversation."""
-        conversation_id = _store(mock_db, "Test")
-
-        result = mock_db.conversation_exists(conversation_id)
-
-        assert result is True
-
-    def test_conversation_exists_false(self, mock_db: ConversationDatabase) -> None:
-        """Test that conversation_exists returns False for nonexistent conversation."""
-        result = mock_db.conversation_exists(99999)
-        assert result is False
-
-    def test_conversation_exists_invalid_id(
-        self,
-        mock_db: ConversationDatabase,
-    ) -> None:
-        """Test that conversation_exists handles invalid IDs."""
-        result = mock_db.conversation_exists(-1)
-        assert result is False
-
-
 class TestTabIdLookup:
     """Tests for tab ID lookup operations."""
 

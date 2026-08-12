@@ -12,23 +12,6 @@ def is_macos() -> bool:
     return sys.platform == "darwin"
 
 
-def fold_btn_fg(bg: str) -> str:
-    """Return a readable link-style fg color for fold buttons given a background hex color.
-
-    Uses perceived luminance to pick between a light blue (dark backgrounds)
-    and a dark blue (light backgrounds).
-    """
-    try:
-        h = bg.strip("#")
-        if len(h) == 3:
-            h = "".join(c * 2 for c in h)
-        r, g, b = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
-        luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255
-        return "#4a9eff" if luminance < 0.5 else "#0055cc"
-    except Exception:
-        return "#4a9eff"
-
-
 class ContentUpdate(NamedTuple):
     answer_index: int
     content_chunk: str

@@ -32,14 +32,6 @@ def extract_visibility(node, source_bytes: bytes) -> str:
     return ""
 
 
-def extract_generic_params(node, source_bytes: bytes) -> str:
-    """Extract generic parameters from a node."""
-    for child in node.children:
-        if child.type == "type_parameters":
-            return get_node_text(child, source_bytes)
-    return ""
-
-
 def extract_function_signature(node, source_bytes: bytes) -> dict:
     """
     Extract function signature information from a function_item node.

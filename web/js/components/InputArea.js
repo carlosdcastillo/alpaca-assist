@@ -6,8 +6,6 @@ class InputArea {
     this.api = api;
 
     // DOM elements
-    this.inputContainer =
-      document.getElementById("message-input").parentElement;
     this.sendBtn = document.getElementById("send-btn");
     this.stopBtn = document.getElementById("stop-btn");
     this.attachBtn = document.getElementById("attach-btn");
@@ -19,37 +17,6 @@ class InputArea {
     this.imageCountLabel = document.getElementById("image-count-label");
     this.clearImagesBtn = document.getElementById("clear-images-btn");
 
-    // Replace textarea with markdown input
-    this.markdownInput = null;
-    this._initMarkdownInput();
-
-    // State
-    this.isStreaming = false;
-    this.isConnected = false;
-    this.attachedImages = [];
-    this.onSendCallback = null;
-    this.onStopCallback = null;
-    this._connectionIndicator = document.getElementById("connection-indicator");
-
-    this._bindEvents();
-  }
-
-  /**
-   * Initialize the markdown input component
-   */
-  _initMarkdownInput() {
-    // Remove the old textarea
-    const oldTextarea = document.getElementById("message-input");
-    if (oldTextarea) {
-      oldTextarea.remove();
-    }
-
-    // Create a container for the markdown input
-    const mdContainer = document.createElement("div");
-    mdContainer.id = "markdown-input-container";
-    this.inputContainer.insertBefore(mdContainer, this.statusEl);
-
-    // Initialize the markdown input
     this.markdownInput = new MarkdownInput("markdown-input-container", {
       placeholder: "Type your message... (Ctrl+Enter to send)",
       onSend: (text) => {
@@ -61,6 +28,16 @@ class InputArea {
         this._updateAttachButton();
       },
     });
+
+    // State
+    this.isStreaming = false;
+    this.isConnected = false;
+    this.attachedImages = [];
+    this.onSendCallback = null;
+    this.onStopCallback = null;
+    this._connectionIndicator = document.getElementById("connection-indicator");
+
+    this._bindEvents();
   }
 
   /**

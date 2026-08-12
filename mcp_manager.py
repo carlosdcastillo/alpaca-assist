@@ -202,23 +202,6 @@ class MCPManager:
                 return False
         return False
 
-    async def reconnect_server(self, name: str) -> bool:
-        """Disconnect and reconnect a server using its stored configuration.
-
-        Holds the per-server lock for the full disconnect+reconnect so that
-        any concurrent call_tool waits until the session is restored.
-        """
-        async with self._get_server_lock(name):
-            if name not in self.server_configs:
-                logger.warning(
-                    f"No config stored for server '{name}', cannot reconnect",
-                )
-                return False
-            config = self.server_configs[name]
-            logger.info(f"Reconnecting MCP server '{name}' after cancellation")
-            await self.disconnect_server(name)
-            return await self.add_server(name, config["command"], config["args"])
-
     async def shutdown(self) -> None:
         """Shutdown all MCP connections."""
         for name in list(self.servers.keys()):

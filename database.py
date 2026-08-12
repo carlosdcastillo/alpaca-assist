@@ -149,16 +149,6 @@ class ConversationDatabase:
             )
             return cursor.fetchall()
 
-    def conversation_exists(self, conversation_id: int) -> bool:
-        """Check if a conversation exists in the database."""
-        with sqlite3.connect(self.db_path) as conn:
-            cursor = conn.cursor()
-            cursor.execute(
-                "SELECT 1 FROM conversations WHERE id = ? LIMIT 1",
-                (conversation_id,),
-            )
-            return cursor.fetchone() is not None
-
     def find_conversation_by_tab_id(self, tab_id: str) -> int | None:
         """Find a conversation ID by the tab_id stored in its chat_data.
 

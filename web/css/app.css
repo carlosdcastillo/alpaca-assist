@@ -1055,26 +1055,6 @@ a[href^="alpaca://conv/"] {
     background: var(--accent-hover);
 }
 
-#message-input {
-    width: 100%;
-    background: var(--bg-primary);
-    border: 1px solid var(--border-color);
-    color: var(--text-primary);
-    padding: 10px 12px;
-    border-radius: 6px;
-    font-family: var(--font-ui);
-    font-size: 14px;
-    line-height: 1.5;
-    resize: none;
-    min-height: 60px;
-    flex: 1 1 auto;
-}
-
-#message-input:focus {
-    outline: none;
-    border-color: var(--accent-primary);
-}
-
 /* Markdown Input Component */
 .markdown-input-wrapper {
     position: relative; /* needed for overlay positioning */

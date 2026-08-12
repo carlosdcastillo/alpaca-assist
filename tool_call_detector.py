@@ -142,49 +142,6 @@ class ToolCallDetector:
         self._saw_open_brace = False
 
     # ------------------------------------------------------------------ #
-    # Batch scanning (complete accumulated text)                          #
-    # ------------------------------------------------------------------ #
-
-    def find_all_complete(self, text: str) -> tuple[list[tuple[int, int]], str]:
-        """Find all complete internal-format tool calls in a fully-accumulated string.
-
-        Unlike ``find_in_chunk()`` (which is stateful and designed for streaming),
-        this method scans a complete text in one pass and is stateless.
-
-        Returns:
-            ``(positions, text)`` where *positions* is a sorted list of
-            ``(start, end)`` tuples that index into the original *text*, and
-            *text* is returned unchanged so callers can slice it directly.
-        """
-        positions: list[tuple[int, int]] = []
-        seen_starts: set[int] = set()
-        decoder = json.JSONDecoder()
-
-        for pattern in self._JSON_START_PATTERNS:
-            search_from = 0
-            while True:
-                start_idx = text.find(pattern, search_from)
-                if start_idx == -1:
-                    break
-                if start_idx in seen_starts:
-                    search_from = start_idx + 1
-                    continue
-                try:
-                    parsed: dict[str, Any] | list[Any] | str | int | float | bool | None
-                    parsed, end_offset = decoder.raw_decode(text, start_idx)
-                    if isinstance(parsed, dict) and "tool_call" in parsed:
-                        seen_starts.add(start_idx)
-                        positions.append((start_idx, end_offset))
-                        search_from = end_offset
-                    else:
-                        search_from = start_idx + len(pattern)
-                except json.JSONDecodeError:
-                    search_from = start_idx + len(pattern)
-
-        positions.sort()
-        return positions, text
-
-    # ------------------------------------------------------------------ #
     # Private helpers                                                      #
     # ------------------------------------------------------------------ #
 

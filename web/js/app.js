@@ -399,7 +399,6 @@ class AlpacaApp {
     const mainContent = document.querySelector(".main-content");
     const chatContainer = document.getElementById("chat-container");
     const inputArea = document.getElementById("input-area");
-    const messageInput = document.getElementById("message-input");
 
     if (!splitter || !chatContainer || !inputArea || !mainContent) {
       console.warn("[SPLITTER] Missing required elements for splitter");
@@ -412,13 +411,6 @@ class AlpacaApp {
     inputArea.style.flex = "0 0 auto";
     inputArea.style.display = "flex";
     inputArea.style.flexDirection = "column";
-
-    // Make textarea fill available space in input area
-    if (messageInput) {
-      messageInput.style.flex = "1 1 auto";
-      messageInput.style.resize = "none"; // Disable manual resize, let it grow with panel
-      messageInput.style.minHeight = "60px";
-    }
 
     let isDragging = false;
     let startY = 0;
@@ -2359,10 +2351,12 @@ class AlpacaApp {
       argsJson,
     );
     if (result.success) {
-      const msgInput = document.getElementById("message-input");
-      if (msgInput && this.currentTabId) {
-        msgInput.value =
-          (msgInput.value ? msgInput.value + "\n" : "") + result.result;
+      if (this.currentTabId) {
+        const currentValue = this.inputArea.getValue();
+        this.inputArea.setValue(
+          (currentValue ? currentValue + "\n" : "") + result.result,
+        );
+        this.inputArea.focus();
       } else {
         await this._showAlert("Result:\n" + result.result);
       }

@@ -190,52 +190,6 @@ class TestMCPManagerServerManagement:
 
         assert result is False
 
-    @pytest.mark.asyncio
-    async def test_reconnect_server_disconnects_then_adds(self) -> None:
-        """Test reconnect disconnects old and adds new."""
-        manager = MCPManager()
-        mock_session_ctx = AsyncMock()
-        mock_stdio_ctx = AsyncMock()
-        server_info = {
-            "session": AsyncMock(),
-            "session_ctx": mock_session_ctx,
-            "stdio_ctx": mock_stdio_ctx,
-            "read": Mock(),
-            "write": Mock(),
-            "params": Mock(),
-        }
-        manager.servers["test_server"] = server_info
-        manager.available_tools["test_server"] = [{"name": "old_tool"}]
-        # reconnect_server reads command/args from server_configs, not servers
-        manager.server_configs["test_server"] = {
-            "command": ["python", "-m", "test_server"],
-            "args": [],
-        }
-
-        with patch.object(manager, "add_server", new_callable=AsyncMock) as mock_add:
-            mock_add.return_value = True
-
-            result = await manager.reconnect_server("test_server")
-
-            # Verify old session context was exited
-            mock_session_ctx.__aexit__.assert_called_once_with(None, None, None)
-            # Verify add_server was called with params from server_configs
-            mock_add.assert_called_once_with(
-                "test_server",
-                ["python", "-m", "test_server"],
-                [],
-            )
-            assert result is True
-
-    @pytest.mark.asyncio
-    async def test_reconnect_server_nonexistent_returns_false(self) -> None:
-        """Test reconnecting nonexistent server returns False."""
-        manager = MCPManager()
-
-        result = await manager.reconnect_server("nonexistent")
-
-        assert result is False
-
 
 class TestMCPManagerToolOperations:
     """Tests for MCP tool operations with real assertions."""

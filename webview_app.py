@@ -82,21 +82,6 @@ class ChatApp:
         # Note: Window icon setting is disabled due to pywebview Windows issues
         # The icon is set via HTML favicon in the web UI instead
 
-    def _get_icon_path(self) -> Path | None:
-        """Get the path to the application icon."""
-        if getattr(sys, "frozen", False):
-            base_path = Path(sys._MEIPASS)  # type: ignore[attr-defined]
-        else:
-            base_path = Path(__file__).parent
-
-        # Try different icon formats
-        for icon_name in ["alpaca.ico", "alpaca.png", "alpaca.icns"]:
-            icon_path = base_path / icon_name
-            if icon_path.exists():
-                return icon_path
-
-        return None
-
     def run(self) -> None:
         """Start the application."""
         # Set the active tab getter on core
