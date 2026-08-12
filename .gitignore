@@ -1,0 +1,97 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+# Anchored to repo root: unanchored, these bare names (esp. lib/) also
+# matched unrelated nested directories like web/js/lib/, silently
+# excluding the vendored frontend libs from every checkout.
+/build/
+/develop-eggs/
+/dist/
+/downloads/
+/eggs/
+/.eggs/
+/lib/
+/lib64/
+/parts/
+/sdist/
+/var/
+/wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual environments
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Type checking
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# Database files
+*.db
+*.sqlite
+*.sqlite3
+
+# Logs
+*.log
+
+# Backup files
+*.bak
+
+# Session files
+chat_session.json
+chat_session.json.bak
+
+# User preferences (personal runtime config)
+preferences.json
+
+# Personal machine/network config — see *.example for the real shape
+pack.json
+mcp_servers.json
+
+# Claude local settings (personal, not shared)
+.claude/settings.local.json
+
+# Desktop files
+*.desktop
+
+# Node
+node_modules/
+
+# Utility scripts (temporary/development files)
+_*.py
+
+# Scratch/experiments (may contain credentials)
+out-of-the-way/

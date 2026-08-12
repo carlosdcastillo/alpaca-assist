@@ -1,0 +1,17 @@
+{
+  "simple-tools": {
+    "command": [
+      "python",
+      "simple_mcp_server.py"
+    ],
+    "args": []
+  },
+  "your-mcp-server": {
+    "command": [
+      "/path/to/your/mcp-server-executable"
+    ],
+    "args": [
+      "serve"
+    ]
+  }
+}

@@ -1,0 +1,434 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Alpaca Assist</title>
+    <meta name="color-scheme" content="dark">
+    <script>
+        // Set before first paint so there's no dark/light flash on launch.
+        // Read from the URL query string instead of a generated file so this
+        // works the same whether the app dir is writable or not (e.g. a
+        // read-only PyInstaller bundle).
+        const _theme = new URLSearchParams(window.location.search).get("theme") || "dark";
+        document.documentElement.setAttribute("data-theme", _theme);
+        document.querySelector('meta[name="color-scheme"]').content = _theme;
+    </script>
+    <link rel="stylesheet" href="css/themes.css">
+    <link rel="stylesheet" href="css/app.css">
+    <link rel="stylesheet" href="js/lib/nord.min.css" id="hljs-theme">
+</head>
+<body>
+    <div id="app">
+        <!-- Menu Bar -->
+        <div class="menu-bar" id="menu-bar">
+            <!-- File Menu -->
+            <div class="menu-category">
+                <button class="menu-category-btn">File</button>
+                <div class="menu-dropdown">
+                    <button class="menu-item" data-action="new-tab">New Tab <span class="shortcut">Ctrl+N</span></button>
+                    <button class="menu-item" data-action="new-pack-tab">New Pack Tab&hellip;</button>
+                    <button class="menu-item" data-action="close-tab">Close Tab <span class="shortcut">Ctrl+W</span></button>
+                    <div class="menu-divider"></div>
+                    <button class="menu-item" data-action="history">Conversation History <span class="shortcut">Ctrl+Y</span></button>
+                    <div class="menu-divider"></div>
+                    <button class="menu-item" data-action="export">Export to HTML <span class="shortcut">Ctrl+T</span></button>
+                    <div class="menu-divider"></div>
+                    <button class="menu-item" data-action="preferences">Preferences <span class="shortcut">Ctrl+,</span></button>
+                    <div class="menu-divider"></div>
+                    <button class="menu-item" data-action="exit">Exit</button>
+                </div>
+            </div>
+
+            <!-- Edit Menu -->
+            <div class="menu-category">
+                <button class="menu-category-btn">Edit</button>
+                <div class="menu-dropdown">
+                    <button class="menu-item" data-action="undo">Undo <span class="shortcut">Ctrl+Z</span></button>
+                    <div class="menu-divider"></div>
+                    <button class="menu-item" data-action="copy">Copy <span class="shortcut">Ctrl+C</span></button>
+                    <button class="menu-item" data-action="paste">Paste <span class="shortcut">Ctrl+V</span></button>
+                    <div class="menu-divider"></div>
+                    <button class="menu-item" data-action="find">Find <span class="shortcut">Ctrl+F</span></button>
+                </div>
+            </div>
+
+            <!-- Chat Menu -->
+            <div class="menu-category">
+                <button class="menu-category-btn">Chat</button>
+                <div class="menu-dropdown">
+                    <button class="menu-item" data-action="submit">Submit Message <span class="shortcut">Ctrl+Enter</span></button>
+                    <div class="menu-divider"></div>
+                    <button class="menu-item" data-action="compact">Compact <span class="shortcut">Ctrl+P</span></button>
+                    <button class="menu-item" data-action="truncate">Truncate <span class="shortcut">Ctrl+Shift+P</span></button>
+                    <button class="menu-item" data-action="pop">Pop</button>
+                    <div class="menu-divider"></div>
+                    <button class="menu-item" data-action="handoff">Handoff <span class="shortcut">Ctrl+Shift+H</span></button>
+                    <button class="menu-item" data-action="clone-conversation">Clone Conversation</button>
+                </div>
+            </div>
+
+            <!-- Tools Menu -->
+            <div class="menu-category">
+                <button class="menu-category-btn">Tools</button>
+                <div class="menu-dropdown">
+                    <button class="menu-item" data-action="refresh-models">Refresh Models <span class="shortcut">Ctrl+R</span></button>
+                    <div class="menu-divider"></div>
+                    <button class="menu-item" data-action="mcp-config">MCP Server Configuration</button>
+                    <button class="menu-item" data-action="mcp-tools">Available MCP Tools</button>
+                    <div class="menu-divider"></div>
+                    <button class="menu-item" data-action="agent-skills">Agent Skills...</button>
+                    <div class="menu-divider"></div>
+                    <button class="menu-item" data-action="copy-conversation-id">Copy Conversation ID</button>
+                </div>
+            </div>
+
+            <!-- Help Menu -->
+            <div class="menu-category">
+                <button class="menu-category-btn">Help</button>
+                <div class="menu-dropdown">
+                    <button class="menu-item" data-action="about">About</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Toolbar -->
+        <div class="toolbar" id="toolbar">
+            <div class="toolbar-new-tab-dropdown" id="toolbar-new-tab-dropdown">
+                <button class="toolbar-btn" id="toolbar-new-tab" title="New Tab (Ctrl+N)" aria-haspopup="true" aria-expanded="false">
+                    <span class="toolbar-icon">+</span>
+                    <span class="toolbar-text">New Tab</span>
+                    <span class="new-tab-caret"></span>
+                </button>
+                <div class="new-tab-menu" id="toolbar-new-tab-menu" role="menu">
+                    <button class="new-tab-menu-item" data-action="new-tab" role="menuitem">
+                        <span class="new-tab-menu-icon">🖥</span>
+                        <span>Local Tab</span>
+                        <span class="new-tab-menu-shortcut">Ctrl+N</span>
+                    </button>
+                    <button class="new-tab-menu-item" data-action="new-pack-tab" role="menuitem">
+                        <span class="new-tab-menu-icon">📦</span>
+                        <span>Pack Tab</span>
+                    </button>
+                </div>
+            </div>
+            <button class="toolbar-btn" id="toolbar-close-tab" title="Close Tab (Ctrl+W)">
+                <span class="toolbar-icon">×</span>
+                <span class="toolbar-text">Close Tab</span>
+            </button>
+            <button class="toolbar-btn" id="toolbar-history" title="Conversation History (Ctrl+Y)">
+                <span class="toolbar-icon">🕐</span>
+                <span class="toolbar-text">History</span>
+            </button>
+            <div class="toolbar-separator"></div>
+            <div class="toolbar-model-selector">
+                <label for="toolbar-model">Model:</label>
+                <select id="toolbar-model">
+                    <option value="">Loading models...</option>
+                </select>
+                <div id="connection-indicator"
+                     class="connection-indicator connection-checking"
+                     title="API connection status"></div>
+            </div>
+        </div>
+
+        <!-- Tab Bar -->
+        <div class="tab-bar" id="tab-bar">
+            <button class="tab-scroll-btn tab-scroll-left hidden" id="tab-scroll-left" title="Scroll tabs left">‹</button>
+            <div class="tabs-container" id="tabs-container"></div>
+            <button class="tab-scroll-btn tab-scroll-right hidden" id="tab-scroll-right" title="Scroll tabs right">›</button>
+            <div class="new-tab-dropdown" id="new-tab-dropdown">
+                <button class="new-tab-btn" id="new-tab-btn" title="New Tab (Ctrl+N)">
+                    <span class="new-tab-plus">+</span>
+                </button>
+                <button
+                    class="new-tab-caret-btn"
+                    id="new-tab-caret-btn"
+                    title="More options"
+                    aria-haspopup="true"
+                    aria-expanded="false"
+                    aria-label="More new-tab options"
+                >
+                    <span class="new-tab-caret"></span>
+                </button>
+                <div class="new-tab-menu" id="new-tab-menu" role="menu">
+                    <button class="new-tab-menu-item" data-action="new-tab" role="menuitem">
+                        <span class="new-tab-menu-icon">🖥</span>
+                        <span>Local Tab</span>
+                        <span class="new-tab-menu-shortcut">Ctrl+N</span>
+                    </button>
+                    <button class="new-tab-menu-item" data-action="new-pack-tab" role="menuitem">
+                        <span class="new-tab-menu-icon">📦</span>
+                        <span>Pack Tab</span>
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Main Content Area -->
+        <div class="main-content">
+            <!-- Find Bar (floats over chat area) -->
+            <div class="find-bar hidden" id="find-bar">
+                <span class="find-label">Find:</span>
+                <input type="text" id="find-input" placeholder="Search in chat..." autocomplete="off" spellcheck="false" />
+                <span class="find-count" id="find-count"></span>
+                <button class="find-btn" id="find-prev" title="Previous match (Shift+Enter)">↑</button>
+                <button class="find-btn" id="find-next" title="Next match (Enter)">↓</button>
+                <button class="find-close" id="find-close" title="Close (Esc)">×</button>
+            </div>
+
+            <!-- Chat Display -->
+            <div class="chat-container" id="chat-container"></div>
+
+            <!-- Resizable Splitter -->
+            <div class="splitter" id="splitter"></div>
+
+            <!-- Input Area -->
+            <div class="input-area hidden" id="input-area">
+                <!-- Image Attachment Header Strip -->
+                <div class="image-attachment-strip hidden" id="image-attachment-strip">
+                    <span id="image-count-label"></span>
+                    <button id="clear-images-btn" title="Clear attached images">✕ Clear</button>
+                </div>
+                <div class="input-toolbar">
+                    <div class="input-actions">
+                        <button id="attach-btn" title="Attach images">📎</button>
+                        <button id="stop-btn" title="Stop streaming" disabled>⏹</button>
+                        <button id="send-btn" title="Send (Ctrl+Enter)">➤</button>
+                    </div>
+                </div>
+                <textarea id="message-input" placeholder="Type your message... (Ctrl+Enter to send)" rows="3" spellcheck="false"></textarea>
+                <div class="input-status" id="input-status"></div>
+            </div>
+        </div>
+
+        <!-- Status Bar -->
+        <div class="status-bar" id="status-bar">
+            <span id="status-text">Ready</span>
+            <span id="token-count"></span>
+        </div>
+    </div>
+
+    <!-- Context Menu -->
+    <div class="context-menu" id="context-menu"></div>
+
+    <!-- Dialogs -->
+    <div class="dialog-overlay" id="dialog-overlay">
+        <!-- History Dialog -->
+        <div class="dialog" id="history-dialog">
+            <div class="dialog-header">
+                <h3>Conversation History</h3>
+                <button class="dialog-close" id="history-dialog-close">&times;</button>
+            </div>
+            <div class="history-dialog-body">
+                <div class="history-search-row">
+                    <input type="text" id="history-search" placeholder="Search conversations..." autocomplete="off" spellcheck="false" />
+                </div>
+                <div class="history-list" id="history-list">
+                    <div class="history-empty">Loading...</div>
+                </div>
+            </div>
+            <div class="dialog-footer">
+                <span class="history-count" id="history-count"></span>
+                <button class="btn-secondary" id="history-delete-btn">Delete</button>
+                <button class="btn-primary" id="history-revive-btn">Revive</button>
+                <button class="btn-secondary" id="history-close-btn">Close</button>
+            </div>
+        </div>
+
+        <!-- MCP Server Configuration Dialog -->
+        <div class="dialog" id="mcp-config-dialog">
+            <div class="dialog-header">
+                <h3>MCP Server Configuration</h3>
+                <button class="dialog-close">&times;</button>
+            </div>
+            <div class="mcp-config-body">
+                <div class="mcp-servers-panel">
+                    <div class="mcp-panel-label">Servers</div>
+                    <div class="mcp-server-list" id="mcp-server-list"></div>
+                    <div class="mcp-server-btns">
+                        <button class="btn-secondary" id="mcp-add-btn">Add</button>
+                        <button class="btn-secondary" id="mcp-update-btn">Update</button>
+                        <button class="btn-secondary" id="mcp-remove-btn">Remove</button>
+                    </div>
+                </div>
+                <div class="mcp-details-panel">
+                    <div class="mcp-form-section">
+                        <div class="mcp-field">
+                            <label>Name</label>
+                            <input type="text" id="mcp-server-name" placeholder="my-server" spellcheck="false" autocomplete="off" />
+                        </div>
+                        <div class="mcp-field">
+                            <label>Command</label>
+                            <div class="mcp-field-row">
+                                <input type="text" id="mcp-server-command" placeholder="/path/to/server or python" spellcheck="false" autocomplete="off" />
+                                <button class="btn-secondary mcp-browse-btn" id="mcp-browse-btn">Browse</button>
+                            </div>
+                        </div>
+                        <div class="mcp-field">
+                            <label>Arguments</label>
+                            <input type="text" id="mcp-server-args" placeholder="arg1 arg2 ..." spellcheck="false" autocomplete="off" />
+                        </div>
+                    </div>
+                    <div class="mcp-tools-panel">
+                        <div class="mcp-panel-label" id="mcp-tools-header">Tools</div>
+                        <div class="mcp-tools-checkboxes" id="mcp-tools-checkboxes">
+                            <div class="mcp-tools-empty">Select a server to view tools</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="dialog-footer">
+                <button class="btn-secondary" id="mcp-test-btn">Test Connection</button>
+                <button class="btn-secondary" id="mcp-reload-btn">Reload All</button>
+                <span id="mcp-status-msg" class="mcp-status-msg"></span>
+                <button class="btn-secondary" id="mcp-config-close-btn">Close</button>
+            </div>
+        </div>
+
+        <!-- Available MCP Tools Dialog -->
+        <div class="dialog" id="mcp-tools-dialog">
+            <div class="dialog-header">
+                <h3>Available MCP Tools</h3>
+                <button class="dialog-close">&times;</button>
+            </div>
+            <div class="mcp-tools-dialog-body">
+                <table class="mcp-tools-table">
+                    <thead>
+                        <tr><th>Server</th><th>Tool</th><th>Description</th></tr>
+                    </thead>
+                    <tbody id="mcp-tools-table-body">
+                        <tr><td colspan="3" class="mcp-tools-empty-row">Loading...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+            <div class="dialog-footer">
+                <button class="btn-secondary" id="mcp-call-tool-btn">Call Tool...</button>
+                <button class="btn-secondary" id="mcp-tools-close-btn">Close</button>
+            </div>
+        </div>
+
+        <!-- Agent Skills Dialog -->
+        <div class="dialog" id="agent-skills-dialog">
+            <div class="dialog-header">
+                <h3>Agent Skills</h3>
+                <button class="dialog-close">&times;</button>
+            </div>
+            <div class="dialog-body">
+                <div class="pref-section">
+                    <label>
+                        <input type="checkbox" id="skills-enabled">
+                        Enable Agent Skills
+                    </label>
+                </div>
+                <div class="pref-section">
+                    <h4>Default Skills Directory</h4>
+                    <div class="skills-default-dir" id="skills-default-dir"></div>
+                </div>
+                <div class="pref-section">
+                    <h4>Additional Directories</h4>
+                    <textarea id="skills-directories" rows="3" placeholder="One directory per line" spellcheck="false"></textarea>
+                </div>
+                <div class="pref-section skills-refresh-row">
+                    <button class="btn-secondary" id="skills-refresh-btn">Refresh Skills</button>
+                    <span class="skills-count" id="skills-count"></span>
+                </div>
+                <div class="skills-list" id="skills-list"></div>
+            </div>
+            <div class="dialog-footer">
+                <button class="btn-primary" id="skills-ok-btn">OK</button>
+                <button class="btn-secondary" id="skills-cancel-btn">Cancel</button>
+            </div>
+        </div>
+
+        <!-- Preferences Dialog -->
+        <div class="dialog" id="preferences-dialog">
+            <div class="dialog-header">
+                <h3>Preferences</h3>
+                <button class="dialog-close">&times;</button>
+            </div>
+            <div class="dialog-body">
+                <div class="pref-section">
+                    <h4>API Settings</h4>
+                    <label>
+                        API URL:
+                        <input type="text" id="pref-api-url" placeholder="http://localhost:11434">
+                    </label>
+                </div>
+                <div class="pref-section">
+                    <h4>Appearance</h4>
+                    <label>
+                        UI Font:
+                        <input type="text" id="pref-font-family" placeholder="Segoe UI">
+                    </label>
+                    <label>
+                        Reading Font:
+                        <input type="text" id="pref-content-font-family" placeholder="Georgia, serif">
+                    </label>
+                    <label>
+                        Font Size:
+                        <input type="number" id="pref-font-size" min="8" max="24" value="12">
+                    </label>
+                    <label>
+                        Theme:
+                        <select id="pref-theme">
+                            <option value="dark">Dark</option>
+                            <option value="light">Light</option>
+                        </select>
+                    </label>
+                </div>
+            </div>
+            <div class="dialog-footer">
+                <button class="btn-primary" id="save-prefs">Save</button>
+                <button class="btn-secondary" id="cancel-prefs">Cancel</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Message Dialog (replaces native alert()/confirm() so the page
+         origin is never shown, and so it centers on the app window
+         instead of the OS screen). Sits in its own overlay so it can
+         stack above any other open dialog without disturbing it. -->
+    <div class="dialog-overlay message-dialog-overlay" id="message-dialog-overlay">
+        <div class="dialog" id="message-dialog">
+            <div class="dialog-header">
+                <h3 id="message-dialog-title">Alpaca Assist</h3>
+            </div>
+            <div class="dialog-body">
+                <p class="message-dialog-text" id="message-dialog-text"></p>
+                <select class="message-dialog-select" id="message-dialog-select"></select>
+                <input type="text" class="message-dialog-input" id="message-dialog-input">
+            </div>
+            <div class="dialog-footer">
+                <button class="btn-secondary" id="message-dialog-cancel-btn">Cancel</button>
+                <button class="btn-primary" id="message-dialog-ok-btn">OK</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast notifications (non-blocking, visible from all tabs) -->
+    <div id="toast-container" class="toast-container"></div>
+
+    <!-- Loading Overlay -->
+    <div class="loading-overlay" id="loading-overlay">
+        <div class="loading-spinner"></div>
+        <div class="loading-text">Loading...</div>
+    </div>
+
+    <!-- Scripts -->
+    <script src="js/lib/marked.min.js"></script>
+    <script src="js/lib/highlight.min.js"></script>
+    <script src="js/lib/purify.min.js"></script>
+    <script src="js/utils/imageResult.js"></script>
+    <script src="js/api.js"></script>
+    <script src="js/UpdatePoller.js"></script>
+    <script src="js/components/ChatDisplay.js"></script>
+    <script src="js/components/TabManager.js"></script>
+    <script src="js/components/MarkdownInput.js"></script>
+    <script src="js/components/InputArea.js"></script>
+    <script src="js/components/ToolFolds.js"></script>
+    <script src="js/utils/markdown.js"></script>
+    <script src="js/utils/helpers.js"></script>
+    <script src="js/app.js"></script>
+</body>
+</html>

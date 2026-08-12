@@ -14,7 +14,7 @@ class ClaudeClient:
 
     def __init__(
         self,
-        profile_name: str = None,
+        profile_name: str | None = None,
         region_name: str = "us-east-1",
         config_file: str = "claude_config.yaml",
     ) -> None:
@@ -44,7 +44,8 @@ class ClaudeClient:
         """Load configuration from YAML file."""
         try:
             with open(config_file) as f:
-                return yaml.safe_load(f)
+                result: dict[str, Any] = yaml.safe_load(f) or {}
+                return result
         except FileNotFoundError:
             print(f"Config file {config_file} not found, using defaults")
             return {}
@@ -94,7 +95,7 @@ class ClaudeClient:
             )
 
             # Parse the response
-            response_body = json.loads(response["body"].read())
+            response_body: dict[str, Any] = json.loads(response["body"].read())
             return response_body
 
         except Exception as e:
@@ -146,7 +147,9 @@ class ClaudeClient:
                     chunk = event["chunk"]
                     if "bytes" in chunk:
                         try:
-                            chunk_data = json.loads(chunk["bytes"].decode())
+                            chunk_data: dict[str, Any] = json.loads(
+                                chunk["bytes"].decode(),
+                            )
                             event_type = chunk_data.get("type", "unknown")
 
                             if event_type == "content_block_delta":

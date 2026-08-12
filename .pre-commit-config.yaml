@@ -1,24 +1,49 @@
 repos:
--   repo: https://github.com/pre-commit/pre-commit-hooks
+  - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v2.3.0
     hooks:
-    - id: check-yaml
-    - id: end-of-file-fixer
-    - id: trailing-whitespace
--   repo: https://github.com/asottile/add-trailing-comma
+      - id: check-yaml
+      - id: end-of-file-fixer
+      - id: trailing-whitespace
+  - repo: https://github.com/asottile/add-trailing-comma
     rev: v3.1.0
     hooks:
-    -   id: add-trailing-comma
--   repo: https://github.com/asottile/reorder-python-imports
-    rev: v3.12.0 # Use the latest version or a specific one
+      - id: add-trailing-comma
+  - repo: https://github.com/asottile/reorder-python-imports
+    rev: v3.12.0
     hooks:
-    -   id: reorder-python-imports
--   repo: https://github.com/psf/black
+      - id: reorder-python-imports
+  - repo: https://github.com/psf/black
     rev: 22.10.0
     hooks:
-    - id: black
--   repo: https://github.com/asottile/pyupgrade
+      - id: black
+  - repo: https://github.com/asottile/pyupgrade
     rev: v3.20.0
     hooks:
       - id: pyupgrade
         args: [--py311-plus]
+  - repo: https://github.com/pre-commit/mirrors-mypy
+    rev: v1.15.0
+    hooks:
+      - id: mypy
+  - repo: https://github.com/pre-commit/mirrors-prettier
+    rev: v3.1.0
+    hooks:
+      - id: prettier
+        types_or: [javascript, ts, tsx]
+        additional_dependencies:
+          - prettier@3.1.0
+  - repo: local
+    hooks:
+      - id: pytest
+        name: pytest
+        entry: python -m pytest tests/ -q --tb=short
+        language: system
+        pass_filenames: false
+        always_run: true
+      - id: jest
+        name: jest
+        entry: npm test
+        language: system
+        pass_filenames: false
+        always_run: true

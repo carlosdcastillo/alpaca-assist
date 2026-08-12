@@ -8,13 +8,14 @@ headings, sections, code blocks, lists, tables, and other markdown elements.
 import os
 import re
 import sys
+from typing import Any
 from typing import Dict
 from typing import List
 from typing import Optional
 from typing import Tuple
 
 
-def extract_headings(content: str) -> list[dict[str, any]]:
+def extract_headings(content: str) -> list[dict[str, Any]]:
     """
     Extract all headings from markdown content.
 
@@ -46,8 +47,9 @@ def extract_headings(content: str) -> list[dict[str, any]]:
 
         # Setext-style headings (underlined with = or -)
         if line_num < len(lines):
-            next_line = lines[line_num] if line_num < len(lines) else ""
-            if re.match(r"^=+$", next_line.strip()) and line.strip():
+            next_line = lines[line_num]
+            next_line_match = re.match(r"^=+$", next_line.strip())
+            if next_line_match and line.strip():
                 headings.append(
                     {
                         "type": "setext_heading",
@@ -71,7 +73,7 @@ def extract_headings(content: str) -> list[dict[str, any]]:
     return headings
 
 
-def extract_code_blocks(content: str) -> list[dict[str, any]]:
+def extract_code_blocks(content: str) -> list[dict[str, Any]]:
     """
     Extract code blocks from markdown content.
 
@@ -81,10 +83,10 @@ def extract_code_blocks(content: str) -> list[dict[str, any]]:
     Returns:
         List[Dict]: List of code block information
     """
-    code_blocks = []
+    code_blocks: list[dict[str, Any]] = []
     lines = content.split("\n")
     in_fenced_block = False
-    current_block = None
+    current_block: dict[str, Any] | None = None
 
     for line_num, line in enumerate(lines, 1):
         # Fenced code blocks (``` or ~~~)
@@ -153,7 +155,7 @@ def extract_code_blocks(content: str) -> list[dict[str, any]]:
     return code_blocks
 
 
-def extract_lists(content: str) -> list[dict[str, any]]:
+def extract_lists(content: str) -> list[dict[str, Any]]:
     """
     Extract lists from markdown content.
 
@@ -163,9 +165,9 @@ def extract_lists(content: str) -> list[dict[str, any]]:
     Returns:
         List[Dict]: List of list information
     """
-    lists = []
+    lists: list[dict[str, Any]] = []
     lines = content.split("\n")
-    current_list = None
+    current_list: dict[str, Any] | None = None
 
     for line_num, line in enumerate(lines, 1):
         # Unordered lists (-, *, +)
@@ -255,7 +257,7 @@ def extract_lists(content: str) -> list[dict[str, any]]:
     return lists
 
 
-def extract_tables(content: str) -> list[dict[str, any]]:
+def extract_tables(content: str) -> list[dict[str, Any]]:
     """
     Extract tables from markdown content.
 
@@ -322,7 +324,7 @@ def extract_tables(content: str) -> list[dict[str, any]]:
     return tables
 
 
-def extract_links_and_images(content: str) -> dict[str, list[dict[str, any]]]:
+def extract_links_and_images(content: str) -> dict[str, list[dict[str, Any]]]:
     """
     Extract links and images from markdown content.
 
@@ -374,13 +376,13 @@ def extract_links_and_images(content: str) -> dict[str, list[dict[str, any]]]:
     # Reference definitions [ref]: url
     ref_def_pattern = r"^\s*\[([^\]]+)\]:\s*(.+)$"
     for line_num, line in enumerate(content.split("\n"), 1):
-        match = re.match(ref_def_pattern, line)
-        if match:
+        match_result: re.Match[str] | None = re.match(ref_def_pattern, line)
+        if match_result:
             links.append(
                 {
                     "type": "reference_definition",
-                    "reference": match.group(1),
-                    "url": match.group(2).strip(),
+                    "reference": match_result.group(1),
+                    "url": match_result.group(2).strip(),
                     "line_number": line_num,
                 },
             )
@@ -388,7 +390,7 @@ def extract_links_and_images(content: str) -> dict[str, list[dict[str, any]]]:
     return {"links": links, "images": images}
 
 
-def summarize_file(filename: str) -> dict[str, any]:
+def summarize_file(filename: str) -> dict[str, Any]:
     """
     Analyze a Markdown file and extract structural information.
 
@@ -439,7 +441,7 @@ def summarize_file(filename: str) -> dict[str, any]:
         return {"error": f"Error analyzing '{filename}': {e}"}
 
 
-def format_results(results: dict[str, any], filename: str) -> str:
+def format_results(results: dict[str, Any], filename: str) -> str:
     """
     Format the analysis results into a string.
 
@@ -465,7 +467,7 @@ def format_results(results: dict[str, any], filename: str) -> str:
 
     if headings:
         # Group by level
-        by_level = {}
+        by_level: dict[int, list[dict[str, Any]]] = {}
         for heading in headings:
             level = heading["level"]
             if level not in by_level:
@@ -496,7 +498,7 @@ def format_results(results: dict[str, any], filename: str) -> str:
 
         if fenced_blocks:
             output_lines.append(f"   Fenced Code Blocks ({len(fenced_blocks)}):")
-            lang_counts = {}
+            lang_counts: dict[str, int] = {}
             for block in fenced_blocks:
                 lang = block["language"]
                 lang_counts[lang] = lang_counts.get(lang, 0) + 1
@@ -559,7 +561,7 @@ def format_results(results: dict[str, any], filename: str) -> str:
     output_lines.append(f"\n🔗 Links ({len(links)} total):")
 
     if links:
-        link_types = {}
+        link_types: dict[str, int] = {}
         for link in links:
             link_type = link["type"]
             link_types[link_type] = link_types.get(link_type, 0) + 1

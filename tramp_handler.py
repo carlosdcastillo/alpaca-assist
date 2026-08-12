@@ -173,9 +173,12 @@ class TrampHandler:
             )
 
         try:
-            return int(result.stdout.strip())
+            size_str = result.stdout.strip()
+            return int(size_str)
         except ValueError:
-            raise RuntimeError(f"Invalid size output: {result.stdout.strip()}")
+            raise RuntimeError(
+                f"Invalid size output: {result.stdout.strip()}",
+            ) from None
 
     def read_file(self, filepath: str) -> str:
         """Read file contents."""
@@ -198,7 +201,7 @@ class TrampHandler:
                     f"Error reading file '{filepath}': {result.stderr.strip()}",
                 )
 
-        return result.stdout
+        return str(result.stdout)
 
     def write_file(self, filepath: str, content: str) -> None:
         """Write content to file."""
