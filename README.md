@@ -51,8 +51,7 @@ pywebview_demo/
 ├── bedrock_server.py             # AWS Bedrock backend
 ├── conversation_graph.py         # DAG conversation model (branching)
 ├── mcp_manager.py                # MCP server management
-├── tool_executor.py,
-│   tool_call_detector.py,
+├── tool_call_detector.py,
 │   internal_tools.py             # Tool calling + built-in tools
 ├── requirements.txt
 └── tests/                        # pytest suite
