@@ -63,8 +63,8 @@ class ToolHandler:
     # threshold), but real tool-loop conversations routinely produce
     # individual results in the tens-to-hundreds-of-KB range (shell
     # command output, read_file) — at 24KB that meant clearing, and the
-    # cache-prefix invalidation that comes with it (see
-    # TOOL_RESULT_CLEARING.md), kicked in after essentially one kept pair.
+    # cache-prefix invalidation that comes with it kicked in after
+    # essentially one kept pair.
     # 256KB leaves room for dozens of full-size pairs before eviction
     # starts, trading a larger worst-case first-time resend for far fewer
     # clear-driven cache busts. Deliberately size-based (not time-based)
@@ -75,7 +75,7 @@ class ToolHandler:
     # above and kept by count instead — a single downscaled screenshot
     # still typically encodes to several times the whole text budget by
     # itself, so counting it there would evict everything around it on the
-    # very next call (see TOOL_RESULT_CLEARING.md's "Images" section). 2
+    # very next call. 2
     # matches the before/after-screenshot pattern this tool is actually
     # used for.
     KEEP_LAST_N_IMAGES = 2
@@ -533,7 +533,7 @@ class ToolHandler:
         # few tool calls still gets bounded overall — previously only the
         # turn currently being continued was ever considered, so accumulated
         # history across completed turns was never cleared at all, no matter
-        # how large the conversation got. See TOOL_RESULT_CLEARING.md.
+        # how large the conversation got.
         per_turn_pairs: list[list[tuple[Any, Any]]] = []
         all_pairs: list[tuple[Any, Any]] = []
         for i, (q, a) in enumerate(zip(questions, answers)):
@@ -662,8 +662,7 @@ class ToolHandler:
             # Tool call / result pairs, coarsely cleared against the global
             # (conversation-wide) boundary computed above — bounds resend
             # growth whether it comes from one long single-turn tool loop or
-            # from many turns each with a handful of tool calls. See
-            # TOOL_RESULT_CLEARING.md.
+            # from many turns each with a handful of tool calls.
             for tc, tr in per_turn_pairs[i]:
                 call_data = self._parse_for_message(tc.content, tc.id)
                 if call_data:

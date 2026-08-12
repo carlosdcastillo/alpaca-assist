@@ -1084,7 +1084,7 @@ class TestToolHandlerPrepareContinuationMessagesWithImages:
     byte budget by itself — these pin down that images are exempt from
     that budget (kept/cleared by KEEP_LAST_N_IMAGES instead) and, just as
     importantly, that a large image pair no longer collaterally evicts
-    small, unrelated text pairs around it. See TOOL_RESULT_CLEARING.md.
+    small, unrelated text pairs around it.
     """
 
     @staticmethod
