@@ -1,158 +1,123 @@
-# Alpaca Assist - PyWebView Migration
+# Alpaca Assist
 
-This is a PyWebView-based migration of the Alpaca Assist desktop chat application, originally built with Tkinter.
+A desktop chat client for LLMs, built with [PyWebView](https://pywebview.flowrl.com/):
+a Python backend drives the business logic and a web frontend (HTML/CSS/JS)
+renders the UI in a native window. It was originally a Tkinter application; the
+UI layer is now web-based while the streaming, tool-execution, and
+state-management logic remains in Python.
 
 ## Architecture
 
-### New Structure
+The Python process owns all business logic and exposes it to the web UI through
+PyWebView's `js_api` bridge. UI updates that originate on background threads
+(e.g. streaming chunks) are delivered via a JavaScript polling loop rather than
+cross-thread `evaluate_js`, which keeps updates thread-safe across platforms.
 
 ```
 pywebview_demo/
 ├── web/                          # Web frontend
-│   ├── index.html               # Main application shell
+│   ├── index.html                # Application shell
 │   ├── css/
-│   │   ├── themes.css           # Light/dark theme variables
-│   │   └── app.css              # Main application styles
+│   │   ├── themes.css            # Light/dark theme variables
+│   │   └── app.css               # Application styles
 │   └── js/
-│       ├── lib/                 # Bundled third-party libraries
-│       │   ├── marked.min.js    # Markdown parser
-│       │   ├── highlight.min.js # Syntax highlighting
-│       │   ├── github.min.css   # Light theme highlight.js
-│       │   ├── github-dark.min.css # Dark theme highlight.js
-│       │   └── purify.min.js    # HTML sanitizer
-│       ├── api.js               # Python/JS API bridge
-│       ├── UpdatePoller.js      # JS polling for UI updates
-│       ├── app.js               # Main application bootstrap
+│       ├── app.js                # Frontend bootstrap
+│       ├── api.js                # Python/JS API bridge (client side)
+│       ├── UpdatePoller.js       # Polls Python for queued UI updates
 │       ├── components/
-│       │   ├── ChatDisplay.js   # Message rendering, markdown, folds
-│       │   ├── TabManager.js    # Multi-tab handling
-│       │   ├── InputArea.js     # Text input
-│       │   ├── ToolFolds.js     # Collapsible tool widgets
-│       │   └── QABar.js         # Question/answer action bars
-│       └── utils/
-│           ├── markdown.js      # Markdown rendering utilities
-│           └── helpers.js       # Helper utilities
-├── core/                        # Python business logic
-│   ├── app_core.py              # UI-agnostic AppCore
-│   └── chat_tab.py              # Refactored ChatTab
-├── webview_app.py               # PyWebView main application
-├── webview_api.py               # Python/JS API bridge
-└── requirements.txt             # Updated dependencies
+│       │   ├── ChatDisplay.js    # Message rendering, markdown, tool folds
+│       │   ├── TabManager.js     # Multi-tab handling
+│       │   ├── InputArea.js      # Input controls
+│       │   ├── MarkdownInput.js  # Markdown-aware text input
+│       │   └── ToolFolds.js      # Collapsible tool-call widgets
+│       ├── utils/
+│       │   ├── markdown.js       # Markdown rendering helpers
+│       │   └── helpers.js        # Misc helpers
+│       └── lib/                  # Bundled third-party assets
+│           ├── marked.min.js     # Markdown parser
+│           ├── highlight.min.js  # Syntax highlighting
+│           ├── github.min.css    # Light highlight.js theme
+│           ├── nord.min.css      # Dark highlight.js theme
+│           └── purify.min.js     # HTML sanitizer
+├── core/                         # UI-agnostic business logic
+│   ├── app_core.py               # AppCore: tabs, session, preferences
+│   ├── chat_tab*.py              # Chat tab: base, streaming, tools, summary
+│   ├── pack_*.py                 # Pack (remote-session) tabs and transport
+│   ├── tool_output_gate.py       # Byte-budgeting of tool results
+│   └── config.py, text_parsing.py
+├── webview_app.py                # PyWebView entry point / main window
+├── webview_api.py                # WebViewAPI: the JS <-> Python bridge
+├── anthropic_ollama_server.py    # Ollama-compatible proxy -> Anthropic / Fireworks
+├── bedrock_server.py             # AWS Bedrock backend
+├── conversation_graph.py         # DAG conversation model (branching)
+├── mcp_manager.py                # MCP server management
+├── tool_executor.py,
+│   tool_call_detector.py,
+│   internal_tools.py             # Tool calling + built-in tools
+├── requirements.txt
+└── tests/                        # pytest suite
 ```
 
-### Key Migration Changes
-
-1. **UI Layer Replaced**: Tkinter widgets replaced with web-based UI
-2. **Thread Safety**: Implemented Pattern C (JS polling) for thread-safe UI updates
-3. **Business Logic Preserved**: All streaming, tool execution, and state management code remains in Python
-4. **Bidirectional Bridge**: PyWebView's `js_api` enables seamless Python/JS communication
-
-## Running the Application
-
-### Prerequisites
+## Running
 
 ```bash
 pip install -r requirements.txt
-```
-
-### Development Mode
-
-```bash
 python webview_app.py
 ```
 
-### Building Executable
+Set `DEBUG=1` to open developer tools and disable the WebView cache:
 
 ```bash
-python build.py
+DEBUG=1 python webview_app.py     # PowerShell: $env:DEBUG=1; python .\webview_app.py
 ```
 
-The build script handles bundling the `web/` directory into the executable.
+### Model backends
 
-## Key Features
+LLM access goes through an Ollama-compatible HTTP API.
+`anthropic_ollama_server.py` provides that endpoint and routes requests to
+Anthropic or Fireworks (model names prefixed `accounts/fireworks/…` route to
+Fireworks); `bedrock_server.py` covers AWS Bedrock. Supply the relevant
+provider's API key in the environment.
 
-- **Streaming Responses**: Real-time LLM response streaming with markdown rendering
-- **MCP Tool Execution**: Tool calls and results displayed in collapsible fold widgets
-- **Multi-Tab Support**: Create, switch, and close multiple chat tabs
-- **Conversation Graph**: DAG-based branching conversation model (edit, fork, regenerate)
-- **Syntax Highlighting**: Code blocks with language detection and copy buttons
-- **Dark/Light Themes**: Toggle between themes
-- **Session Persistence**: Auto-save and restore conversations
+### MCP servers
 
-## API Bridge
+External tool servers are configured in `mcp_servers.json` (see
+`mcp_servers.json.example`). Server-provided tools appear in chat as collapsible
+fold widgets.
 
-The `WebViewAPI` class provides bidirectional communication:
+## Features
 
-### JavaScript → Python
-- `create_tab(title)` - Create new tab
-- `send_message(tab_id, message, images)` - Send chat message
-- `stop_streaming(tab_id)` - Stop current streaming
-- `get_preferences()` / `save_preferences(prefs)` - Settings management
-- `get_models()` - Fetch available LLM models
-- `export_conversation(tab_id)` - Export to HTML
+- **Streaming responses** with live markdown rendering and syntax-highlighted
+  code blocks (copy buttons, language detection)
+- **Multi-tab chats**, including **pack tabs** that attach to remote sessions
+- **MCP tool execution** shown in collapsible tool-fold widgets; image tool
+  results render inline
+- **Branching conversations** — a DAG model supporting edit, fork, and
+  regenerate, with stable conversation IDs and internal conversation search
+- **Tool-output gating** — large tool results are byte-budgeted so context
+  stays manageable
+- **Dark / light themes**
+- **Session persistence** — conversations auto-save and restore on launch
 
-### Python → JavaScript (via polling)
-- `onContentUpdate(tab_id, update)` - Streaming content chunk
-- `onStreamingStart/End(tab_id, index)` - Streaming lifecycle
-- `onError(tab_id, error)` - Error notifications
-- `injectToolFold(tab_id, fold_data)` - Tool fold widget injection
+## Development
 
-## Thread Safety
+- **New JS <-> Python method:** add it to `webview_api.py`, then call it from
+  `web/js/api.js`. For Python-initiated UI updates, queue work that the frontend
+  picks up via `get_pending_js` (see `UpdatePoller.js` and the `on*` handlers in
+  `app.js`).
+- **Custom elements:** the UI defines `<tool-fold>` for tool call/result display.
+- **Styling:** color variables live in `themes.css`; `[data-theme="light"]`
+  holds light-mode overrides.
 
-This implementation uses **Pattern C (JavaScript polling)** as recommended in the migration spec:
+## Testing
 
-1. Python queues UI updates in a thread-safe queue
-2. JavaScript polls every 50ms via `get_pending_js()`
-3. JavaScript executes updates directly via `Function()` constructor
+```bash
+pytest
+```
 
-This avoids thread-safety concerns with `evaluate_js()` and works reliably across platforms.
-
-## Removed Features
-
-Per the migration spec, the following features were removed:
-- File completions (`@/`) - Not used by customers
-- Prompt completions (`@@`) - Not used by customers
-
-## Migration Status
-
-### Completed
-- [x] Core architecture with PyWebView
-- [x] API bridge with bidirectional communication
-- [x] Thread-safe UI updates via JS polling
-- [x] Tab management
-- [x] Chat display with streaming markdown
-- [x] Input area with model selection
-- [x] Tool fold widgets (collapsible)
-- [x] Q/A action bars
-- [x] Theme system (dark/light)
-- [x] Session persistence framework
-
-### TODO
-- [ ] Full conversation state rendering on tab switch
-- [ ] Image attachment UI
-- [ ] Find dialog
-- [ ] MCP tools configuration dialog
-- [ ] Conversation history browser
-- [ ] Complete integration testing
-
-## Development Notes
-
-### Adding New API Methods
-
-1. Add method to `webview_api.py` in the appropriate section
-2. Add corresponding method to `web/js/api.js`
-3. For Python → JS updates, use `_safe_evaluate_js()` and handle in `app.js`
-
-### Styling
-
-CSS variables in `themes.css` control the color scheme. The `[data-theme="light"]` selector handles light mode overrides.
-
-### Custom Elements
-
-The app uses Web Components for complex UI elements:
-- `<tool-fold>` - Collapsible tool call/result display
-- `<qa-bar>` - Question/answer action buttons
+The `tests/` directory contains the suite (unit and integration tests for the
+API bridge, session restore, streaming, tools, and conversation model).
 
 ## License
 
-Same as original Alpaca Assist project.
+Same as the original Alpaca Assist project.
