@@ -250,6 +250,20 @@ class StreamProcessor:
                                 0,
                             )
 
+                        if data.get("done_reason") == "error":
+                            error_message = data.get("error", "Unknown stream error")
+                            logger.error(f"[STREAM] Backend stream error: {error_message}")
+                            self._queue_content_update(
+                                answer_index,
+                                f"\n[Error]: {error_message}",
+                                is_done=True,
+                                is_error=True,
+                            )
+                            api = self._chat._app_core.api
+                            if api is not None:
+                                api.on_streaming_end(self._chat.tab_id, answer_index)
+                            break
+
                         self._queue_content_update(answer_index, "", is_done=True)
 
                         # Inject call folds AFTER done signal

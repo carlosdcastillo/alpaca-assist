@@ -96,6 +96,7 @@ class TestMidStreamFailureStillReportsMetrics:
 
         chunk = _last_chunk(handler)
         assert chunk["done_reason"] == "error"
+        assert chunk["error"] == "connection reset by peer"
         metrics = chunk["invocation_metrics"]
         assert metrics["input_token_count"] == 100
         # Estimated from the 400 chars actually received, not silently zero.
@@ -114,6 +115,7 @@ class TestMidStreamFailureStillReportsMetrics:
 
         chunk = _last_chunk(handler)
         assert chunk["done_reason"] == "error"
+        assert chunk["error"] == "connection reset by peer"
         assert "invocation_metrics" not in chunk
 
 

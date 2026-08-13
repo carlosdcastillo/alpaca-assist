@@ -37,6 +37,7 @@ def _capture_metrics(handler: OllamaRequestHandler, events: list[dict]) -> dict 
         stop_reason="stop",
         tool_calls=None,
         invocation_metrics=None,
+        error=None,
     ):
         captured["metrics"] = invocation_metrics
 

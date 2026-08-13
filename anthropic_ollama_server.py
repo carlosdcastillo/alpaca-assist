@@ -590,6 +590,7 @@ class OllamaRequestHandler(BaseHTTPRequestHandler):
         stop_reason: str = "stop",
         tool_calls: list[Any] | None = None,
         invocation_metrics: dict | None = None,
+        error: str | None = None,
     ):
         """Send the final completion chunk."""
         now = datetime.datetime.now(datetime.UTC).astimezone()
@@ -615,6 +616,8 @@ class OllamaRequestHandler(BaseHTTPRequestHandler):
 
         if invocation_metrics:
             response["invocation_metrics"] = invocation_metrics
+        if error is not None:
+            response["error"] = error
 
         self.wfile.write(json.dumps(response).encode())
         self.wfile.write(b"\n")
@@ -834,6 +837,7 @@ class OllamaRequestHandler(BaseHTTPRequestHandler):
             count,
             stop_reason,
             invocation_metrics=invocation_metrics,
+            error=str(stream_error) if stream_error is not None else None,
         )
 
     def do_POST(self) -> None:

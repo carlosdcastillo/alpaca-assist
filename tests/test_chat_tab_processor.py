@@ -63,6 +63,25 @@ class TestProcessStreamHappyPath:
         processor.process_stream(_make_response(200, lines), 0, _stop_flag())
         mock_api.on_streaming_end.assert_called_once_with("tab-1", 0)
 
+    def test_error_completion_renders_backend_error_and_ends_stream(self) -> None:
+        processor, _, mock_api = _make_processor()
+        lines = _lines(
+            {
+                "message": {"content": ""},
+                "done": True,
+                "done_reason": "error",
+                "error": "model does not support image inputs",
+            },
+        )
+
+        processor.process_stream(_make_response(200, lines), 0, _stop_flag())
+
+        update = mock_api.on_content_update.call_args.args[1]
+        assert update.content_chunk == "\n[Error]: model does not support image inputs"
+        assert update.is_done is True
+        assert update.is_error is True
+        mock_api.on_streaming_end.assert_called_once_with("tab-1", 0)
+
 
 class TestProcessStreamSessionTokenAccumulation:
     """session_input_tokens/session_output_tokens/session_cached_input_tokens
