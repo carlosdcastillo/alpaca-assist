@@ -45,6 +45,7 @@ ATTACH_TIMEOUT = 15.0
 MUTATE_TIMEOUT = 15.0
 SEND_MESSAGE_TIMEOUT = 30.0
 VIDEO_CHUNK_TIMEOUT = 30.0
+GATED_OUTPUT_TIMEOUT = 30.0
 STOP_STREAMING_TIMEOUT = 10.0
 FOLD_RENDER_TIMEOUT = 2.0
 
@@ -426,6 +427,16 @@ class PackTab:
             {"locator": locator, "offset": offset},
             timeout=VIDEO_CHUNK_TIMEOUT,
         )
+
+    def read_gated_tool_output(self, gated_text: str) -> str:
+        """Fetch a gated result from the remote Pack daemon's temp file."""
+        self._ensure_connected(timeout=ATTACH_TIMEOUT)
+        result = self._transport.send_request(
+            "read_gated_tool_output",
+            {"gated_text": gated_text},
+            timeout=GATED_OUTPUT_TIMEOUT,
+        )
+        return result["content"]
 
     def compact_conversation(self) -> dict[str, Any]:
         return self._mutate("compact_conversation")

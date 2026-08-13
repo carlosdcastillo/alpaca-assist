@@ -930,6 +930,23 @@ class WebViewAPI:
             logger.warning(f"Could not load video chunk for tab {tab_id}: {e}")
             return {"success": False, "error": str(e)}
 
+    def get_gated_tool_output(self, tab_id: str, gated_text: str) -> dict[str, Any]:
+        """Load a gated result on demand, proxying reads for Pack tabs."""
+        try:
+            tab = self._app.core.tabs.get(tab_id)
+            if tab is None:
+                return {"success": False, "error": "Tab not found"}
+            if hasattr(tab, "read_gated_tool_output"):
+                content = tab.read_gated_tool_output(gated_text)
+            else:
+                from core.tool_output_gate import read_gated_tool_output
+
+                content = read_gated_tool_output(gated_text, tab_id)
+            return {"success": True, "content": content}
+        except Exception as e:
+            logger.warning(f"Could not load gated tool output for tab {tab_id}: {e}")
+            return {"success": False, "error": str(e)}
+
     def get_agent_skills_config(self) -> dict[str, Any]:
         """Return agent skills configuration and discovered skills list."""
         try:

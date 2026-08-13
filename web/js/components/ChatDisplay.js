@@ -28,6 +28,8 @@ class ChatDisplay {
     // tool-call ids are model-assigned free text, only guaranteed unique
     // within the answer that generated them.
     this.answerToolResults = new Map();
+    this.gatedToolResultLoads = new Map();
+    this.gatedToolResultEpoch = 0;
 
     // Track streaming state
     this.isStreaming = false;
@@ -670,10 +672,60 @@ class ChatDisplay {
     const bufferData = this.answerBuffers.get(answerIndex);
     if (
       bufferData?.buffer.includes(`alpaca://image/${toolCallId}`) &&
-      window.ImageResultUtils?.parse(content)
+      (window.ImageResultUtils?.parse(content) ||
+        this._isGatedToolResult(content))
     ) {
       this._renderAnswerBuffer(answerIndex, bufferData, false);
     }
+  }
+
+  _isGatedToolResult(content) {
+    return (
+      typeof content === "string" &&
+      content.includes("[Output truncated:") &&
+      /^Full output saved to: .+$/m.test(content)
+    );
+  }
+
+  /** Replace a stored gate placeholder with its full temp-file content. */
+  _loadGatedToolResult(answerIndex, toolCallId, gatedContent) {
+    if (!this._isGatedToolResult(gatedContent)) return null;
+    const tabId = window.app?.currentTabId;
+    if (!tabId || !window.pythonAPI?.get_gated_tool_output) return null;
+
+    const key = `${answerIndex}:${toolCallId}`;
+    const existing = this.gatedToolResultLoads.get(key);
+    if (existing) return existing;
+    const epoch = this.gatedToolResultEpoch;
+    const promise = window.pythonAPI
+      .get_gated_tool_output(tabId, gatedContent)
+      .then((response) => {
+        if (!response?.success) {
+          throw new Error(response?.error || "Could not load tool output");
+        }
+        const results = this.answerToolResults.get(answerIndex);
+        if (
+          epoch !== this.gatedToolResultEpoch ||
+          results?.get(toolCallId) !== gatedContent
+        ) {
+          return null;
+        }
+        results.set(toolCallId, response.content);
+        const bufferData = this.answerBuffers.get(answerIndex);
+        if (bufferData) this._renderAnswerBuffer(answerIndex, bufferData, false);
+        return response.content;
+      })
+      .catch((error) => {
+        console.warn(`Could not load gated tool result: ${error.message}`);
+        return null;
+      })
+      .finally(() => {
+        if (this.gatedToolResultLoads.get(key) === promise) {
+          this.gatedToolResultLoads.delete(key);
+        }
+      });
+    this.gatedToolResultLoads.set(key, promise);
+    return promise;
   }
 
   /**
@@ -690,7 +742,10 @@ class ChatDisplay {
     return text.replace(/alpaca:\/\/image\/([^)\s"'>]+)/g, (match, id) => {
       const content = results?.get(id);
       const parsed = content && window.ImageResultUtils?.parse(content);
-      if (!parsed) return match;
+      if (!parsed) {
+        this._loadGatedToolResult(answerIndex, id, content);
+        return match;
+      }
       return `data:${parsed.mimeType};base64,${parsed.base64Data}`;
     });
   }
@@ -702,8 +757,12 @@ class ChatDisplay {
       const href = link.getAttribute("href") || "";
       if (!href.startsWith("alpaca://video/")) continue;
       const id = href.slice("alpaca://video/".length);
-      const parsed = window.VideoResultUtils?.parse(results?.get(id));
-      if (!parsed) continue;
+      const content = results?.get(id);
+      const parsed = window.VideoResultUtils?.parse(content);
+      if (!parsed) {
+        this._loadGatedToolResult(answerIndex, id, content);
+        continue;
+      }
 
       const wrapper = document.createElement("div");
       wrapper.className = "inline-video-result";
@@ -1192,11 +1251,13 @@ class ChatDisplay {
    */
   clear() {
     window.VideoResultUtils?.clear();
+    this.gatedToolResultEpoch += 1;
     this.container.innerHTML = "";
     this.answerBuffers.clear();
     this.pendingFolds.clear();
     this.injectedFolds.clear();
     this.answerToolResults.clear();
+    this.gatedToolResultLoads.clear();
     this.currentAnswerIndex = -1;
   }
 

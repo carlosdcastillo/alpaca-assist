@@ -53,6 +53,8 @@ describe("ChatDisplay", () => {
     window.Helpers = {
       copyToClipboard: jest.fn().mockResolvedValue(true),
     };
+    window.app = undefined;
+    window.pythonAPI = undefined;
 
     chatDisplay = new ChatDisplay("chat-container");
   });
@@ -448,6 +450,75 @@ describe("ChatDisplay", () => {
           0,
         ),
       ).toBe("![Preview](data:image/png;base64,QUJDRA==)");
+    });
+
+    it("loads a gated image result and re-renders the reference", async () => {
+      const placeholder =
+        "[Output truncated: 1 lines / 40000 bytes total — showing first 1 lines (4.0 KB).\n" +
+        "Full output saved to: /tmp/alpaca_assist_tool_outputs/tab-1/shot.txt\n" +
+        "Use the read_file_range tool to inspect another slice of it.]";
+      const fullResult =
+        "@@ALPACA_IMAGE_RESULT@@image/png@@ALPACA_FIELD@@QUJDRA==@@ALPACA_FIELD@@Preview";
+      window.app = { currentTabId: "tab-1" };
+      window.pythonAPI = {
+        get_gated_tool_output: jest.fn().mockResolvedValue({
+          success: true,
+          content: fullResult,
+        }),
+      };
+      chatDisplay.registerToolResult(0, "shot-1", placeholder);
+      chatDisplay.appendToAnswerBuffer(
+        0,
+        "![Preview](alpaca://image/shot-1)",
+        true,
+      );
+
+      await chatDisplay.gatedToolResultLoads.get("0:shot-1");
+
+      expect(window.pythonAPI.get_gated_tool_output).toHaveBeenCalledWith(
+        "tab-1",
+        placeholder,
+      );
+      expect(chatDisplay.answerToolResults.get(0).get("shot-1")).toBe(
+        fullResult,
+      );
+      expect(marked.parse).toHaveBeenLastCalledWith(
+        "![Preview](data:image/png;base64,QUJDRA==)",
+      );
+    });
+
+    it("loads a gated video result before hydrating it", async () => {
+      const placeholder =
+        "[Output truncated: 1 lines / 40000 bytes total\n" +
+        "Full output saved to: /tmp/alpaca_assist_tool_outputs/tab-1/video.txt\n]";
+      const fullResult =
+        "@@ALPACA_VIDEO_RESULT@@video/webm@@ALPACA_FIELD@@locator" +
+        "@@ALPACA_FIELD@@6@@ALPACA_FIELD@@Demo";
+      window.app = { currentTabId: "tab-1" };
+      window.pythonAPI = {
+        get_gated_tool_output: jest.fn().mockResolvedValue({
+          success: true,
+          content: fullResult,
+        }),
+      };
+      window.VideoResultUtils = {
+        parse: jest.fn((content) =>
+          content === fullResult ? { mimeType: "video/webm" } : null,
+        ),
+        load: jest.fn().mockResolvedValue("blob:demo"),
+        clear: jest.fn(),
+      };
+      chatDisplay.registerToolResult(0, "video-1", placeholder);
+      const segment = document.createElement("div");
+      segment.innerHTML = '<a href="alpaca://video/video-1">Demo</a>';
+
+      chatDisplay._hydrateInlineVideoRefs(segment, 0);
+      await chatDisplay.gatedToolResultLoads.get("0:video-1");
+
+      expect(chatDisplay.answerToolResults.get(0).get("video-1")).toBe(
+        fullResult,
+      );
+      expect(window.pythonAPI.get_gated_tool_output).toHaveBeenCalledTimes(1);
     });
 
     it("does not resolve image references across answers", () => {

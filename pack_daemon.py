@@ -35,6 +35,7 @@ from typing import Any
 from typing import Callable
 
 from core import pack_protocol
+from core.tool_output_gate import read_gated_tool_output
 from video_tool_result import read_video_chunk
 
 logger = logging.getLogger("pack_daemon")
@@ -279,6 +280,13 @@ def make_dispatcher(
             return {"answer_index": getattr(tab, "_current_answer_index", 0)}
         if method == "read_video_chunk":
             return read_video_chunk(params["locator"], params.get("offset", 0))
+        if method == "read_gated_tool_output":
+            return {
+                "content": read_gated_tool_output(
+                    params["gated_text"],
+                    tab.tab_id,
+                ),
+            }
         if method == "stop_streaming":
             tab.stop_streaming()
             return {"success": True}

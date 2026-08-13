@@ -312,6 +312,18 @@ class TestMakeDispatcher:
         assert tab.preferences["model"] == "new-model"
         core.save_preferences.assert_called_once_with()
 
+    def test_gated_tool_output_dispatches_with_remote_tab_id(self) -> None:
+        tab = self._tab()
+        dispatch = make_dispatcher(tab, PackDaemonAdapter(), resumed=False, core=self._core())
+
+        with pytest.MonkeyPatch.context() as monkeypatch:
+            reader = MagicMock(return_value="full media")
+            monkeypatch.setattr("pack_daemon.read_gated_tool_output", reader)
+            result = dispatch("read_gated_tool_output", {"gated_text": "placeholder"})
+
+        assert result == {"content": "full media"}
+        reader.assert_called_once_with("placeholder", "tab-1")
+
     def test_mutating_methods_dispatch_to_real_tab_methods(self) -> None:
         tab = self._tab()
         dispatch = make_dispatcher(tab, PackDaemonAdapter(), resumed=False, core=self._core())

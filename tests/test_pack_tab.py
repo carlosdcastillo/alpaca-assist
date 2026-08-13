@@ -338,6 +338,21 @@ class TestSessionLostRecreate:
             timeout=mock.ANY,
         )
 
+    def test_read_gated_tool_output_is_proxied_to_remote_daemon(
+        self,
+        pack_tab: PackTab,
+    ) -> None:
+        pack_tab._transport.send_request.return_value = {"content": "full media"}
+
+        result = pack_tab.read_gated_tool_output("placeholder")
+
+        assert result == "full media"
+        pack_tab._transport.send_request.assert_called_once_with(
+            "read_gated_tool_output",
+            {"gated_text": "placeholder"},
+            timeout=mock.ANY,
+        )
+
     def test_resolve_session_lost_recreate_failure_marks_offline(
         self,
         pack_tab: PackTab,

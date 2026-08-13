@@ -15,6 +15,7 @@ from core.tool_output_gate import gate_tool_call_arguments
 from core.tool_output_gate import gate_tool_output
 from core.tool_output_gate import PREVIEW_MAX_BYTES
 from core.tool_output_gate import PREVIEW_MAX_LINES
+from core.tool_output_gate import read_gated_tool_output
 from core.tool_output_gate import sweep_orphaned_output_dirs
 
 
@@ -102,6 +103,19 @@ class TestGateToolOutputOverThreshold:
         assert len(all_files) == 1
         for f in all_files:
             assert gate_module.TOOL_OUTPUT_TEMP_ROOT in f.parents
+
+    def test_full_content_can_be_loaded_from_placeholder(self) -> None:
+        text = "media" * GATE_THRESHOLD_BYTES
+        placeholder = gate_tool_output(text, "tab-1", "tool-1", "chart")
+
+        assert read_gated_tool_output(placeholder, "tab-1") == text
+
+    def test_placeholder_cannot_read_another_tabs_output(self) -> None:
+        text = "private" * GATE_THRESHOLD_BYTES
+        placeholder = gate_tool_output(text, "tab-1", "tool-1", "chart")
+
+        with pytest.raises(ValueError, match="does not belong"):
+            read_gated_tool_output(placeholder, "tab-2")
 
 
 class TestCleanupTabOutputDir:

@@ -24,6 +24,7 @@ swept on app startup (sweep_orphaned_output_dirs).
 from __future__ import annotations
 
 import json
+import re
 import shutil
 import tempfile
 from pathlib import Path
@@ -37,6 +38,7 @@ PREVIEW_MAX_LINES = 100
 PREVIEW_MAX_BYTES = 4 * 1024
 
 TOOL_OUTPUT_TEMP_ROOT = Path(tempfile.gettempdir()) / "alpaca_assist_tool_outputs"
+_SAVED_PATH_RE = re.compile(r"^Full output saved to: (.+)$", re.MULTILINE)
 
 
 def _sanitize_for_filename(value: str) -> str:
@@ -110,6 +112,29 @@ def gate_tool_output(
         "This file is temporary and will be deleted when this tab is closed.]"
     )
     return f"{notice}\n\n{preview}"
+
+
+def read_gated_tool_output(gated_text: str, tab_id: str) -> str:
+    """Read the full result referenced by a gate placeholder.
+
+    The path is accepted only when it points inside this tab's output
+    directory. This keeps the JS bridge and Pack RPC from becoming arbitrary
+    local-file readers if a model emits a lookalike placeholder.
+    """
+    if not isinstance(gated_text, str) or "[Output truncated:" not in gated_text:
+        raise ValueError("Tool result is not a gated output")
+    match = _SAVED_PATH_RE.search(gated_text)
+    if match is None:
+        raise ValueError("Gated output has no saved file")
+
+    tab_dir = (TOOL_OUTPUT_TEMP_ROOT / _sanitize_for_filename(tab_id)).resolve()
+    file_path = Path(match.group(1)).resolve()
+    if file_path.parent != tab_dir:
+        raise ValueError("Gated output file does not belong to this tab")
+    try:
+        return file_path.read_text(encoding="utf-8")
+    except OSError as exc:
+        raise ValueError("Gated output file is no longer available") from exc
 
 
 def gate_tool_call_arguments(

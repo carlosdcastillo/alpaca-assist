@@ -110,6 +110,10 @@ class PythonAPI {
     return this.call("get_video_chunk", tabId, locator, offset);
   }
 
+  async get_gated_tool_output(tabId, gatedText) {
+    return this.call("get_gated_tool_output", tabId, gatedText);
+  }
+
   async stop_streaming(tabId) {
     return this.call("stop_streaming", tabId);
   }
