@@ -300,6 +300,18 @@ class TestMakeDispatcher:
         tab.stop_streaming.assert_called_once()
         assert result == {"success": True}
 
+    def test_set_model_updates_tab_preferences_and_persists(self) -> None:
+        tab = self._tab()
+        tab.preferences = {"model": "old-model"}
+        core = self._core()
+        dispatch = make_dispatcher(tab, PackDaemonAdapter(), resumed=False, core=core)
+
+        result = dispatch("set_model", {"model": "new-model"})
+
+        assert result == {"success": True}
+        assert tab.preferences["model"] == "new-model"
+        core.save_preferences.assert_called_once_with()
+
     def test_mutating_methods_dispatch_to_real_tab_methods(self) -> None:
         tab = self._tab()
         dispatch = make_dispatcher(tab, PackDaemonAdapter(), resumed=False, core=self._core())

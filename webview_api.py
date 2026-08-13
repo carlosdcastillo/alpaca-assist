@@ -10,6 +10,7 @@ from typing import Any
 from typing import Optional
 from typing import TYPE_CHECKING
 
+from core.pack_tab import PackTab
 from utils import ContentUpdate
 
 if TYPE_CHECKING:
@@ -585,6 +586,10 @@ class WebViewAPI:
     def set_model(self, model: str) -> dict[str, Any]:
         """Set the selected model."""
         try:
+            active_tab_id = self._app.get_active_tab_id()
+            active_tab = self._app.core.tabs.get(active_tab_id)
+            if isinstance(active_tab, PackTab):
+                return active_tab.set_model(model)
             self._app.core.preferences["model"] = model
             self._app.core.save_preferences()
             return {"success": True}

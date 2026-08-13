@@ -7,7 +7,7 @@ process). Instead, PackTab independently implements exactly the surface
 every webview_api.py call site actually needs from a tab object, verified
 against the real code rather than assumed:
 
-    handle_user_message, stop_streaming, is_streaming, chat_state,
+    handle_user_message, stop_streaming, set_model, is_streaming, chat_state,
     title, conversation_id, get_serializable_data, load_from_data,
     cleanup_resources, compact_conversation, truncate_conversation,
     pop_conversation, _current_answer_index (raw attribute, read
@@ -408,6 +408,15 @@ class PackTab:
             self._transport.send_request("stop_streaming", {}, timeout=STOP_STREAMING_TIMEOUT)
         except PackTransportError as e:
             logger.warning(f"Pack tab {self.tab_id} stop_streaming failed: {e}")
+
+    def set_model(self, model: str) -> dict[str, Any]:
+        """Change and persist the model used by the remote ChatTab."""
+        self._ensure_connected(timeout=ATTACH_TIMEOUT)
+        return self._transport.send_request(
+            "set_model",
+            {"model": model},
+            timeout=MUTATE_TIMEOUT,
+        )
 
     def read_video_chunk(self, locator: str, offset: int) -> dict[str, Any]:
         """Fetch a bounded video chunk from the remote Pack daemon."""

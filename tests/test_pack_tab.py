@@ -152,6 +152,21 @@ class TestHandleUserMessage:
         assert "Pack tab offline" in app_core.api.on_error.call_args[0][1]
 
 
+class TestSetModel:
+    def test_sends_model_to_remote_daemon(self, pack_tab: PackTab) -> None:
+        transport = pack_tab._transport
+        transport.connected = True
+        transport.send_request.return_value = {"success": True}
+
+        result = pack_tab.set_model("new-model")
+
+        assert result == {"success": True}
+        transport.send_request.assert_called_once_with(
+            "set_model",
+            {"model": "new-model"},
+            timeout=mock.ANY,
+        )
+
 
 class TestMutatingMethods:
     def test_compact_conversation_mutates_then_resyncs(self, pack_tab: PackTab) -> None:

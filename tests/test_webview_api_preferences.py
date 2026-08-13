@@ -12,6 +12,7 @@ import os
 import platform
 import shutil
 import time
+from unittest.mock import MagicMock
 from unittest.mock import Mock
 
 import pytest
@@ -78,3 +79,17 @@ class TestSetModelPersistence:
         api.set_model("kimi-k2p7-code")
 
         assert core.preferences["model"] == "kimi-k2p7-code"
+
+    def test_set_model_routes_to_active_pack_tab(self, api, core) -> None:
+        from core.pack_tab import PackTab
+
+        pack_tab = MagicMock(spec=PackTab)
+        pack_tab.set_model.return_value = {"success": True}
+        core.tabs["pack-1"] = pack_tab
+        api._app.get_active_tab_id.return_value = "pack-1"
+
+        result = api.set_model("remote-model")
+
+        assert result == {"success": True}
+        pack_tab.set_model.assert_called_once_with("remote-model")
+        assert core.preferences.get("model") != "remote-model"

@@ -282,6 +282,10 @@ def make_dispatcher(
         if method == "stop_streaming":
             tab.stop_streaming()
             return {"success": True}
+        if method == "set_model":
+            tab.preferences["model"] = params["model"]
+            core.save_preferences()
+            return {"success": True}
         if method == "compact_conversation":
             return tab.compact_conversation()
         if method == "truncate_conversation":
