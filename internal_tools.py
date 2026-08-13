@@ -17,6 +17,7 @@ import sqlite3
 from typing import Any
 
 import image_tool_result
+import video_tool_result
 from database import CONVERSATIONS_DB
 from rg_wrapper import RipgrepError
 from rg_wrapper import RipgrepWrapper
@@ -406,6 +407,40 @@ def view_image(arguments: dict[str, Any]) -> dict[str, Any]:
         return _ok(image_tool_result.encode_image_result(mime_type, b64_data, description))
     except Exception as e:
         return _err(f"Error loading image: {e}")
+
+
+def view_video(arguments: dict[str, Any]) -> dict[str, Any]:
+    """Expose a generated video to the UI without putting its bytes in context.
+
+    The returned marker contains metadata and an encoded local path only. Pack
+    tabs fetch the actual file from their remote daemon in bounded chunks when
+    the user opens it.
+    """
+    try:
+        filepath = _get_filepath(arguments)
+    except ValueError as e:
+        return _err(str(e))
+    tramp, _tramp_error = _get_tramp()
+    if tramp and tramp.is_tramp_path(filepath):
+        return _err(
+            "Error: view_video does not support remote (TRAMP) paths; use a "
+            "path local to the active tab's host.",
+        )
+    try:
+        mime_type, size = video_tool_result.inspect_video(filepath)
+        description = f"Loaded video '{filepath}' ({size:,} bytes as {mime_type})."
+        return _ok(
+            video_tool_result.encode_video_result(
+                mime_type,
+                filepath,
+                size,
+                description,
+            ),
+        )
+    except ValueError as e:
+        return _err(f"Error: {e}")
+    except Exception as e:
+        return _err(f"Error loading video: {e}")
 
 
 def write_file(arguments: dict[str, Any]) -> dict[str, Any]:
@@ -1071,6 +1106,7 @@ _HANDLERS: dict[str, Any] = {
     "read_file": read_file,
     "read_file_range": read_file_range,
     "view_image": view_image,
+    "view_video": view_video,
     "write_file": write_file,
     "modify_file": modify_file,
     "search_files_for_text": search_files_for_text,
@@ -1190,6 +1226,28 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
                     "file_path": {
                         "type": "string",
                         "description": "Local path to the image file",
+                    },
+                },
+                "required": ["file_path"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "internal_view_video",
+            "description": (
+                "Show a generated MP4, WebM, or Ogg video file to the user. Use "
+                "this after recording a feature demonstration. The video stays "
+                "out of model context and is transferred to the UI only for "
+                "playback. Local paths only."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "file_path": {
+                        "type": "string",
+                        "description": "Local path to the generated video file",
                     },
                 },
                 "required": ["file_path"],

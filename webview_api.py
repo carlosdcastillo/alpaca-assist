@@ -908,6 +908,23 @@ class WebViewAPI:
             logger.error(f"Error attaching image: {e}")
             return {"success": False, "error": str(e)}
 
+    def get_video_chunk(self, tab_id: str, locator: str, offset: int = 0) -> dict[str, Any]:
+        """Return one bounded video chunk without storing bytes in chat state."""
+        try:
+            tab = self._app.core.tabs.get(tab_id)
+            if tab is None:
+                return {"success": False, "error": "Tab not found"}
+            if hasattr(tab, "read_video_chunk"):
+                chunk = tab.read_video_chunk(locator, offset)
+            else:
+                from video_tool_result import read_video_chunk
+
+                chunk = read_video_chunk(locator, offset)
+            return {"success": True, **chunk}
+        except Exception as e:
+            logger.warning(f"Could not load video chunk for tab {tab_id}: {e}")
+            return {"success": False, "error": str(e)}
+
     def get_agent_skills_config(self) -> dict[str, Any]:
         """Return agent skills configuration and discovered skills list."""
         try:

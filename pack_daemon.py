@@ -35,6 +35,7 @@ from typing import Any
 from typing import Callable
 
 from core import pack_protocol
+from video_tool_result import read_video_chunk
 
 logger = logging.getLogger("pack_daemon")
 
@@ -276,6 +277,8 @@ def make_dispatcher(
         if method == "send_message":
             tab.handle_user_message(params.get("message", ""), params.get("images", []))
             return {"answer_index": getattr(tab, "_current_answer_index", 0)}
+        if method == "read_video_chunk":
+            return read_video_chunk(params["locator"], params.get("offset", 0))
         if method == "stop_streaming":
             tab.stop_streaming()
             return {"success": True}

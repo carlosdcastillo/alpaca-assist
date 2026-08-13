@@ -308,6 +308,21 @@ class TestSessionLostRecreate:
         assert pack_tab._pending_recreate_state is None
         assert pack_tab.chat_state.to_dict()["questions"] == ["Q"]
 
+    def test_read_video_chunk_is_proxied_to_remote_daemon(self, pack_tab: PackTab) -> None:
+        pack_tab._transport.send_request.return_value = {
+            "data": "YWJj",
+            "done": True,
+        }
+
+        result = pack_tab.read_video_chunk("locator", 12)
+
+        assert result["done"] is True
+        pack_tab._transport.send_request.assert_called_once_with(
+            "read_video_chunk",
+            {"locator": "locator", "offset": 12},
+            timeout=mock.ANY,
+        )
+
     def test_resolve_session_lost_recreate_failure_marks_offline(
         self,
         pack_tab: PackTab,

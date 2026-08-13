@@ -380,6 +380,36 @@ describe("ChatDisplay", () => {
       expect(bufferData.lastRenderLength).toBe(11);
     });
 
+    it("should replace a same-answer video reference with a player", async () => {
+      const parsed = {
+        mimeType: "video/webm",
+        locator: "demo",
+        size: 10,
+        description: "demo",
+      };
+      window.app = { currentTabId: "tab-1" };
+      window.VideoResultUtils = {
+        parse: jest.fn().mockReturnValue(parsed),
+        load: jest.fn().mockResolvedValue("blob:demo"),
+        clear: jest.fn(),
+      };
+      chatDisplay.registerToolResult(0, "video-1", "video marker");
+      const segment = document.createElement("div");
+      segment.innerHTML =
+        '<a href="alpaca://video/video-1">Feature demonstration</a>';
+      container.appendChild(segment);
+
+      chatDisplay._hydrateInlineVideoRefs(segment, 0);
+      await Promise.resolve();
+
+      const video = segment.querySelector("video");
+      expect(video).not.toBeNull();
+      expect(video.src).toBe("blob:demo");
+      expect(video.controls).toBe(true);
+      expect(segment.textContent).toContain("Feature demonstration");
+      expect(window.VideoResultUtils.load).toHaveBeenCalledWith("tab-1", parsed);
+    });
+
     it("should copy only the selected text as Markdown", async () => {
       chatDisplay.appendToAnswerBuffer(0, "Before bold text after", true);
       const segment = container.querySelector(".answer-segment");

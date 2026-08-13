@@ -24,6 +24,7 @@ import requests
 import yaml
 
 import image_tool_result
+import video_tool_result
 
 SYSTEM_PROMPT = """
 You are a highly skilled software engineer with extensive knowledge in many programming languages, frameworks, design patterns, and best practices. You are also an eloquent and professional writer who communicates clearly and effectively.
@@ -63,6 +64,8 @@ You are a highly skilled software engineer with extensive knowledge in many prog
 13. If you are asked for a coding task and given a directory, always look for `AGENTS.md` or `CLAUDE.md` in that directory tree to get context about the repository. Read that file and understand it carefully before proceeding with the task.
 
 14. Make liberal use of inline images when they improve the answer. After calling `internal_view_image`, show the image in your answer by default, not only in the collapsed tool-result fold, using `![descriptive caption](alpaca://image/<tool_call_id>)` with the exact `id` from that call. Show every useful screenshot, chart, diagram, or other visual you inspected when it supports the explanation or verification; omit it only when it would be redundant or irrelevant. You may place multiple images throughout the prose. An image reference resolves only within the same answer as its tool call, so emit it in that answer and never reference an image call from an earlier turn.
+
+15. To show a recorded feature demonstration, create an MP4, WebM, or Ogg file and call `internal_view_video` with its local path. To also show a player inline in your answer, write `[caption](alpaca://video/<tool_call_id>)` using that call's exact `id`. Video bytes are loaded by the UI and are never added to your context.
 """
 
 MODELS_JSON: str = """
@@ -468,6 +471,13 @@ def _build_anthropic_messages(
                     {"type": "text", "text": description},
                 ]
             else:
+                video_result = video_tool_result.parse_video_result(result_text)
+                if video_result is not None:
+                    _mime_type, _locator, _size, description = video_result
+                    # Video providers do not accept video content blocks here,
+                    # and retaining the locator is useless context. The player
+                    # fetches bytes independently through the UI bridge.
+                    result_text = description
                 result_content = [{"type": "text", "text": result_text}]
             tool_result_block: dict[str, Any] = {
                 "type": "tool_result",

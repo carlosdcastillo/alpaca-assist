@@ -11,9 +11,11 @@ either doesn't slip through silently.
 from __future__ import annotations
 
 import base64
+import json
 
 from anthropic_ollama_server import _build_anthropic_messages
 from image_tool_result import encode_image_result
+from video_tool_result import encode_video_result
 
 
 class TestToolUseCall:
@@ -109,6 +111,19 @@ class TestToolResultWithImage:
         ]
         result, _errors = _build_anthropic_messages(messages)
         assert result[0]["content"][0]["cache_control"] == {"type": "ephemeral"}
+
+
+class TestToolResultWithVideo:
+    def test_sends_description_not_locator_or_video_bytes_to_model(self) -> None:
+        encoded = encode_video_result("video/webm", "/tmp/demo.webm", 1234, "demo ready")
+        stored = '{"content": [{"type": "text", "text": ' + json.dumps(encoded) + "}]}"
+        messages = [{"role": "tool_result", "id": "v1", "content": stored}]
+
+        result, _errors = _build_anthropic_messages(messages)
+
+        content = result[0]["content"][0]["content"]
+        assert content == [{"type": "text", "text": "demo ready"}]
+        assert "ALPACA_VIDEO_RESULT" not in str(content)
 
 
 class TestUserWithImages:

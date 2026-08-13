@@ -662,6 +662,24 @@ html, body {
     box-shadow: 0 8px 24px rgb(0 0 0 / 18%);
 }
 
+.inline-video-result {
+    margin: 12px 0;
+    color: var(--text-secondary);
+    font-size: 13px;
+}
+
+.inline-video-result video {
+    display: block;
+    width: 100%;
+    max-height: 70vh;
+    border-radius: 6px;
+    background: #000;
+}
+
+.inline-video-caption {
+    margin-top: 6px;
+}
+
 .message-content p {
     margin-bottom: 20px;
     margin-top: 0;

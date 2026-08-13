@@ -44,6 +44,7 @@ logger = logging.getLogger(__name__)
 ATTACH_TIMEOUT = 15.0
 MUTATE_TIMEOUT = 15.0
 SEND_MESSAGE_TIMEOUT = 30.0
+VIDEO_CHUNK_TIMEOUT = 30.0
 STOP_STREAMING_TIMEOUT = 10.0
 FOLD_RENDER_TIMEOUT = 2.0
 
@@ -407,6 +408,15 @@ class PackTab:
             self._transport.send_request("stop_streaming", {}, timeout=STOP_STREAMING_TIMEOUT)
         except PackTransportError as e:
             logger.warning(f"Pack tab {self.tab_id} stop_streaming failed: {e}")
+
+    def read_video_chunk(self, locator: str, offset: int) -> dict[str, Any]:
+        """Fetch a bounded video chunk from the remote Pack daemon."""
+        self._ensure_connected(timeout=ATTACH_TIMEOUT)
+        return self._transport.send_request(
+            "read_video_chunk",
+            {"locator": locator, "offset": offset},
+            timeout=VIDEO_CHUNK_TIMEOUT,
+        )
 
     def compact_conversation(self) -> dict[str, Any]:
         return self._mutate("compact_conversation")

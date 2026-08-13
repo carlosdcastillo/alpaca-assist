@@ -16,6 +16,7 @@ import pytest
 
 import image_tool_result
 import internal_tools
+import video_tool_result
 from internal_tools import call_tool
 from internal_tools import get_time
 from internal_tools import list_files
@@ -63,6 +64,7 @@ class TestToolSchemas:
         "internal_read_file",
         "internal_read_file_range",
         "internal_view_image",
+        "internal_view_video",
         "internal_write_file",
         "internal_modify_file",
         "internal_search_files_for_text",
@@ -73,8 +75,8 @@ class TestToolSchemas:
         "internal_dump_conversations",
     }
 
-    def test_exactly_thirteen_schemas(self) -> None:
-        assert len(TOOL_SCHEMAS) == 13
+    def test_exactly_fourteen_schemas(self) -> None:
+        assert len(TOOL_SCHEMAS) == 14
 
     def test_schema_names_match_expected(self) -> None:
         names = {s["function"]["name"] for s in TOOL_SCHEMAS}
@@ -504,6 +506,36 @@ class TestViewImage:
         assert fitted is not None
         _encoded, _mime, final_size = fitted
         assert final_size == (50, 50)
+
+
+class TestViewVideo:
+    def test_returns_metadata_reference_without_video_bytes(self, tmp_path: Path) -> None:
+        video = tmp_path / "demo.webm"
+        video.write_bytes(b"\x1aE\xdf\xa3" + b"video payload")
+
+        result = internal_tools.view_video({"file_path": str(video)})
+
+        assert _ok(result)
+        text = _text(result)
+        parsed = video_tool_result.parse_video_result(text)
+        assert parsed is not None
+        mime_type, locator, size, description = parsed
+        assert mime_type == "video/webm"
+        assert size == video.stat().st_size
+        assert "video payload" not in text
+        assert "Loaded video" in description
+        chunk = video_tool_result.read_video_chunk(locator, 0)
+        assert chunk["done"] is True
+        assert chunk["size"] == size
+
+    def test_rejects_unknown_container(self, tmp_path: Path) -> None:
+        video = tmp_path / "demo.mp4"
+        video.write_bytes(b"not really a video")
+
+        result = internal_tools.view_video({"file_path": str(video)})
+
+        assert result["isError"] is True
+        assert "Unsupported video format" in _text(result)
 
 
 # ---------------------------------------------------------------------------

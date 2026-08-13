@@ -106,6 +106,10 @@ class PythonAPI {
     return this.call("attach_image");
   }
 
+  async get_video_chunk(tabId, locator, offset) {
+    return this.call("get_video_chunk", tabId, locator, offset);
+  }
+
   async stop_streaming(tabId) {
     return this.call("stop_streaming", tabId);
   }

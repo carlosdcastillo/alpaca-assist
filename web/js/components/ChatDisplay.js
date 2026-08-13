@@ -23,9 +23,8 @@ class ChatDisplay {
     this.injectedFolds = new Map();
 
     // Map answer_index -> Map(tool_call_id -> raw tool_result content), so
-    // `alpaca://image/<tool_call_id>` refs in that same answer's own text
-    // can resolve to the actual image (see registerToolResult /
-    // _resolveInlineImageRefs). Scoped per answer_index deliberately —
+    // same-answer alpaca:// image/video refs can resolve to their media.
+    // Scoped per answer_index deliberately —
     // tool-call ids are model-assigned free text, only guaranteed unique
     // within the answer that generated them.
     this.answerToolResults = new Map();
@@ -122,7 +121,8 @@ class ChatDisplay {
       if (
         data.attrName === "href" &&
         typeof data.attrValue === "string" &&
-        data.attrValue.startsWith("alpaca://conv/")
+        (data.attrValue.startsWith("alpaca://conv/") ||
+          data.attrValue.startsWith("alpaca://video/"))
       ) {
         data.forceKeepAttr = true;
       }
@@ -642,6 +642,7 @@ class ChatDisplay {
       : this._closeOpenFences(withResolvedImages);
 
     this._renderMarkdown(answerElement, processedText);
+    this._hydrateInlineVideoRefs(answerElement, answerIndex);
 
     bufferData.lastRenderLength = buffer.length;
     // Folds are siblings of the text segments in answerWrapper and are unaffected.
@@ -692,6 +693,51 @@ class ChatDisplay {
       if (!parsed) return match;
       return `data:${parsed.mimeType};base64,${parsed.base64Data}`;
     });
+  }
+
+  /** Replace same-answer alpaca://video links with an asynchronously loaded player. */
+  _hydrateInlineVideoRefs(element, answerIndex) {
+    const results = this.answerToolResults.get(answerIndex);
+    for (const link of element.querySelectorAll("a")) {
+      const href = link.getAttribute("href") || "";
+      if (!href.startsWith("alpaca://video/")) continue;
+      const id = href.slice("alpaca://video/".length);
+      const parsed = window.VideoResultUtils?.parse(results?.get(id));
+      if (!parsed) continue;
+
+      const wrapper = document.createElement("div");
+      wrapper.className = "inline-video-result";
+      wrapper.contentEditable = "false";
+      wrapper.textContent = "Loading video…";
+      link.replaceWith(wrapper);
+      const tabId = window.app?.currentTabId;
+      if (!tabId) continue;
+      window.VideoResultUtils.load(tabId, parsed)
+        .then((url) => {
+          if (!wrapper.isConnected) return;
+          wrapper.textContent = "";
+          const video = document.createElement("video");
+          video.controls = true;
+          video.preload = "metadata";
+          video.src = url;
+          video.setAttribute(
+            "aria-label",
+            link.textContent || "Generated video",
+          );
+          wrapper.appendChild(video);
+          if (link.textContent) {
+            const caption = document.createElement("div");
+            caption.className = "inline-video-caption";
+            caption.textContent = link.textContent;
+            wrapper.appendChild(caption);
+          }
+        })
+        .catch((error) => {
+          if (wrapper.isConnected && error.message !== "Video load cancelled") {
+            wrapper.textContent = `Could not load video: ${error.message}`;
+          }
+        });
+    }
   }
 
   /**
@@ -1145,6 +1191,7 @@ class ChatDisplay {
    * Clear all content
    */
   clear() {
+    window.VideoResultUtils?.clear();
     this.container.innerHTML = "";
     this.answerBuffers.clear();
     this.pendingFolds.clear();

@@ -16,6 +16,8 @@ class ToolFold extends HTMLElement {
     this._isPlainText = false;
     this._isImage = false;
     this._imageResult = null;
+    this._isVideo = false;
+    this._videoResult = null;
   }
 
   /**
@@ -126,6 +128,8 @@ class ToolFold extends HTMLElement {
   _highlightBody() {
     this._isImage = false;
     this._imageResult = null;
+    this._isVideo = false;
+    this._videoResult = null;
 
     if (!this._bodyText) {
       this._highlightedBody = "";
@@ -141,6 +145,12 @@ class ToolFold extends HTMLElement {
       if (imageResult) {
         this._isImage = true;
         this._imageResult = imageResult;
+        return;
+      }
+      const videoResult = window.VideoResultUtils?.parse(this._bodyText);
+      if (videoResult) {
+        this._isVideo = true;
+        this._videoResult = videoResult;
         return;
       }
       // Try to extract plain text from MCP-style JSON before deciding how to display.
@@ -341,6 +351,20 @@ class ToolFold extends HTMLElement {
                     font-size: 12px;
                     color: var(--text-secondary, #9d9d9d);
                 }
+
+                .video-result video {
+                    display: block;
+                    width: 100%;
+                    max-height: 70vh;
+                    border-radius: 4px;
+                    background: #000;
+                }
+
+                .video-status {
+                    color: var(--text-secondary, #9d9d9d);
+                    font-family: var(--font-mono, 'Consolas', monospace);
+                    font-size: 12px;
+                }
             </style>
             <div class="fold-header">
                 <span class="fold-icon">${type === "call" ? "🔧" : "📦"}</span>
@@ -396,6 +420,41 @@ class ToolFold extends HTMLElement {
         return;
       }
       // Fell through validation — treat as plain text below instead.
+    }
+
+    if (this._isVideo && this._videoResult) {
+      const result = this._videoResult;
+      bodyDiv.innerHTML = '<div class="video-status">Loading video…</div>';
+      const tabId = window.app?.currentTabId;
+      if (!tabId) {
+        bodyDiv.textContent = "Video is unavailable because no tab is active.";
+        return;
+      }
+      window.VideoResultUtils.load(tabId, result)
+        .then((url) => {
+          if (!this.isConnected) return;
+          bodyDiv.innerHTML = "";
+          const wrapper = document.createElement("div");
+          wrapper.className = "video-result";
+          const video = document.createElement("video");
+          video.controls = true;
+          video.preload = "metadata";
+          video.src = url;
+          wrapper.appendChild(video);
+          if (result.description) {
+            const caption = document.createElement("div");
+            caption.className = "image-caption";
+            caption.textContent = result.description;
+            wrapper.appendChild(caption);
+          }
+          bodyDiv.appendChild(wrapper);
+        })
+        .catch((error) => {
+          if (this.isConnected && error.message !== "Video load cancelled") {
+            bodyDiv.textContent = `Could not load video: ${error.message}`;
+          }
+        });
+      return;
     }
 
     if (!this._highlightedBody) {
