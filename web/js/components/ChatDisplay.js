@@ -14,7 +14,7 @@ class ChatDisplay {
       throw new Error(`ChatDisplay: Container #${containerId} not found`);
     }
 
-    // Map answer_index -> { buffer: string, element: HTMLElement, foldContainer: HTMLElement }
+    // Map answer_index -> the current render segment.
     this.answerBuffers = new Map();
 
     // Store pending fold data
@@ -423,7 +423,12 @@ class ChatDisplay {
       const answerHeader = document.createElement("div");
       answerHeader.className = "answer-header";
       answerHeader.contentEditable = "false";
-      answerHeader.innerHTML = '<span class="answer-role">Assistant</span>';
+
+      const answerRole = document.createElement("span");
+      answerRole.className = "answer-role";
+      answerRole.textContent = "Assistant";
+
+      answerHeader.appendChild(answerRole);
 
       // First text segment — more segments are created dynamically after each
       // result fold so folds and text interleave in the natural narrative order.
@@ -479,6 +484,113 @@ class ChatDisplay {
     if (shouldRender) {
       this._renderAnswerBuffer(answerIndex, bufferData, isFinal);
     }
+  }
+
+  /**
+   * Copy only the selection within the chat, converting its rendered HTML back
+   * to Markdown so links, emphasis, lists, and code remain portable.
+   */
+  async copySelectionAsMarkdown() {
+    const selection = window.getSelection();
+    if (!selection || selection.rangeCount === 0 || selection.isCollapsed)
+      return false;
+
+    const range = selection.getRangeAt(0);
+    const start =
+      range.startContainer.nodeType === Node.ELEMENT_NODE
+        ? range.startContainer
+        : range.startContainer.parentElement;
+    const end =
+      range.endContainer.nodeType === Node.ELEMENT_NODE
+        ? range.endContainer
+        : range.endContainer.parentElement;
+    if (!this.container.contains(start) || !this.container.contains(end))
+      return false;
+
+    const fragment = range.cloneContents();
+    let markdown = Array.from(fragment.childNodes)
+      .map((node) => this._selectionNodeToMarkdown(node))
+      .join("")
+      .trim();
+
+    // A range wholly inside one text node does not clone its inline ancestors.
+    // Restore those wrappers up to the answer segment.
+    if (range.commonAncestorContainer.nodeType === Node.TEXT_NODE) {
+      let ancestor = range.commonAncestorContainer.parentElement;
+      while (ancestor && ancestor !== this.container) {
+        if (ancestor.matches("strong, b")) markdown = `**${markdown}**`;
+        else if (ancestor.matches("em, i")) markdown = `*${markdown}*`;
+        else if (ancestor.matches("del, s")) markdown = `~~${markdown}~~`;
+        else if (ancestor.matches("code") && !ancestor.closest("pre"))
+          markdown = `\`${markdown}\``;
+        else if (ancestor.matches("a"))
+          markdown = `[${markdown}](${ancestor.getAttribute("href") || ""})`;
+        ancestor = ancestor.parentElement;
+      }
+    }
+
+    if (!markdown) return false;
+
+    return window.Helpers.copyToClipboard(markdown);
+  }
+
+  _selectionNodeToMarkdown(node) {
+    if (node.nodeType === Node.TEXT_NODE) return node.nodeValue;
+    if (!(node instanceof HTMLElement)) return "";
+
+    const children = () =>
+      Array.from(node.childNodes)
+        .map((child) => this._selectionNodeToMarkdown(child))
+        .join("");
+    const tag = node.tagName.toLowerCase();
+
+    if (
+      node.matches(".answer-header, .message-header, button, tool-fold")
+    )
+      return "";
+    if (node.classList.contains("code-block")) {
+      const code = node.querySelector("code")?.textContent || "";
+      const language = node.querySelector(".lang")?.textContent || "";
+      return `\n\n\`\`\`${language === "text" ? "" : language}\n${code}\n\`\`\`\n\n`;
+    }
+    if (tag === "strong" || tag === "b") return `**${children()}**`;
+    if (tag === "em" || tag === "i") return `*${children()}*`;
+    if (tag === "del" || tag === "s") return `~~${children()}~~`;
+    if (tag === "code" && node.parentElement?.tagName !== "PRE")
+      return `\`${node.textContent}\``;
+    if (tag === "a")
+      return `[${children()}](${node.getAttribute("href") || ""})`;
+    if (tag === "img")
+      return `![${node.getAttribute("alt") || ""}](${node.getAttribute("src") || ""})`;
+    if (tag === "br") return "\n";
+    if (tag === "hr") return "\n\n---\n\n";
+    if (/^h[1-6]$/.test(tag))
+      return `${"#".repeat(Number(tag[1]))} ${children().trim()}\n\n`;
+    if (tag === "p") return `${children().trim()}\n\n`;
+    if (tag === "blockquote")
+      return `${children()
+        .trim()
+        .split("\n")
+        .map((line) => `> ${line}`)
+        .join("\n")}\n\n`;
+    if (tag === "ul" || tag === "ol") {
+      return `${Array.from(node.children)
+        .filter((child) => child.tagName === "LI")
+        .map((child, index) => {
+          const marker = tag === "ol" ? `${index + 1}. ` : "- ";
+          return marker + this._selectionNodeToMarkdown(child).trim();
+        })
+        .join("\n")}\n\n`;
+    }
+    if (tag === "li") return children();
+    if (tag === "pre") {
+      const code = node.querySelector("code") || node;
+      const language = Array.from(code.classList || [])
+        .find((name) => name.startsWith("language-"))
+        ?.slice("language-".length);
+      return `\n\n\`\`\`${language || ""}\n${code.textContent}\n\`\`\`\n\n`;
+    }
+    return children();
   }
 
   /**

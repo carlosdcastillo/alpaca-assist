@@ -115,6 +115,12 @@ class AlpacaApp {
 
     // Menu item actions
     document.querySelectorAll(".menu-item").forEach((btn) => {
+      if (btn.dataset.action === "copy-markdown") {
+        btn.addEventListener("mousedown", (e) => {
+          // Preserve the chat selection while opening and clicking the menu.
+          e.preventDefault();
+        });
+      }
       btn.addEventListener("click", (e) => {
         const action = e.currentTarget.dataset.action;
         this._handleMenuAction(action);
@@ -320,6 +326,10 @@ class AlpacaApp {
         // Ctrl+Shift combos
         if (e.shiftKey) {
           switch (e.key) {
+            case "C":
+              e.preventDefault();
+              this._handleMenuAction("copy-markdown");
+              return;
             case "P":
               e.preventDefault();
               this._handleMenuAction("truncate");
@@ -607,6 +617,9 @@ class AlpacaApp {
       case "copy":
         this._copyText();
         break;
+      case "copy-markdown":
+        await this._copyTextAsMarkdown();
+        break;
       case "paste":
         this._pasteText();
         break;
@@ -726,6 +739,9 @@ class AlpacaApp {
     categories.forEach((category) => {
       const btn = category.querySelector(".menu-category-btn");
 
+      // Desktop menus should not steal an active chat/text selection.
+      btn.addEventListener("mousedown", (e) => e.preventDefault());
+
       // Click to toggle
       btn.addEventListener("click", (e) => {
         e.stopPropagation();
@@ -818,6 +834,25 @@ class AlpacaApp {
    */
   _copyText() {
     document.execCommand("copy");
+  }
+
+  /**
+   * Copy the current chat selection while preserving Markdown formatting.
+   */
+  async _copyTextAsMarkdown() {
+    const copied = await this.chatDisplay.copySelectionAsMarkdown();
+    const status = document.getElementById("status-text");
+    status.textContent = copied
+      ? "Copied selection as Markdown"
+      : "Select chat text to copy as Markdown";
+    setTimeout(() => {
+      if (
+        status.textContent === "Copied selection as Markdown" ||
+        status.textContent === "Select chat text to copy as Markdown"
+      ) {
+        status.textContent = "Ready";
+      }
+    }, 2000);
   }
 
   /**

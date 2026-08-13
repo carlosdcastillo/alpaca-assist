@@ -48,6 +48,9 @@ describe("ChatDisplay", () => {
     // Set up DOM
     document.body.innerHTML = '<div id="chat-container"></div>';
     container = document.getElementById("chat-container");
+    window.Helpers = {
+      copyToClipboard: jest.fn().mockResolvedValue(true),
+    };
 
     chatDisplay = new ChatDisplay("chat-container");
   });
@@ -215,6 +218,17 @@ describe("ChatDisplay", () => {
       expect(role.textContent).toBe("Assistant");
     });
 
+    it("should not put a Copy Markdown button on each answer", () => {
+      chatDisplay.appendContent({
+        type: "content",
+        content: "Hello world",
+        answer_index: 0,
+      });
+
+      const button = container.querySelector(".answer-copy-btn");
+      expect(button).toBeNull();
+    });
+
     it("should create answer segment", () => {
       chatDisplay.appendContent({
         type: "content",
@@ -331,6 +345,33 @@ describe("ChatDisplay", () => {
 
       const bufferData = chatDisplay.answerBuffers.get(0);
       expect(bufferData.lastRenderLength).toBe(11);
+    });
+
+    it("should copy only the selected text as Markdown", async () => {
+      chatDisplay.appendToAnswerBuffer(0, "Before bold text after", true);
+      const segment = container.querySelector(".answer-segment");
+      segment.innerHTML = "<p>Before <strong>bold text</strong> after</p>";
+
+      const selectedText = segment.querySelector("strong").firstChild;
+      const range = document.createRange();
+      range.selectNodeContents(selectedText);
+      window.getSelection().removeAllRanges();
+      window.getSelection().addRange(range);
+
+      const copied = await chatDisplay.copySelectionAsMarkdown();
+
+      expect(window.Helpers.copyToClipboard).toHaveBeenCalledWith("**bold text**");
+      expect(copied).toBe(true);
+    });
+
+    it("should not copy the whole answer when there is no selection", async () => {
+      chatDisplay.appendToAnswerBuffer(0, "Whole answer", true);
+      window.getSelection().removeAllRanges();
+
+      const copied = await chatDisplay.copySelectionAsMarkdown();
+
+      expect(window.Helpers.copyToClipboard).not.toHaveBeenCalled();
+      expect(copied).toBe(false);
     });
   });
 
