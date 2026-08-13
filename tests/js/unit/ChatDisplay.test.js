@@ -275,7 +275,6 @@ describe("ChatDisplay", () => {
           { left: "$$", right: "$$", display: true },
           { left: "\\[", right: "\\]", display: true },
           { left: "\\(", right: "\\)", display: false },
-          { left: "$", right: "$", display: false },
         ],
         throwOnError: false,
         strict: false,
@@ -338,6 +337,38 @@ describe("ChatDisplay", () => {
 
       expect(protectedText).toBe("ALPACA_MATH_TOKEN_0_END");
       expect(formulas.get(protectedText)).toBe(math);
+    });
+
+    it("should leave currency ranges as ordinary prose", () => {
+      const text = "Plans cost $50 to $99, or $50-$99, per month.";
+
+      expect(chatDisplay._protectMath(text)).toEqual({
+        protectedText: text,
+        formulas: new Map(),
+      });
+    });
+
+    it("should normalize single-dollar formulas to unambiguous delimiters", () => {
+      const { protectedText, formulas } = chatDisplay._protectMath(
+        "Energy is $E = mc^2$ and position is $x$.",
+      );
+
+      expect(protectedText).toBe(
+        "Energy is ALPACA_MATH_TOKEN_0_END and position is ALPACA_MATH_TOKEN_1_END.",
+      );
+      expect(Array.from(formulas.values())).toEqual([
+        "\\(E = mc^2\\)",
+        "\\(x\\)",
+      ]);
+    });
+
+    it("should leave bare dollar amounts as prose", () => {
+      const text = "The fee is $50$ before tax.";
+
+      expect(chatDisplay._protectMath(text)).toEqual({
+        protectedText: text,
+        formulas: new Map(),
+      });
     });
 
     it("should track last render length", () => {

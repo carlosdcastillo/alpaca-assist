@@ -152,7 +152,6 @@ class ChatDisplay {
         { left: "$$", right: "$$", display: true },
         { left: "\\[", right: "\\]", display: true },
         { left: "\\(", right: "\\)", display: false },
-        { left: "$", right: "$", display: false },
       ],
       throwOnError: false,
       strict: false,
@@ -239,7 +238,10 @@ class ChatDisplay {
   /**
    * Replace complete math expressions with inert text tokens before Marked can
    * insert <br> elements into multiline $$...$$ blocks or consume backslashes.
-   * Code spans and fenced code blocks are deliberately left untouched.
+   * Code spans and fenced code blocks are deliberately left untouched. The
+   * ambiguous $...$ form is normalized to \(...\) only when it looks like a
+   * complete formula, preventing currency prose such as "$50 to $99" from
+   * being consumed by KaTeX.
    */
   _protectMath(text) {
     const formulas = new Map();
@@ -248,11 +250,33 @@ class ChatDisplay {
       /(```[\s\S]*?```|~~~[\s\S]*?~~~|`+[^`]*`+)|(\$\$[\s\S]*?\$\$|\\\[[\s\S]*?\\\]|\\\([\s\S]*?\\\)|\$[^$\n]+?\$)/g;
     const protectedText = text.replace(pattern, (match, code, math) => {
       if (code || !math) return match;
+      if (math.startsWith("$") && !math.startsWith("$$")) {
+        const body = math.slice(1, -1);
+        if (!this._isInlineDollarMath(body)) return match;
+        math = `\\(${body}\\)`;
+      }
       const token = `ALPACA_MATH_TOKEN_${index++}_END`;
       formulas.set(token, math);
       return token;
     });
     return { protectedText, formulas };
+  }
+
+  /**
+   * Single-dollar math is common in model output but collides with currency.
+   * Require tight delimiters and reject the numeric/range shapes that occur in
+   * prices. Explicit \(...\) remains available for intentionally ambiguous
+   * formulas such as a lone number.
+   */
+  _isInlineDollarMath(body) {
+    if (!body || body !== body.trim()) return false;
+    if (/^\d[\d,]*(?:\.\d+)?$/.test(body)) return false;
+    if (/^\d[\d,.]*\s*(?:-|–|—|to)\s*$/i.test(body)) return false;
+
+    // Whitespace-only prose is more likely to be a pair of currency markers.
+    // Real spaced formulas normally contain an operator or a TeX command.
+    if (/\s/.test(body) && !/[\\^_{}=+*/<>≤≥≈]/.test(body)) return false;
+    return true;
   }
 
   _restoreMathTokens(element, formulas) {
