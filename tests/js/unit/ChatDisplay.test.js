@@ -23,6 +23,8 @@ global.hljs = {
 
 global.renderMathInElement = jest.fn();
 
+require("../../../web/js/utils/imageResult.js");
+
 // Load the module - this populates window.ChatDisplay
 require("../../../web/js/components/ChatDisplay.js");
 
@@ -403,6 +405,66 @@ describe("ChatDisplay", () => {
 
       expect(window.Helpers.copyToClipboard).not.toHaveBeenCalled();
       expect(copied).toBe(false);
+    });
+
+    it("resolves a same-answer alpaca image reference", () => {
+      const result =
+        "@@ALPACA_IMAGE_RESULT@@image/png@@ALPACA_FIELD@@QUJDRA==@@ALPACA_FIELD@@Preview";
+      chatDisplay.registerToolResult(0, "shot-1", result);
+
+      expect(
+        chatDisplay._resolveInlineImageRefs(
+          "![Preview](alpaca://image/shot-1)",
+          0,
+        ),
+      ).toBe("![Preview](data:image/png;base64,QUJDRA==)");
+    });
+
+    it("does not resolve image references across answers", () => {
+      const result =
+        "@@ALPACA_IMAGE_RESULT@@image/png@@ALPACA_FIELD@@QUJDRA==@@ALPACA_FIELD@@Preview";
+      chatDisplay.registerToolResult(0, "shot-1", result);
+
+      expect(
+        chatDisplay._resolveInlineImageRefs(
+          "![Preview](alpaca://image/shot-1)",
+          1,
+        ),
+      ).toBe("![Preview](alpaca://image/shot-1)");
+    });
+
+    it("re-renders an already-painted reference when its result arrives", () => {
+      chatDisplay.appendToAnswerBuffer(
+        0,
+        "![Preview](alpaca://image/late-shot)",
+        true,
+      );
+      marked.parse.mockClear();
+
+      chatDisplay.registerToolResult(
+        0,
+        "late-shot",
+        "@@ALPACA_IMAGE_RESULT@@image/jpeg@@ALPACA_FIELD@@QUJDRA==@@ALPACA_FIELD@@Late preview",
+      );
+
+      expect(marked.parse).toHaveBeenCalledWith(
+        "![Preview](data:image/jpeg;base64,QUJDRA==)",
+      );
+    });
+
+    it("leaves malformed or unsafe image results unresolved", () => {
+      chatDisplay.registerToolResult(
+        0,
+        "unsafe",
+        "@@ALPACA_IMAGE_RESULT@@image/svg+xml@@ALPACA_FIELD@@PHN2Zz4=@@ALPACA_FIELD@@Unsafe",
+      );
+
+      expect(
+        chatDisplay._resolveInlineImageRefs(
+          "![Unsafe](alpaca://image/unsafe)",
+          0,
+        ),
+      ).toBe("![Unsafe](alpaca://image/unsafe)");
     });
   });
 

@@ -649,6 +649,19 @@ html, body {
     border-radius: 4px;
 }
 
+.answer-segment img {
+    display: block;
+    max-width: 100%;
+    max-height: min(70vh, 720px);
+    width: auto;
+    height: auto;
+    margin: 14px auto 20px;
+    object-fit: contain;
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    box-shadow: 0 8px 24px rgb(0 0 0 / 18%);
+}
+
 .message-content p {
     margin-bottom: 20px;
     margin-top: 0;

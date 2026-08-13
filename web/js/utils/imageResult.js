@@ -10,6 +10,12 @@
 const ImageResultUtils = {
   SENTINEL: "@@ALPACA_IMAGE_RESULT@@",
   FIELD_SEP: "@@ALPACA_FIELD@@",
+  SAFE_MIME_TYPES: new Set([
+    "image/gif",
+    "image/jpeg",
+    "image/png",
+    "image/webp",
+  ]),
 
   /**
    * Mirrors Python's str.split(sep, 2): at most 3 parts, with any further
@@ -43,6 +49,19 @@ const ImageResultUtils = {
     const parts = this._splitMaxTwo(payload, this.FIELD_SEP);
     if (parts.length !== 3) return null;
     const [mimeType, base64Data, rawDescription] = parts;
+    if (!this.SAFE_MIME_TYPES.has(mimeType)) return null;
+    if (
+      !base64Data ||
+      base64Data.length % 4 !== 0 ||
+      !/^[A-Za-z0-9+/]+={0,2}$/.test(base64Data)
+    ) {
+      return null;
+    }
+    try {
+      atob(base64Data);
+    } catch (_error) {
+      return null;
+    }
     const quoteIdx = rawDescription.indexOf('"');
     const description =
       quoteIdx !== -1 ? rawDescription.slice(0, quoteIdx) : rawDescription;

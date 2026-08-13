@@ -662,6 +662,17 @@ class ChatDisplay {
       this.answerToolResults.set(answerIndex, map);
     }
     map.set(toolCallId, content);
+
+    // Pack notifications and local UI updates preserve order, but rendering
+    // is deliberately tolerant of a late result. If markdown containing the
+    // reference was already painted, resolve it as soon as its image arrives.
+    const bufferData = this.answerBuffers.get(answerIndex);
+    if (
+      bufferData?.buffer.includes(`alpaca://image/${toolCallId}`) &&
+      window.ImageResultUtils?.parse(content)
+    ) {
+      this._renderAnswerBuffer(answerIndex, bufferData, false);
+    }
   }
 
   /**

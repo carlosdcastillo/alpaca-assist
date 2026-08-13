@@ -105,7 +105,10 @@ fold widgets.
   code blocks (copy buttons, language detection)
 - **Multi-tab chats**, including **pack tabs** that attach to remote sessions
 - **MCP tool execution** shown in collapsible tool-fold widgets; image tool
-  results render inline
+  results render in their folds and can be embedded in assistant Markdown
+  with `![caption](alpaca://image/<tool-call-id>)`. References are scoped to
+  their answer and work identically in local and Pack tabs, including replay
+  after switching tabs.
 - **Branching conversations** — a DAG model supporting edit, fork, and
   regenerate, with stable conversation IDs and internal conversation search
 - **Tool-output gating** — large tool results are byte-budgeted so context
