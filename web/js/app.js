@@ -128,71 +128,38 @@ class AlpacaApp {
       });
     });
 
-    // New-tab dropdowns: both the top-left toolbar "+ New Tab" button and the
-    // tab-strip split button (its plus and caret) open the same Local/Pack
-    // menu. Ctrl+N still creates a local tab directly for the fast path.
-    //
-    // Two sibling <button> elements (plus + caret) rather than one button with
-    // clickable inner <span>s: a <button> can't contain another <button>, and
-    // listeners on inner spans never fire for keyboard activation (Enter/Space
-    // dispatches a click whose target is the button itself and doesn't bubble
-    // down into children), so a span-only listener is unreachable by keyboard.
-    const newTabDropdowns = [];
-    const setupNewTabDropdown = (dropdown, triggers, menu) => {
-      if (!dropdown || !menu) return;
-      const close = () => {
-        dropdown.classList.remove("open");
-        triggers.forEach((b) => b && b.setAttribute("aria-expanded", "false"));
-      };
-      const toggle = () => {
-        const willOpen = !dropdown.classList.contains("open");
-        newTabDropdowns.forEach((d) => d.close()); // close any other open one
-        dropdown.classList.toggle("open", willOpen);
-        triggers.forEach(
-          (b) => b && b.setAttribute("aria-expanded", String(willOpen)),
-        );
-      };
-      triggers.forEach(
-        (btn) =>
-          btn &&
-          btn.addEventListener("click", (e) => {
-            e.stopPropagation();
-            toggle();
-          }),
-      );
-      menu.querySelectorAll(".new-tab-menu-item").forEach((item) => {
-        item.addEventListener("click", (e) => {
-          e.stopPropagation();
-          close();
-          this._handleMenuAction(item.dataset.action);
-        });
-      });
-      newTabDropdowns.push({ close });
+    // The toolbar New Tab button opens the Local/Pack menu. Ctrl+N still
+    // creates a local tab directly for the fast path.
+    const newTabDropdown = document.getElementById("toolbar-new-tab-dropdown");
+    const newTabButton = document.getElementById("toolbar-new-tab");
+    const newTabMenu = document.getElementById("toolbar-new-tab-menu");
+    const closeNewTabDropdown = () => {
+      newTabDropdown.classList.remove("open");
+      newTabButton.setAttribute("aria-expanded", "false");
     };
+    newTabButton.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const willOpen = !newTabDropdown.classList.contains("open");
+      newTabDropdown.classList.toggle("open", willOpen);
+      newTabButton.setAttribute("aria-expanded", String(willOpen));
+    });
+    newTabMenu.querySelectorAll(".new-tab-menu-item").forEach((item) => {
+      item.addEventListener("click", (e) => {
+        e.stopPropagation();
+        closeNewTabDropdown();
+        this._handleMenuAction(item.dataset.action);
+      });
+    });
 
-    setupNewTabDropdown(
-      document.getElementById("new-tab-dropdown"),
-      [
-        document.getElementById("new-tab-btn"),
-        document.getElementById("new-tab-caret-btn"),
-      ],
-      document.getElementById("new-tab-menu"),
-    );
-    setupNewTabDropdown(
-      document.getElementById("toolbar-new-tab-dropdown"),
-      [document.getElementById("toolbar-new-tab")],
-      document.getElementById("toolbar-new-tab-menu"),
-    );
-
-    // Close any open new-tab dropdown on outside-click or Escape.
+    // Close the new-tab dropdown on outside-click or Escape.
     document.addEventListener("click", (e) => {
-      if (!e.target.closest(".new-tab-dropdown, .toolbar-new-tab-dropdown")) {
-        newTabDropdowns.forEach((d) => d.close());
+      if (!e.target.closest(".toolbar-new-tab-dropdown")) {
+        closeNewTabDropdown();
       }
     });
     document.addEventListener("keydown", (e) => {
       if (e.key === "Escape") {
-        newTabDropdowns.forEach((d) => d.close());
+        closeNewTabDropdown();
       }
     });
 

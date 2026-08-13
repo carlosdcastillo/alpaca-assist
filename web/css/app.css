@@ -244,25 +244,46 @@ html, body {
     border-color: var(--accent-primary);
 }
 
-/* Tab Bar — same tone as the menu bar/toolbar above it, so the three read as
-   one chrome region with a single seam (this border) instead of three
-   separately-bordered strips. */
+/* The workspace keeps conversation navigation beside the active chat. */
+.workspace {
+    display: flex;
+    flex: 1;
+    min-height: 0;
+    overflow: hidden;
+}
+
 .tab-bar {
     display: flex;
-    align-items: center;
+    flex-direction: column;
+    align-items: stretch;
+    width: 232px;
+    flex: 0 0 232px;
     background: var(--bg-secondary);
-    border-bottom: 1px solid var(--border-color);
-    padding: 4px 8px;
-    gap: 4px;
+    border-right: 1px solid var(--border-color);
+    padding: 12px 10px 10px;
+    gap: 6px;
+    min-height: 0;
+}
+
+.tab-bar-label {
+    padding: 0 8px 6px;
+    color: var(--text-muted);
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    user-select: none;
 }
 
 .tabs-container {
     display: flex;
+    flex-direction: column;
     flex: 1;
-    gap: 2px;
-    overflow-x: auto;
-    scrollbar-width: none;          /* Firefox / WebView2 */
-    -ms-overflow-style: none;      /* IE / old Edge */
+    gap: 4px;
+    min-height: 0;
+    overflow-y: auto;
+    scrollbar-width: none;         /* Firefox / WebView2 */
+    -ms-overflow-style: none;       /* IE / old Edge */
 }
 
 .tabs-container::-webkit-scrollbar {
@@ -274,10 +295,10 @@ html, body {
     background: transparent;
     border: none;
     color: var(--text-secondary);
-    padding: 4px 6px;
+    padding: 3px 6px;
     cursor: pointer;
     border-radius: 4px;
-    font-size: 18px;
+    font-size: 13px;
     line-height: 1;
     flex-shrink: 0;
     user-select: none;
@@ -302,24 +323,23 @@ html, body {
     display: flex;
     align-items: center;
     gap: 8px;
-    padding: 6px 12px;
-    background: var(--bg-tertiary);
-    border: 1px solid var(--border-color);
-    border-radius: 4px 4px 0 0;
+    width: 100%;
+    padding: 9px 10px;
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: 6px;
     cursor: pointer;
     font-size: 13px;
-    max-width: 200px;
-    min-width: 140px;
+    min-width: 0;
     user-select: none;
-    transition: all 0.15s ease;
+    transition: background 0.15s ease, border-color 0.15s ease;
 }
 
 .tab.active {
-    background: var(--bg-primary);
-    border-bottom-color: var(--bg-primary);
-    border-top: 2px solid var(--accent-primary);
+    background: var(--bg-active);
+    border-color: var(--accent-secondary);
     font-weight: 600;
-    box-shadow: 0 -1px 0 var(--accent-primary), 0 6px 14px -10px rgba(0, 0, 0, 0.6);
+    box-shadow: inset 3px 0 0 var(--accent-primary);
 }
 
 .tab.active .tab-title {
@@ -385,33 +405,6 @@ html, body {
     color: white;
 }
 
-.new-tab-dropdown {
-    position: relative;
-    display: inline-flex;
-    align-items: stretch;
-}
-
-.new-tab-btn,
-.new-tab-caret-btn {
-    background: transparent;
-    border: none;
-    color: var(--text-secondary);
-    cursor: pointer;
-    border-radius: 4px;
-    line-height: 1;
-    display: inline-flex;
-    align-items: center;
-}
-
-.new-tab-btn {
-    padding: 4px 2px 4px 8px;
-    font-size: 16px;
-}
-
-.new-tab-caret-btn {
-    padding: 4px 6px 4px 2px;
-}
-
 .new-tab-caret {
     /* Font-independent triangle drawn with borders so it renders identically
        on every platform (the ▾ glyph was invisible in the Windows webview font). */
@@ -423,25 +416,6 @@ html, body {
     border-right: 4px solid transparent;
     border-top: 5px solid currentColor;
     opacity: 0.85;
-}
-
-.new-tab-btn:hover,
-.new-tab-caret-btn:hover {
-    background: var(--bg-hover);
-    color: var(--text-primary);
-}
-
-.new-tab-caret-btn:hover .new-tab-caret {
-    opacity: 1;
-}
-
-.new-tab-dropdown.open .new-tab-caret-btn {
-    background: var(--bg-hover);
-    color: var(--text-primary);
-}
-
-.new-tab-dropdown.open .new-tab-caret {
-    opacity: 1;
 }
 
 /* Sub-menu that appears below the New Tab button */
@@ -459,11 +433,7 @@ html, body {
     padding: 4px 0;
 }
 
-.new-tab-dropdown.open .new-tab-menu {
-    display: block;
-}
-
-/* The toolbar "+ New Tab" button opens the same Local/Pack menu. */
+/* The toolbar "+ New Tab" button opens the Local/Pack menu. */
 .toolbar-new-tab-dropdown {
     position: relative;
     display: inline-flex;
@@ -521,6 +491,7 @@ html, body {
     display: flex;
     flex-direction: column;
     flex: 1;
+    min-width: 0;
     overflow: hidden;
     position: relative;
     box-shadow: inset 0 6px 10px -8px rgba(0, 0, 0, 0.45);

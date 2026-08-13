@@ -12,7 +12,7 @@ class TabManager {
     // Scroll button references
     this.scrollLeftBtn = document.getElementById("tab-scroll-left");
     this.scrollRightBtn = document.getElementById("tab-scroll-right");
-    this._scrollStep = 150; // fallback pixels per click
+    this._scrollStep = 44; // fallback pixels per click
 
     this._setupScrollButtons();
     this._setupOverflowObserver();
@@ -391,12 +391,12 @@ class TabManager {
   _setupScrollButtons() {
     this.scrollLeftBtn.addEventListener("click", () => {
       const step = this._getScrollStep();
-      this.container.scrollBy({ left: -step, behavior: "smooth" });
+      this.container.scrollBy({ top: -step, behavior: "smooth" });
     });
 
     this.scrollRightBtn.addEventListener("click", () => {
       const step = this._getScrollStep();
-      this.container.scrollBy({ left: step, behavior: "smooth" });
+      this.container.scrollBy({ top: step, behavior: "smooth" });
     });
 
     // Update button enabled/disabled states as the user scrolls
@@ -406,14 +406,14 @@ class TabManager {
   }
 
   /**
-   * Return the number of pixels to scroll per click.  Tries to use one
-   * tab width; falls back to the fixed _scrollStep if no tabs exist yet.
+   * Return the number of pixels to scroll per click. Tries to use one tab
+   * height; falls back to the fixed _scrollStep if no tabs exist yet.
    */
   _getScrollStep() {
     const firstTab = this.container.querySelector(".tab");
     if (firstTab) {
-      // offsetWidth + gap (2px from CSS)
-      return firstTab.offsetWidth + 2;
+      // offsetHeight + gap (4px from CSS)
+      return firstTab.offsetHeight + 4;
     }
     return this._scrollStep;
   }
@@ -423,12 +423,12 @@ class TabManager {
    */
   _updateScrollButtonStates() {
     const el = this.container;
-    const atLeftEdge = el.scrollLeft <= 0;
+    const atStart = el.scrollTop <= 0;
     // Tolerance of 1px to handle floating-point rounding
-    const atRightEdge = el.scrollLeft + el.clientWidth >= el.scrollWidth - 1;
+    const atEnd = el.scrollTop + el.clientHeight >= el.scrollHeight - 1;
 
-    this.scrollLeftBtn.disabled = atLeftEdge;
-    this.scrollRightBtn.disabled = atRightEdge;
+    this.scrollLeftBtn.disabled = atStart;
+    this.scrollRightBtn.disabled = atEnd;
   }
 
   /**
@@ -453,7 +453,7 @@ class TabManager {
    */
   _checkOverflow() {
     const el = this.container;
-    const isOverflowing = el.scrollWidth > el.clientWidth;
+    const isOverflowing = el.scrollHeight > el.clientHeight;
 
     if (isOverflowing) {
       this.scrollLeftBtn.classList.remove("hidden");

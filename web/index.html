@@ -135,73 +135,50 @@
             </div>
         </div>
 
-        <!-- Tab Bar -->
-        <div class="tab-bar" id="tab-bar">
-            <button class="tab-scroll-btn tab-scroll-left hidden" id="tab-scroll-left" title="Scroll tabs left">‹</button>
-            <div class="tabs-container" id="tabs-container"></div>
-            <button class="tab-scroll-btn tab-scroll-right hidden" id="tab-scroll-right" title="Scroll tabs right">›</button>
-            <div class="new-tab-dropdown" id="new-tab-dropdown">
-                <button class="new-tab-btn" id="new-tab-btn" title="New Tab (Ctrl+N)">
-                    <span class="new-tab-plus">+</span>
-                </button>
-                <button
-                    class="new-tab-caret-btn"
-                    id="new-tab-caret-btn"
-                    title="More options"
-                    aria-haspopup="true"
-                    aria-expanded="false"
-                    aria-label="More new-tab options"
-                >
-                    <span class="new-tab-caret"></span>
-                </button>
-                <div class="new-tab-menu" id="new-tab-menu" role="menu">
-                    <button class="new-tab-menu-item" data-action="new-tab" role="menuitem">
-                        <span class="new-tab-menu-icon">🖥</span>
-                        <span>Local Tab</span>
-                        <span class="new-tab-menu-shortcut">Ctrl+N</span>
-                    </button>
-                    <button class="new-tab-menu-item" data-action="new-pack-tab" role="menuitem">
-                        <span class="new-tab-menu-icon">📦</span>
-                        <span>Pack Tab</span>
-                    </button>
+        <div class="workspace">
+            <!-- Conversation tabs -->
+            <aside class="tab-bar" id="tab-bar" aria-label="Conversations">
+                <div class="tab-bar-label">Conversations</div>
+                <button class="tab-scroll-btn tab-scroll-left hidden" id="tab-scroll-left" title="Scroll tabs up" aria-label="Scroll tabs up">↑</button>
+                <div class="tabs-container" id="tabs-container"></div>
+                <button class="tab-scroll-btn tab-scroll-right hidden" id="tab-scroll-right" title="Scroll tabs down" aria-label="Scroll tabs down">↓</button>
+            </aside>
+
+            <!-- Main Content Area -->
+            <div class="main-content">
+                <!-- Find Bar (floats over chat area) -->
+                <div class="find-bar hidden" id="find-bar">
+                    <span class="find-label">Find:</span>
+                    <input type="text" id="find-input" placeholder="Search in chat..." autocomplete="off" spellcheck="false" />
+                    <span class="find-count" id="find-count"></span>
+                    <button class="find-btn" id="find-prev" title="Previous match (Shift+Enter)">↑</button>
+                    <button class="find-btn" id="find-next" title="Next match (Enter)">↓</button>
+                    <button class="find-close" id="find-close" title="Close (Esc)">×</button>
                 </div>
-            </div>
-        </div>
 
-        <!-- Main Content Area -->
-        <div class="main-content">
-            <!-- Find Bar (floats over chat area) -->
-            <div class="find-bar hidden" id="find-bar">
-                <span class="find-label">Find:</span>
-                <input type="text" id="find-input" placeholder="Search in chat..." autocomplete="off" spellcheck="false" />
-                <span class="find-count" id="find-count"></span>
-                <button class="find-btn" id="find-prev" title="Previous match (Shift+Enter)">↑</button>
-                <button class="find-btn" id="find-next" title="Next match (Enter)">↓</button>
-                <button class="find-close" id="find-close" title="Close (Esc)">×</button>
-            </div>
+                <!-- Chat Display -->
+                <div class="chat-container" id="chat-container"></div>
 
-            <!-- Chat Display -->
-            <div class="chat-container" id="chat-container"></div>
+                <!-- Resizable Splitter -->
+                <div class="splitter" id="splitter"></div>
 
-            <!-- Resizable Splitter -->
-            <div class="splitter" id="splitter"></div>
-
-            <!-- Input Area -->
-            <div class="input-area hidden" id="input-area">
-                <!-- Image Attachment Header Strip -->
-                <div class="image-attachment-strip hidden" id="image-attachment-strip">
-                    <span id="image-count-label"></span>
-                    <button id="clear-images-btn" title="Clear attached images">✕ Clear</button>
-                </div>
-                <div class="input-toolbar">
-                    <div class="input-actions">
-                        <button id="attach-btn" title="Attach images">📎</button>
-                        <button id="stop-btn" title="Stop streaming" disabled>⏹</button>
-                        <button id="send-btn" title="Send (Ctrl+Enter)">➤</button>
+                <!-- Input Area -->
+                <div class="input-area hidden" id="input-area">
+                    <!-- Image Attachment Header Strip -->
+                    <div class="image-attachment-strip hidden" id="image-attachment-strip">
+                        <span id="image-count-label"></span>
+                        <button id="clear-images-btn" title="Clear attached images">✕ Clear</button>
                     </div>
+                    <div class="input-toolbar">
+                        <div class="input-actions">
+                            <button id="attach-btn" title="Attach images">📎</button>
+                            <button id="stop-btn" title="Stop streaming" disabled>⏹</button>
+                            <button id="send-btn" title="Send (Ctrl+Enter)">➤</button>
+                        </div>
+                    </div>
+                    <div id="markdown-input-container"></div>
+                    <div class="input-status" id="input-status"></div>
                 </div>
-                <div id="markdown-input-container"></div>
-                <div class="input-status" id="input-status"></div>
             </div>
         </div>
 

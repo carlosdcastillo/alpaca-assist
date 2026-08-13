@@ -513,4 +513,38 @@ describe("TabManager", () => {
       expect(button.classList.contains("active")).toBe(true);
     });
   });
+
+  describe("vertical overflow", () => {
+    it("scroll buttons move the tab list vertically", () => {
+      container.scrollBy = jest.fn();
+
+      document.getElementById("tab-scroll-right").click();
+      document.getElementById("tab-scroll-left").click();
+
+      expect(container.scrollBy).toHaveBeenNthCalledWith(1, {
+        top: 44,
+        behavior: "smooth",
+      });
+      expect(container.scrollBy).toHaveBeenNthCalledWith(2, {
+        top: -44,
+        behavior: "smooth",
+      });
+    });
+
+    it("shows overflow controls when tabs exceed the available height", () => {
+      Object.defineProperties(container, {
+        clientHeight: { configurable: true, value: 200 },
+        scrollHeight: { configurable: true, value: 300 },
+      });
+
+      tabManager._checkOverflow();
+
+      expect(document.getElementById("tab-scroll-left")).not.toHaveClass(
+        "hidden",
+      );
+      expect(document.getElementById("tab-scroll-right")).not.toHaveClass(
+        "hidden",
+      );
+    });
+  });
 });
