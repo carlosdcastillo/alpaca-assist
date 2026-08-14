@@ -370,6 +370,10 @@ class TestMakeDispatcher:
         assert dispatch("attach", {})["resumed"] is True
 
 
+@pytest.mark.skipif(
+    not hasattr(socket, "AF_UNIX"),
+    reason="AF_UNIX sockets are not available on this platform",
+)
 class TestBindSocket:
     def test_binds_fresh_socket(self, tmp_path: Path) -> None:
         sock_path = tmp_path / "daemon.sock"
