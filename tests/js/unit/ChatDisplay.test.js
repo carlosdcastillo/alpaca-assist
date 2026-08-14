@@ -127,6 +127,28 @@ describe("ChatDisplay", () => {
       const images = container.querySelector(".message-images");
       expect(images).not.toBeNull();
     });
+
+    it("should open an attached image in a full-size overlay", () => {
+      chatDisplay.addQuestion("See this", ["data:image/png;base64,abc123"]);
+      const image = container.querySelector(".message-images img");
+
+      image.click();
+
+      expect(chatDisplay.imageOverlay.classList).toContain("active");
+      expect(chatDisplay.imageOverlay.getAttribute("aria-hidden")).toBe("false");
+      expect(chatDisplay.imageOverlayImage.src).toBe(image.src);
+    });
+
+    it("should close the full-size image overlay with Escape", () => {
+      chatDisplay.addQuestion("See this", ["data:image/png;base64,abc123"]);
+      container.querySelector(".message-images img").click();
+
+      document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+
+      expect(chatDisplay.imageOverlay.classList).not.toContain("active");
+      expect(chatDisplay.imageOverlay.getAttribute("aria-hidden")).toBe("true");
+      expect(chatDisplay.imageOverlayImage.hasAttribute("src")).toBe(false);
+    });
   });
 
   describe("appendContent", () => {

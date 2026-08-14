@@ -73,6 +73,66 @@ class ChatDisplay {
       },
       true,
     );
+
+    this._createImageOverlay();
+
+    // Use delegation so images created by streaming Markdown and images inside
+    // tool-fold shadow roots are covered without per-render event handlers.
+    this.container.addEventListener("click", (event) => {
+      const image = event
+        .composedPath()
+        .find((node) => node instanceof HTMLImageElement);
+      if (image) this._openImageOverlay(image);
+    });
+  }
+
+  _createImageOverlay() {
+    const overlay = document.createElement("div");
+    overlay.className = "conversation-image-overlay";
+    overlay.setAttribute("role", "dialog");
+    overlay.setAttribute("aria-modal", "true");
+    overlay.setAttribute("aria-label", "Full-size conversation image");
+    overlay.setAttribute("aria-hidden", "true");
+    overlay.innerHTML = `
+      <button class="conversation-image-overlay-close" type="button" aria-label="Close full-size image">&times;</button>
+      <img alt="" />
+    `;
+    document.body.appendChild(overlay);
+
+    this.imageOverlay = overlay;
+    this.imageOverlayImage = overlay.querySelector("img");
+    this.imageOverlayClose = overlay.querySelector("button");
+    this.imageOverlayClose.addEventListener("click", () =>
+      this._closeImageOverlay(),
+    );
+    overlay.addEventListener("click", (event) => {
+      if (event.target === overlay || event.target === this.imageOverlayImage) {
+        this._closeImageOverlay();
+      }
+    });
+    document.addEventListener("keydown", (event) => {
+      if (event.key === "Escape" && overlay.classList.contains("active")) {
+        this._closeImageOverlay();
+      }
+    });
+  }
+
+  _openImageOverlay(image) {
+    this.imageOverlayPreviousFocus = document.activeElement;
+    this.imageOverlayImage.src = image.currentSrc || image.src;
+    this.imageOverlayImage.alt = image.alt || "Full-size conversation image";
+    this.imageOverlay.classList.add("active");
+    this.imageOverlay.setAttribute("aria-hidden", "false");
+    this.imageOverlayClose.focus();
+  }
+
+  _closeImageOverlay() {
+    if (!this.imageOverlay.classList.contains("active")) return;
+    this.imageOverlay.classList.remove("active");
+    this.imageOverlay.setAttribute("aria-hidden", "true");
+    this.imageOverlayImage.removeAttribute("src");
+    this.imageOverlayPreviousFocus?.focus?.();
+    this.imageOverlayPreviousFocus = null;
   }
 
   /**
@@ -1250,6 +1310,7 @@ class ChatDisplay {
    * Clear all content
    */
   clear() {
+    this._closeImageOverlay();
     window.VideoResultUtils?.clear();
     this.gatedToolResultEpoch += 1;
     this.container.innerHTML = "";

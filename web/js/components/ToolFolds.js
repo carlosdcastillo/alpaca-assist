@@ -343,6 +343,7 @@ class ToolFold extends HTMLElement {
                     max-width: 100%;
                     height: auto;
                     border-radius: 4px;
+                    cursor: zoom-in;
                 }
 
                 .image-caption {
