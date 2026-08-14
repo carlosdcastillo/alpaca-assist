@@ -244,7 +244,37 @@ html, body {
     border-color: var(--accent-primary);
 }
 
-/* The workspace keeps conversation navigation beside the active chat. */
+@media (max-width: 950px) {
+    .toolbar-text {
+        display: none;
+    }
+
+    .toolbar-btn {
+        padding-inline: 10px;
+    }
+
+    #toolbar-model {
+        min-width: 0;
+        width: 200px;
+    }
+}
+
+.app-body {
+    display: flex;
+    flex: 1;
+    min-height: 0;
+    overflow: hidden;
+}
+
+.content-column {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-width: 0;
+    min-height: 0;
+    overflow: hidden;
+}
+
 .workspace {
     display: flex;
     flex: 1;
@@ -260,13 +290,13 @@ html, body {
     flex: 0 0 232px;
     background: var(--bg-secondary);
     border-right: 1px solid var(--border-color);
-    padding: 12px 10px 10px;
-    gap: 6px;
+    padding: 8px 10px 10px;
+    gap: 0;
     min-height: 0;
 }
 
 .tab-bar-label {
-    padding: 0 8px 6px;
+    padding: 0 8px;
     color: var(--text-muted);
     font-size: 11px;
     font-weight: 700;
@@ -295,7 +325,7 @@ html, body {
     background: transparent;
     border: none;
     color: var(--text-secondary);
-    padding: 3px 6px;
+    padding: 0 6px;
     cursor: pointer;
     border-radius: 4px;
     font-size: 13px;
@@ -1226,6 +1256,10 @@ a[href^="alpaca://conv/"] {
     font-size: 12px;
     color: var(--text-secondary);
     min-height: 16px;
+}
+
+.input-status:empty {
+    display: none;
 }
 
 /* Status Bar */
