@@ -8,6 +8,7 @@ import json
 import math
 import os
 import random
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -675,6 +676,18 @@ class OllamaRequestHandler(BaseHTTPRequestHandler):
         self.wfile.write(b"\n")
         self.wfile.flush()
 
+    def _send_cli_tool_event(self, event: dict[str, Any]) -> None:
+        """Forward a CLI-owned media call without asking Alpaca to execute it."""
+        response = {
+            "model": "codellama:13b",
+            "message": {"role": "assistant", "content": ""},
+            "done": False,
+            "cli_tool_event": event,
+        }
+        self.wfile.write(json.dumps(response).encode())
+        self.wfile.write(b"\n")
+        self.wfile.flush()
+
     def _send_completion_chunk(
         self,
         count: int,
@@ -777,7 +790,10 @@ class OllamaRequestHandler(BaseHTTPRequestHandler):
                 print(event)
                 val: dict[str, Any] = event
 
-                if val.get("type") == "message_start":
+                if val.get("type") == "alpaca_tool_event":
+                    self._send_cli_tool_event(val)
+
+                elif val.get("type") == "message_start":
                     usage = val.get("message", {}).get("usage", {})
                     # Anthropic splits input across three fields when prompt caching
                     # is active; sum them for the true total.  Fireworks may send 0
@@ -1356,7 +1372,46 @@ def _flatten_transcript(messages: list[dict[str, Any]]) -> str:
     return "\n\n".join(lines)
 
 
-def _build_claude_mcp_config_file() -> str | None:
+def _cli_mcp_servers(
+    media_event_path: str,
+    working_directory: str | None,
+) -> dict[str, dict[str, Any]]:
+    """Return configured MCP servers plus Alpaca's CLI media bridge."""
+    servers: dict[str, dict[str, Any]] = {}
+    if os.path.exists(MCP_SERVERS_FILE):
+        try:
+            with open(MCP_SERVERS_FILE, encoding="utf-8") as file:
+                raw = json.load(file)
+            for name, spec in raw.items():
+                if not isinstance(spec, dict):
+                    continue
+                command_list = spec.get("command", [])
+                if not command_list:
+                    continue
+                servers[name] = {
+                    "command": command_list[0],
+                    "args": list(command_list[1:]) + list(spec.get("args", [])),
+                }
+                if isinstance(spec.get("env"), dict):
+                    servers[name]["env"] = dict(spec["env"])
+        except (OSError, json.JSONDecodeError) as error:
+            print(f"[warn] Could not read {MCP_SERVERS_FILE} for CLI MCP: {error}")
+
+    media_env = {"ALPACA_CLI_MEDIA_EVENTS": media_event_path}
+    if working_directory:
+        media_env["ALPACA_WORKSPACE"] = working_directory
+    servers["alpaca-media"] = {
+        "command": sys.executable,
+        "args": [os.path.join(os.path.dirname(__file__), "cli_media_mcp_server.py")],
+        "env": media_env,
+    }
+    return servers
+
+
+def _build_claude_mcp_config_file(
+    media_event_path: str,
+    working_directory: str | None,
+) -> str:
     """Translate alpaca-assist's mcp_servers.json into the schema `claude
     --mcp-config` actually expects.
 
@@ -1365,43 +1420,79 @@ def _build_claude_mcp_config_file() -> str | None:
     schema is {"mcpServers": {name: {"command": <string>, "args": [...]}}}
     — confirmed against a real `claude -p --mcp-config` run, which
     rejects alpaca's raw file with "mcpServers: Invalid input: expected
-    record, received undefined". Returns a temp file path the caller must
-    delete, or None if mcp_servers.json doesn't exist / doesn't parse.
+    record, received undefined". The built-in media bridge means this always
+    returns a config path, even when mcp_servers.json is absent. The caller
+    must delete the temporary file.
     """
-    if not os.path.exists(MCP_SERVERS_FILE):
-        return None
-    try:
-        with open(MCP_SERVERS_FILE, encoding="utf-8") as f:
-            raw = json.load(f)
-    except (OSError, json.JSONDecodeError) as e:
-        print(f"[warn] Could not read {MCP_SERVERS_FILE} for claude --mcp-config: {e}")
-        return None
-
-    mcp_servers: dict[str, Any] = {}
-    for name, spec in raw.items():
-        if not isinstance(spec, dict):
-            continue
-        command_list = spec.get("command", [])
-        if not command_list:
-            continue
-        mcp_servers[name] = {
-            "command": command_list[0],
-            "args": list(command_list[1:]) + list(spec.get("args", [])),
-        }
-
-    if not mcp_servers:
-        return None
-
     fd, path = tempfile.mkstemp(prefix="alpaca_claude_mcp_", suffix=".json")
     with os.fdopen(fd, "w", encoding="utf-8") as f:
-        json.dump({"mcpServers": mcp_servers}, f)
+        json.dump(
+            {"mcpServers": _cli_mcp_servers(media_event_path, working_directory)},
+            f,
+        )
     return path
+
+
+def _codex_mcp_overrides(
+    media_event_path: str,
+    working_directory: str | None,
+) -> list[str]:
+    overrides: list[str] = []
+    for name, spec in _cli_mcp_servers(media_event_path, working_directory).items():
+        prefix = f"mcp_servers.{json.dumps(name)}"
+        overrides.extend(("-c", f"{prefix}.command={json.dumps(spec['command'])}"))
+        overrides.extend(("-c", f"{prefix}.args={json.dumps(spec.get('args', []))}"))
+        for env_name, value in spec.get("env", {}).items():
+            overrides.extend(
+                ("-c", f"{prefix}.env.{env_name}={json.dumps(value)}"),
+            )
+    return overrides
+
+
+def _prepare_cli_images(
+    messages: list[dict[str, Any]],
+) -> tuple[str, str | None, list[str]]:
+    """Materialize base64 attachments for CLIs, returning prompt/tempdir/paths."""
+    temp_dir: str | None = None
+    paths: list[str] = []
+    prepared: list[dict[str, Any]] = []
+    for message_index, message in enumerate(messages):
+        item = dict(message)
+        image_lines: list[str] = []
+        for image_index, image in enumerate(item.get("images", [])):
+            try:
+                mime_type = _detect_image_format(image)
+                if mime_type is None:
+                    continue
+                if temp_dir is None:
+                    temp_dir = tempfile.mkdtemp(prefix="alpaca_cli_images_")
+                extension = {
+                    "image/jpeg": ".jpg",
+                    "image/png": ".png",
+                    "image/gif": ".gif",
+                    "image/webp": ".webp",
+                }[mime_type]
+                path = os.path.join(
+                    temp_dir,
+                    f"message-{message_index + 1}-image-{image_index + 1}{extension}",
+                )
+                with open(path, "wb") as file:
+                    file.write(base64.b64decode(image, validate=True))
+                paths.append(path)
+                image_lines.append(f"Attached image: {path}")
+            except (KeyError, OSError, ValueError):
+                continue
+        if image_lines:
+            item["content"] = f"{item.get('content', '')}\n\n" + "\n".join(image_lines)
+        prepared.append(item)
+    return _flatten_transcript(prepared), temp_dir, paths
 
 
 def _run_cli_jsonl(
     cmd: list[str],
     prompt: str,
     working_directory: str | None = None,
+    media_event_path: str | None = None,
 ) -> Generator[dict[str, Any], None, None]:
     """Run a CLI subprocess, feed it `prompt` on stdin, yield parsed JSONL stdout lines."""
     proc = subprocess.Popen(
@@ -1418,7 +1509,26 @@ def _run_cli_jsonl(
         assert proc.stdin is not None and proc.stdout is not None
         proc.stdin.write(prompt)
         proc.stdin.close()
+        event_offset = 0
+
+        def read_media_events() -> list[dict[str, Any]]:
+            nonlocal event_offset
+            if not media_event_path:
+                return []
+            try:
+                with open(media_event_path, encoding="utf-8") as event_file:
+                    event_file.seek(event_offset)
+                    events: list[dict[str, Any]] = []
+                    while row := event_file.readline():
+                        if row.strip():
+                            events.append(json.loads(row))
+                    event_offset = event_file.tell()
+                    return events
+            except (OSError, json.JSONDecodeError):
+                return []
+
         for line in proc.stdout:
+            yield from read_media_events()
             line = line.strip()
             if not line:
                 continue
@@ -1426,6 +1536,7 @@ def _run_cli_jsonl(
                 yield json.loads(line)
             except json.JSONDecodeError:
                 print(f"[warn] Non-JSON line from {cmd[0]}: {line[:200]}")
+        yield from read_media_events()
     finally:
         stderr_output = proc.stderr.read() if proc.stderr else ""
         returncode = proc.wait()
@@ -1438,13 +1549,11 @@ class ClaudeCodeCLIClient:
     headless mode, spending the logged-in Claude Code subscription's
     usage instead of a metered ANTHROPIC_API_KEY.
 
-    Tool calls are NOT executed by this app for these models — `claude -p`
-    is handed the app's own MCP server config (mcp_servers.json) and runs
-    its own agent loop, resolving tool_use/tool_result internally before
-    ever emitting a stream event. Only "text" content blocks are
-    forwarded to _process_stream; tool_use content blocks are consumed
-    here so alpaca-assist's own tool executor (chat_tab_tools.py) never
-    sees them and never tries to double-execute them.
+    Tool calls are NOT executed by this app for these models. `claude -p`
+    receives the app's MCP config and runs its own agent loop. Ordinary CLI
+    tool events remain hidden to avoid double execution; the built-in media
+    MCP server emits a separate completed-call event so Alpaca can mirror its
+    image/video result without executing it again.
 
     Runs with --dangerously-skip-permissions because headless mode has no
     TTY to answer an interactive permission prompt on — it would just
@@ -1476,7 +1585,12 @@ class ClaudeCodeCLIClient:
         elif isinstance(system, str):
             system_text = system
 
-        prompt = _flatten_transcript(messages)
+        prompt, image_temp_dir, image_paths = _prepare_cli_images(messages)
+        event_fd, media_event_path = tempfile.mkstemp(
+            prefix="alpaca_cli_media_",
+            suffix=".jsonl",
+        )
+        os.close(event_fd)
 
         cmd = [
             "claude",
@@ -1494,19 +1608,32 @@ class ClaudeCodeCLIClient:
             "--no-session-persistence",
             "--dangerously-skip-permissions",
         ]
-        # mcp_servers.json is in alpaca's own flat schema, not the
-        # {"mcpServers": {...}} shape `claude --mcp-config` requires — and
-        # it's optional/git-ignored, so a missing/unusable file just means
-        # this turn runs with no tools rather than failing outright.
-        mcp_config_path = _build_claude_mcp_config_file()
-        if mcp_config_path:
-            cmd += ["--strict-mcp-config", "--mcp-config", mcp_config_path]
+        mcp_config_path = _build_claude_mcp_config_file(
+            media_event_path,
+            working_directory,
+        )
+        cmd += ["--strict-mcp-config", "--mcp-config", mcp_config_path]
+
+        if image_paths:
+            prompt += (
+                "\n\nThe attached image paths above are user-provided inputs. "
+                "Inspect them with your image-reading capability before answering."
+            )
 
         text_block_indices: set[int] = set()
 
         try:
-            for line in _run_cli_jsonl(cmd, prompt, working_directory):
+            for line in _run_cli_jsonl(
+                cmd,
+                prompt,
+                working_directory,
+                media_event_path=media_event_path,
+            ):
                 line_type = line.get("type")
+
+                if line_type == "alpaca_tool_event":
+                    yield line
+                    continue
 
                 if line_type == "result":
                     if line.get("is_error"):
@@ -1553,6 +1680,12 @@ class ClaudeCodeCLIClient:
                     os.remove(mcp_config_path)
                 except OSError:
                     pass
+            try:
+                os.remove(media_event_path)
+            except OSError:
+                pass
+            if image_temp_dir:
+                shutil.rmtree(image_temp_dir, ignore_errors=True)
 
 
 class CodexCLIClient:
@@ -1569,13 +1702,9 @@ class CodexCLIClient:
     version's `codex exec` (would have hard-failed every call) and
     --sandbox conflicts with --approve-for-me; both caught by running it.
 
-    Known gap: unlike ClaudeCodeCLIClient, this does NOT wire up
-    alpaca-assist's own mcp_servers.json — `codex exec` has no
-    per-invocation --mcp-config flag (verified via --help); MCP servers
-    for codex are configured only via ~/.codex/config.toml, so today this
-    only sees the CLI's ambient global config, not the app's. Doable via
-    repeated `-c mcp_servers.<name>.command=...` overrides, but that
-    wasn't built here since I don't have the exact TOML schema verified.
+    Codex has no per-invocation --mcp-config file flag, so this translates
+    alpaca-assist's MCP config (plus the built-in media bridge) into repeated
+    `-c mcp_servers.<name>...` overrides for each run.
 
     Same rationale as ClaudeCodeCLIClient for suppressing tool-call
     content: tool execution happens inside codex's own agent loop, not
@@ -1595,7 +1724,12 @@ class CodexCLIClient:
         working_directory: str | None = None,
     ) -> Generator[dict[str, Any], None, None]:
         alias = model.split("/", 1)[1] if "/" in model else model
-        prompt = _flatten_transcript(messages)
+        prompt, image_temp_dir, image_paths = _prepare_cli_images(messages)
+        event_fd, media_event_path = tempfile.mkstemp(
+            prefix="alpaca_cli_media_",
+            suffix=".jsonl",
+        )
+        os.close(event_fd)
 
         system_text = SYSTEM_PROMPT
         if isinstance(system, list):
@@ -1626,26 +1760,46 @@ class CodexCLIClient:
             "-c",
             f"developer_instructions={json.dumps(system_text)}",
         ]
+        for image_path in image_paths:
+            cmd.extend(("--image", image_path))
+        cmd.extend(_codex_mcp_overrides(media_event_path, working_directory))
 
         yielded_start = False
-        for line in _run_cli_jsonl(cmd, prompt, working_directory):
-            if not yielded_start:
-                yield {"type": "message_start", "message": {"usage": {}}}
-                yielded_start = True
+        try:
+            for line in _run_cli_jsonl(
+                cmd,
+                prompt,
+                working_directory,
+                media_event_path=media_event_path,
+            ):
+                if not yielded_start:
+                    yield {"type": "message_start", "message": {"usage": {}}}
+                    yielded_start = True
 
-            text = _extract_codex_text(line)
-            if text:
-                yield {"type": "content_block_delta", "delta": {"text": text}}
+                if line.get("type") == "alpaca_tool_event":
+                    yield line
+                    continue
 
-            if line.get("type") == "error":
-                err = line.get("message") or line.get("error") or str(line)
-                yield {
-                    "type": "content_block_delta",
-                    "delta": {"text": f"\n\n[codex CLI error: {err}]\n"},
-                }
+                text = _extract_codex_text(line)
+                if text:
+                    yield {"type": "content_block_delta", "delta": {"text": text}}
 
-        yield {"type": "message_delta", "delta": {"stop_reason": "end_turn"}}
-        yield {"type": "message_stop"}
+                if line.get("type") == "error":
+                    err = line.get("message") or line.get("error") or str(line)
+                    yield {
+                        "type": "content_block_delta",
+                        "delta": {"text": f"\n\n[codex CLI error: {err}]\n"},
+                    }
+
+            yield {"type": "message_delta", "delta": {"stop_reason": "end_turn"}}
+            yield {"type": "message_stop"}
+        finally:
+            try:
+                os.remove(media_event_path)
+            except OSError:
+                pass
+            if image_temp_dir:
+                shutil.rmtree(image_temp_dir, ignore_errors=True)
 
 
 def _extract_codex_text(line: dict[str, Any]) -> str | None:

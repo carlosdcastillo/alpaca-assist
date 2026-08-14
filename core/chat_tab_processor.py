@@ -98,6 +98,7 @@ class StreamProcessor:
         total_content = 0
         # Accumulate (tool_json, tc_store_id) pairs for call fold injection
         pending_call_folds: list[tuple[str, str]] = []
+        pending_cli_media_folds: list[tuple[str, str, str]] = []
         done_received = False
 
         # Reject non-200 responses immediately so the error body is shown and
@@ -165,6 +166,52 @@ class StreamProcessor:
                 try:
                     data = json.loads(line.strip())
                     message = data.get("message", {})
+
+                    cli_tool_event = data.get("cli_tool_event")
+                    if isinstance(cli_tool_event, dict):
+                        tool_id = str(cli_tool_event.get("id", ""))
+                        tool_name = str(cli_tool_event.get("name", "alpaca_media"))
+                        arguments = cli_tool_event.get("arguments", {})
+                        result = str(cli_tool_event.get("result", ""))
+                        if tool_id and result:
+                            tool_json = json.dumps(
+                                {
+                                    "tool_call": {
+                                        "id": tool_id,
+                                        "name": tool_name,
+                                        "arguments": arguments,
+                                    },
+                                },
+                            )
+                            self._chat.chat_state.add_tool_call_to_answer(
+                                answer_index,
+                                tool_json,
+                                tool_id,
+                            )
+                            self._chat.chat_state.add_tool_result_to_answer(
+                                answer_index,
+                                result,
+                                tool_id,
+                            )
+                            call_update = utils.ContentUpdate(
+                                answer_index=answer_index,
+                                content_chunk=tool_json,
+                                is_tool_call=True,
+                                tool_id=tool_id,
+                            )
+                            result_update = utils.ContentUpdate(
+                                answer_index=answer_index,
+                                content_chunk=result,
+                                is_tool_result=True,
+                                tool_id=tool_id,
+                            )
+                            self._put_content_update_with_retry(call_update)
+                            self._put_content_update_with_retry(result_update)
+                            api = self._chat._app_core.api
+                            if api is not None:
+                                api.on_content_update(self._chat.tab_id, call_update)
+                                api.on_content_update(self._chat.tab_id, result_update)
+                            pending_cli_media_folds.append((tool_json, result, tool_id))
 
                     # Handle Ollama native tool_calls field
                     if message.get("tool_calls"):
@@ -276,6 +323,19 @@ class StreamProcessor:
                                     answer_index,
                                     tool_json,
                                     tc_store_id,
+                                )
+
+                        for tool_json, result, tool_id in pending_cli_media_folds:
+                            if self._tool_handler:
+                                self._tool_handler.inject_call_fold(
+                                    answer_index,
+                                    tool_json,
+                                    tool_id,
+                                )
+                                self._tool_handler._inject_result_fold(
+                                    answer_index,
+                                    result,
+                                    f"fold-result-{answer_index}-{tool_id}",
                                 )
 
                         # Emit streaming end signal via API

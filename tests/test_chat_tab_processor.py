@@ -63,6 +63,43 @@ class TestProcessStreamHappyPath:
         processor.process_stream(_make_response(200, lines), 0, _stop_flag())
         mock_api.on_streaming_end.assert_called_once_with("tab-1", 0)
 
+    def test_cli_media_event_is_persisted_and_folded_without_execution(self) -> None:
+        mock_api = Mock()
+        mock_chat = Mock()
+        mock_chat.tab_id = "tab-1"
+        mock_chat._app_core.api = mock_api
+        tool_handler = Mock()
+        processor = StreamProcessor(mock_chat, tool_handler)
+        event = {
+            "id": "alpaca_media_view_image_abc",
+            "name": "alpaca_media_view_image",
+            "arguments": {"file_path": "shot.png"},
+            "result": (
+                "@@ALPACA_IMAGE_RESULT@@image/png@@ALPACA_FIELD@@"
+                "QQ==@@ALPACA_FIELD@@shot"
+            ),
+        }
+        lines = _lines(
+            {"message": {"content": ""}, "done": False, "cli_tool_event": event},
+            {"message": {"content": ""}, "done": True},
+        )
+
+        processor.process_stream(_make_response(200, lines), 0, _stop_flag())
+
+        mock_chat.chat_state.add_tool_call_to_answer.assert_called_once()
+        mock_chat.chat_state.add_tool_result_to_answer.assert_called_once_with(
+            0,
+            event["result"],
+            event["id"],
+        )
+        tool_handler.handle_tool_call.assert_not_called()
+        tool_handler.inject_call_fold.assert_called_once()
+        tool_handler._inject_result_fold.assert_called_once_with(
+            0,
+            event["result"],
+            f"fold-result-0-{event['id']}",
+        )
+
     def test_error_completion_renders_backend_error_and_ends_stream(self) -> None:
         processor, _, mock_api = _make_processor()
         lines = _lines(

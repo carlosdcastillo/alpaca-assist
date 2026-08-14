@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import json
+import sys
 import threading
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 from unittest.mock import patch
@@ -11,6 +13,9 @@ import pytest
 from anthropic_ollama_server import ClaudeCodeCLIClient
 from anthropic_ollama_server import CodexCLIClient
 from anthropic_ollama_server import OllamaRequestHandler
+from anthropic_ollama_server import _build_claude_mcp_config_file
+from anthropic_ollama_server import _codex_mcp_overrides
+from anthropic_ollama_server import _run_cli_jsonl
 from core.chat_tab_streaming import StreamingHandler
 
 
@@ -155,3 +160,85 @@ def test_continuation_keeps_project_workspace_and_system_prompt() -> None:
     payload = post.call_args.kwargs["json"]
     assert payload["working_directory"] == "/srv/workspaces/alpaca-session"
     assert payload["system"] == "RUNBOOK and first-turn SPINUP"
+
+
+@pytest.mark.parametrize(
+    ("client", "model", "executable"),
+    [
+        (ClaudeCodeCLIClient(), "claude-code/sonnet", "claude"),
+        (CodexCLIClient(), "codex/gpt-5.6-sol", "codex"),
+    ],
+)
+def test_cli_clients_materialize_user_images(
+    client: ClaudeCodeCLIClient | CodexCLIClient,
+    model: str,
+    executable: str,
+) -> None:
+    # 1x1 PNG
+    image = (
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk"
+        "+A8AAQUBAScY42YAAAAASUVORK5CYII="
+    )
+    with (
+        patch(
+            "anthropic_ollama_server._build_claude_mcp_config_file",
+            return_value=None,
+        ),
+        patch(
+            "anthropic_ollama_server._run_cli_jsonl",
+            return_value=iter(()),
+        ) as run_cli,
+    ):
+        list(
+            client.stream_complete(
+                messages=[
+                    {"role": "user", "content": "Describe it", "images": [image]},
+                ],
+                model=model,
+            ),
+        )
+
+    command, prompt, _workspace = run_cli.call_args.args
+    assert command[0] == executable
+    assert "Attached image:" in prompt
+    if executable == "codex":
+        assert "--image" in command
+
+
+def test_cli_mcp_config_always_includes_media_bridge(tmp_path: Path) -> None:
+    event_path = str(tmp_path / "events.jsonl")
+    config_path = _build_claude_mcp_config_file(event_path, "/workspace")
+    try:
+        config = json.loads(Path(config_path).read_text())
+    finally:
+        Path(config_path).unlink()
+
+    media = config["mcpServers"]["alpaca-media"]
+    assert media["env"]["ALPACA_CLI_MEDIA_EVENTS"] == event_path
+    assert media["env"]["ALPACA_WORKSPACE"] == "/workspace"
+    assert media["args"][0].endswith("cli_media_mcp_server.py")
+
+    overrides = _codex_mcp_overrides(event_path, "/workspace")
+    assert any('mcp_servers."alpaca-media".command=' in value for value in overrides)
+    assert any("ALPACA_CLI_MEDIA_EVENTS" in value for value in overrides)
+
+
+def test_cli_jsonl_forwards_media_side_channel(tmp_path: Path) -> None:
+    event_path = tmp_path / "events.jsonl"
+    event = {"type": "alpaca_tool_event", "id": "media-1"}
+    event_path.write_text(json.dumps(event) + "\n")
+    command = [
+        sys.executable,
+        "-c",
+        "import json; print(json.dumps({'type': 'result'}))",
+    ]
+
+    output = list(
+        _run_cli_jsonl(
+            command,
+            "",
+            media_event_path=str(event_path),
+        ),
+    )
+
+    assert output == [event, {"type": "result"}]
