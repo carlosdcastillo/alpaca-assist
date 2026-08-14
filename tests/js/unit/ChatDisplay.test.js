@@ -296,15 +296,18 @@ describe("ChatDisplay", () => {
         true,
       );
 
-      expect(renderMathInElement).toHaveBeenCalledWith(expect.any(HTMLElement), {
-        delimiters: [
-          { left: "$$", right: "$$", display: true },
-          { left: "\\[", right: "\\]", display: true },
-          { left: "\\(", right: "\\)", display: false },
-        ],
-        throwOnError: false,
-        strict: false,
-      });
+      expect(renderMathInElement).toHaveBeenCalledWith(
+        expect.any(HTMLElement),
+        {
+          delimiters: [
+            { left: "$$", right: "$$", display: true },
+            { left: "\\[", right: "\\]", display: true },
+            { left: "\\(", right: "\\)", display: false },
+          ],
+          throwOnError: false,
+          strict: false,
+        },
+      );
     });
 
     it("should retain unchanged rendered formula nodes across stream updates", () => {
@@ -431,7 +434,42 @@ describe("ChatDisplay", () => {
       expect(video.src).toBe("blob:demo");
       expect(video.controls).toBe(true);
       expect(segment.textContent).toContain("Feature demonstration");
-      expect(window.VideoResultUtils.load).toHaveBeenCalledWith("tab-1", parsed);
+      expect(window.VideoResultUtils.load).toHaveBeenCalledWith(
+        "tab-1",
+        parsed,
+      );
+    });
+
+    it("falls back to positional matching for a wrong-id video ref", async () => {
+      const parsed = {
+        mimeType: "video/webm",
+        locator: "demo",
+        size: 10,
+        description: "demo",
+      };
+      window.app = { currentTabId: "tab-1" };
+      window.VideoResultUtils = {
+        parse: jest.fn().mockReturnValue(parsed),
+        load: jest.fn().mockResolvedValue("blob:demo"),
+        clear: jest.fn(),
+      };
+      chatDisplay.registerToolResult(
+        0,
+        "internal_view_video_14",
+        "video marker",
+      );
+      const segment = document.createElement("div");
+      segment.innerHTML =
+        '<a href="alpaca://video/2">Feature demonstration</a>';
+      container.appendChild(segment);
+
+      chatDisplay._hydrateInlineVideoRefs(segment, 0);
+      await Promise.resolve();
+
+      expect(window.VideoResultUtils.load).toHaveBeenCalledWith(
+        "tab-1",
+        parsed,
+      );
     });
 
     it("should copy only the selected text as Markdown", async () => {
@@ -447,7 +485,9 @@ describe("ChatDisplay", () => {
 
       const copied = await chatDisplay.copySelectionAsMarkdown();
 
-      expect(window.Helpers.copyToClipboard).toHaveBeenCalledWith("**bold text**");
+      expect(window.Helpers.copyToClipboard).toHaveBeenCalledWith(
+        "**bold text**",
+      );
       expect(copied).toBe(true);
     });
 
@@ -472,6 +512,34 @@ describe("ChatDisplay", () => {
           0,
         ),
       ).toBe("![Preview](data:image/png;base64,QUJDRA==)");
+    });
+
+    it("falls back to positional matching when the model uses a wrong id", () => {
+      const result =
+        "@@ALPACA_IMAGE_RESULT@@image/png@@ALPACA_FIELD@@QUJDRA==@@ALPACA_FIELD@@Preview";
+      chatDisplay.registerToolResult(0, "internal_view_image_12", result);
+
+      expect(
+        chatDisplay._resolveInlineImageRefs("![Preview](alpaca://image/1)", 0),
+      ).toBe("![Preview](data:image/png;base64,QUJDRA==)");
+    });
+
+    it("matches multiple wrong-id image refs to results in registration order", () => {
+      const first =
+        "@@ALPACA_IMAGE_RESULT@@image/png@@ALPACA_FIELD@@AAAA@@ALPACA_FIELD@@First";
+      const second =
+        "@@ALPACA_IMAGE_RESULT@@image/png@@ALPACA_FIELD@@BBBB@@ALPACA_FIELD@@Second";
+      chatDisplay.registerToolResult(0, "internal_view_image_12", first);
+      chatDisplay.registerToolResult(0, "internal_view_image_13", second);
+
+      expect(
+        chatDisplay._resolveInlineImageRefs(
+          "![One](alpaca://image/1) ![Two](alpaca://image/2)",
+          0,
+        ),
+      ).toBe(
+        "![One](data:image/png;base64,AAAA) ![Two](data:image/png;base64,BBBB)",
+      );
     });
 
     it("loads a gated image result and re-renders the reference", async () => {

@@ -256,7 +256,8 @@ class ChatDisplay {
       current.nodeType === Node.TEXT_NODE ||
       current.nodeType === Node.COMMENT_NODE
     ) {
-      if (current.nodeValue !== next.nodeValue) current.nodeValue = next.nodeValue;
+      if (current.nodeValue !== next.nodeValue)
+        current.nodeValue = next.nodeValue;
       return;
     }
 
@@ -268,7 +269,8 @@ class ChatDisplay {
     }
 
     const currentMathKey = this._renderedMathKey(current);
-    if (currentMathKey && currentMathKey === this._renderedMathKey(next)) return;
+    if (currentMathKey && currentMathKey === this._renderedMathKey(next))
+      return;
     if (currentMathKey) {
       current.replaceWith(next);
       return;
@@ -278,7 +280,8 @@ class ChatDisplay {
       if (!next.hasAttribute(name)) current.removeAttribute(name);
     }
     for (const { name, value } of Array.from(next.attributes)) {
-      if (current.getAttribute(name) !== value) current.setAttribute(name, value);
+      if (current.getAttribute(name) !== value)
+        current.setAttribute(name, value);
     }
 
     this._updateRenderedChildren(current, next);
@@ -630,14 +633,14 @@ class ChatDisplay {
         .join("");
     const tag = node.tagName.toLowerCase();
 
-    if (
-      node.matches(".answer-header, .message-header, button, tool-fold")
-    )
+    if (node.matches(".answer-header, .message-header, button, tool-fold"))
       return "";
     if (node.classList.contains("code-block")) {
       const code = node.querySelector("code")?.textContent || "";
       const language = node.querySelector(".lang")?.textContent || "";
-      return `\n\n\`\`\`${language === "text" ? "" : language}\n${code}\n\`\`\`\n\n`;
+      return `\n\n\`\`\`${
+        language === "text" ? "" : language
+      }\n${code}\n\`\`\`\n\n`;
     }
     if (tag === "strong" || tag === "b") return `**${children()}**`;
     if (tag === "em" || tag === "i") return `*${children()}*`;
@@ -647,7 +650,9 @@ class ChatDisplay {
     if (tag === "a")
       return `[${children()}](${node.getAttribute("href") || ""})`;
     if (tag === "img")
-      return `![${node.getAttribute("alt") || ""}](${node.getAttribute("src") || ""})`;
+      return `![${node.getAttribute("alt") || ""}](${
+        node.getAttribute("src") || ""
+      })`;
     if (tag === "br") return "\n";
     if (tag === "hr") return "\n\n---\n\n";
     if (/^h[1-6]$/.test(tag))
@@ -772,7 +777,8 @@ class ChatDisplay {
         }
         results.set(toolCallId, response.content);
         const bufferData = this.answerBuffers.get(answerIndex);
-        if (bufferData) this._renderAnswerBuffer(answerIndex, bufferData, false);
+        if (bufferData)
+          this._renderAnswerBuffer(answerIndex, bufferData, false);
         return response.content;
       })
       .catch((error) => {
@@ -799,11 +805,30 @@ class ChatDisplay {
   _resolveInlineImageRefs(text, answerIndex) {
     if (!text.includes("alpaca://image/")) return text;
     const results = this.answerToolResults.get(answerIndex);
+    // Fallback for when the model writes a short placeholder id ("1",
+    // "2") instead of copying the real tool-call id as instructed — the
+    // system prompt says not to, but this is cheap insurance against it
+    // happening anyway. Only used when the referenced id doesn't match
+    // anything at all (not even a gated placeholder); assumes refs and
+    // their matching image results appear in the same relative order
+    // within the answer, which held in the observed failure case.
+    const imageResults = results
+      ? [...results.entries()].filter(
+          ([, c]) =>
+            window.ImageResultUtils?.parse(c) || this._isGatedToolResult(c),
+        )
+      : [];
+    let positionalIdx = 0;
     return text.replace(/alpaca:\/\/image\/([^)\s"'>]+)/g, (match, id) => {
-      const content = results?.get(id);
+      let realId = id;
+      let content = results?.get(id);
+      if (content === undefined && imageResults[positionalIdx]) {
+        [realId, content] = imageResults[positionalIdx];
+      }
+      positionalIdx++;
       const parsed = content && window.ImageResultUtils?.parse(content);
       if (!parsed) {
-        this._loadGatedToolResult(answerIndex, id, content);
+        this._loadGatedToolResult(answerIndex, realId, content);
         return match;
       }
       return `data:${parsed.mimeType};base64,${parsed.base64Data}`;
@@ -813,14 +838,28 @@ class ChatDisplay {
   /** Replace same-answer alpaca://video links with an asynchronously loaded player. */
   _hydrateInlineVideoRefs(element, answerIndex) {
     const results = this.answerToolResults.get(answerIndex);
+    // Same positional fallback as _resolveInlineImageRefs, for the same
+    // reason — see its comment.
+    const videoResults = results
+      ? [...results.entries()].filter(
+          ([, c]) =>
+            window.VideoResultUtils?.parse(c) || this._isGatedToolResult(c),
+        )
+      : [];
+    let positionalIdx = 0;
     for (const link of element.querySelectorAll("a")) {
       const href = link.getAttribute("href") || "";
       if (!href.startsWith("alpaca://video/")) continue;
       const id = href.slice("alpaca://video/".length);
-      const content = results?.get(id);
+      let realId = id;
+      let content = results?.get(id);
+      if (content === undefined && videoResults[positionalIdx]) {
+        [realId, content] = videoResults[positionalIdx];
+      }
+      positionalIdx++;
       const parsed = window.VideoResultUtils?.parse(content);
       if (!parsed) {
-        this._loadGatedToolResult(answerIndex, id, content);
+        this._loadGatedToolResult(answerIndex, realId, content);
         continue;
       }
 
