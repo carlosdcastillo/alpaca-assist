@@ -145,7 +145,8 @@ class TestHandleUserMessage:
         transport.connected = False
         transport.connect.side_effect = PackTransportError("no route to host")
 
-        pack_tab.handle_user_message("hello", [])
+        with pytest.raises(PackTransportError):
+            pack_tab.handle_user_message("hello", [])
 
         assert pack_tab.offline is True
         app_core.api.on_error.assert_called_once()

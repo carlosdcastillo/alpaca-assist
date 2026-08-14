@@ -403,6 +403,13 @@ class PackTab:
             api = self._app_core.api
             if api is not None:
                 api.on_error(self.tab_id, f"Pack tab offline: {e}")
+            # Re-raise so webview_api.send_message reports failure to the
+            # frontend instead of silently swallowing it — app.js's own
+            # send_message catch block (restores the typed text, offers a
+            # retry dialog) never ran because this returned normally on
+            # failure, so a failed send looked identical to a successful
+            # one in the UI.
+            raise
 
     def stop_streaming(self) -> None:
         try:
