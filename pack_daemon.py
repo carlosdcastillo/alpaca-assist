@@ -30,11 +30,13 @@ import os
 import socket
 import sys
 import threading
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
-from typing import Callable
 
 from core import pack_protocol
+from core.projects import prepare_workspace
+from core.projects import probe_workspace
 from core.tool_output_gate import read_gated_tool_output
 from video_tool_result import read_video_chunk
 
@@ -278,6 +280,35 @@ def make_dispatcher(
         if method == "send_message":
             tab.handle_user_message(params.get("message", ""), params.get("images", []))
             return {"answer_index": getattr(tab, "_current_answer_index", 0)}
+        if method == "configure_project":
+            if tab.is_streaming:
+                raise RuntimeError("Cannot configure a project while streaming")
+            previous_project = getattr(tab, "project_name", None)
+            previous_workspace = getattr(tab, "workspace_path", None)
+            workspace_path = prepare_workspace(params)
+            binding_changed = (
+                previous_project != params["name"]
+                or previous_workspace != workspace_path
+            )
+            tab.project_name = params["name"]
+            tab.workspace_path = workspace_path
+            tab.project_fingerprint = params.get("fingerprint")
+            tab.project_runbook = params.get("runbook", "")
+            tab.project_spinup = params.get("spinup", "")
+            if binding_changed:
+                tab.project_spinup_pending = True
+            os.environ["ALPACA_WORKSPACE"] = workspace_path
+            core.save_session()
+            return {
+                "success": True,
+                "workspace_path": workspace_path,
+                "workspace_status": probe_workspace(workspace_path),
+            }
+        if method == "workspace_status":
+            status_workspace = getattr(tab, "workspace_path", None)
+            if not status_workspace:
+                return {"workspace_path": None, "exists": False, "is_git": False}
+            return probe_workspace(status_workspace)
         if method == "read_video_chunk":
             return read_video_chunk(params["locator"], params.get("offset", 0))
         if method == "read_gated_tool_output":
@@ -326,7 +357,10 @@ def make_dispatcher(
 _BARE_PYTHON_NAMES = {"python", "python3"}
 
 
-def _absolutize_mcp_config(raw_config: dict[str, Any], repo_root: Path) -> dict[str, Any]:
+def _absolutize_mcp_config(
+    raw_config: dict[str, Any],
+    repo_root: Path,
+) -> dict[str, Any]:
     """Rewrite repo-relative script paths and bare interpreter names in
 
     mcp_servers.json entries to absolute paths.
@@ -454,7 +488,9 @@ def main() -> None:
             saved_conv_id = tab_data.get("conversation_id")
             _tab_id, tab = core.create_tab(
                 tab_data.get("name", tab_data.get("title", "Pack Tab")),
-                conversation_id=int(saved_conv_id) if saved_conv_id is not None else None,
+                conversation_id=int(saved_conv_id)
+                if saved_conv_id is not None
+                else None,
             )
             tab.load_from_data(tab_data)
         else:

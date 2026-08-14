@@ -402,6 +402,20 @@ html, body {
     font-size: 11px;
 }
 
+.tab-project {
+    flex-shrink: 0;
+    max-width: 92px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    padding: 1px 5px;
+    border-radius: 4px;
+    color: var(--accent-primary);
+    background: var(--bg-tertiary);
+    font-size: 10px;
+    font-weight: 600;
+}
+
 /* Offline state: the remote daemon is unreachable (host down, SSH
    dropped, or connection not yet established). Retried opportunistically
    on tab click (switch_tab) or the next message send. */

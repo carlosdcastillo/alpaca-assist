@@ -160,7 +160,10 @@ class ShellExecutor:
         timeout: int = DEFAULT_TIMEOUT,
     ) -> ExecutionResult:
         start_time = time.time()
-        cwd = working_directory or os.getcwd()
+        workspace = os.environ.get("ALPACA_WORKSPACE")
+        cwd = working_directory or workspace or os.getcwd()
+        if workspace and working_directory and not os.path.isabs(working_directory):
+            cwd = os.path.join(workspace, working_directory)
 
         # Validate working directory
         if not os.path.isdir(cwd):

@@ -141,6 +141,9 @@ class ChatTab(ChatTabBase):
 
             Streaming flags are reset by StreamingHandler before calling this method.
         """
+        # A successful first turn completes the one-shot project spinup contract.
+        self.project_spinup_pending = False
+
         # Update title from first question only before summary has been generated.
         # Once summary is generated (or attempted), _generated is True and we stop
         # overwriting the title with the raw question on every subsequent message.

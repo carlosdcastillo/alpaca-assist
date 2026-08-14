@@ -27,6 +27,7 @@ from __future__ import annotations
 import json
 import logging
 import threading
+import time
 from typing import Any
 from typing import TYPE_CHECKING
 
@@ -42,6 +43,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 ATTACH_TIMEOUT = 15.0
+PROJECT_SETUP_TIMEOUT = 620.0
 MUTATE_TIMEOUT = 15.0
 SEND_MESSAGE_TIMEOUT = 30.0
 VIDEO_CHUNK_TIMEOUT = 30.0
@@ -61,6 +63,7 @@ class PackTab:
         conversation_id: int,
         host: str,
         session_id: str,
+        project_payload: dict[str, Any] | None = None,
     ) -> None:
         self.tab_id = tab_id
         self.title = title
@@ -68,6 +71,21 @@ class PackTab:
         self.conversation_id = conversation_id
         self.host = host
         self.session_id = session_id
+        self._project_payload = project_payload
+        self.project_name = project_payload.get("name") if project_payload else None
+        self.workspace_path = (
+            project_payload.get("workspace_path") if project_payload else None
+        )
+        self.project_fingerprint = (
+            project_payload.get("fingerprint") if project_payload else None
+        )
+        self.project_setup_state = "setting_up" if project_payload else None
+        self.project_setup_error: str | None = None
+        self._project_ready = threading.Event()
+        if project_payload is None:
+            self._project_ready.set()
+        self._workspace_status: dict[str, Any] | None = None
+        self._workspace_status_at = 0.0
 
         self.chat_state: ChatState | ConversationGraph = ConversationGraph()
         self.is_streaming = False
@@ -123,6 +141,10 @@ class PackTab:
             if not self.offline:
                 return
             self._transport = self._build_transport()
+            self.project_setup_error = None
+            if self._project_payload:
+                self.project_setup_state = "setting_up"
+                self._project_ready.clear()
         threading.Thread(target=self._connect, args=(None,), daemon=True).start()
 
     def _connect(self, model: str | None) -> None:
@@ -130,14 +152,50 @@ class PackTab:
             try:
                 self._transport.connect(model=model)
                 self._resync(timeout=ATTACH_TIMEOUT)
+                self._configure_project()
                 self.offline = False
                 self._notify_if_active()
             except PackTransportError as e:
                 logger.warning(f"Pack tab {self.tab_id} failed to connect: {e}")
                 self.offline = True
+                if self._project_payload:
+                    self.project_setup_state = "failed"
+                self.project_setup_error = str(e)
+                self._project_ready.set()
                 api = self._app_core.api
                 if api is not None:
                     api.on_error(self.tab_id, f"Pack tab offline: {e}")
+            except Exception as e:
+                logger.warning(f"Pack tab {self.tab_id} project setup failed: {e}")
+                self.offline = True
+                self.project_setup_state = "failed"
+                self.project_setup_error = str(e)
+                self._project_ready.set()
+                api = self._app_core.api
+                if api is not None:
+                    api.on_error(self.tab_id, f"Project setup failed: {e}")
+
+    def _configure_project(self) -> None:
+        if not self._project_payload:
+            self._project_ready.set()
+            return
+        try:
+            result = self._transport.send_request(
+                "configure_project",
+                self._project_payload,
+                timeout=PROJECT_SETUP_TIMEOUT,
+            )
+            self.workspace_path = result["workspace_path"]
+            self.project_name = self._project_payload["name"]
+            self.project_fingerprint = self._project_payload.get("fingerprint")
+            self.project_setup_state = "ready"
+            self._workspace_status = result.get("workspace_status")
+            self._workspace_status_at = time.monotonic()
+        except Exception as e:
+            self.project_setup_error = str(e)
+            raise
+        finally:
+            self._project_ready.set()
 
     def _ensure_connected(self, timeout: float) -> None:
         """Used by handle_user_message: if offline, try one synchronous
@@ -145,13 +203,23 @@ class PackTab:
         reconnect before giving up, so a user who's already looking at
         the tab and just types doesn't need to click away and back.
         """
-        if not self.offline and self._transport.connected:
-            return
-        self._transport = self._build_transport()
-        self._transport.connect()
-        self._resync(timeout=timeout)
-        self.offline = False
-        self._notify_if_active()
+        if self.offline or not self._transport.connected:
+            self._transport = self._build_transport()
+            self.project_setup_error = None
+            if self._project_payload:
+                self.project_setup_state = "setting_up"
+                self._project_ready.clear()
+            self._transport.connect()
+            self._resync(timeout=timeout)
+            self._configure_project()
+            self.offline = False
+            self._notify_if_active()
+        if not self._project_ready.wait(timeout=PROJECT_SETUP_TIMEOUT):
+            raise PackTransportError("timed out waiting for project setup")
+        if self.project_setup_error:
+            raise PackTransportError(
+                f"project setup failed: {self.project_setup_error}",
+            )
 
     def _notify_if_active(self) -> None:
         """Tell JS to re-fetch and repaint this tab's conversation if it's
@@ -396,7 +464,10 @@ class PackTab:
                 {"message": message, "images": images},
                 timeout=SEND_MESSAGE_TIMEOUT,
             )
-            self._current_answer_index = result.get("answer_index", self._current_answer_index)
+            self._current_answer_index = result.get(
+                "answer_index",
+                self._current_answer_index,
+            )
         except PackTransportError as e:
             logger.warning(f"Pack tab {self.tab_id} send_message failed: {e}")
             self.offline = True
@@ -413,7 +484,11 @@ class PackTab:
 
     def stop_streaming(self) -> None:
         try:
-            self._transport.send_request("stop_streaming", {}, timeout=STOP_STREAMING_TIMEOUT)
+            self._transport.send_request(
+                "stop_streaming",
+                {},
+                timeout=STOP_STREAMING_TIMEOUT,
+            )
         except PackTransportError as e:
             logger.warning(f"Pack tab {self.tab_id} stop_streaming failed: {e}")
 
@@ -425,6 +500,22 @@ class PackTab:
             {"model": model},
             timeout=MUTATE_TIMEOUT,
         )
+
+    def get_workspace_status(self, max_age: float = 5.0) -> dict[str, Any] | None:
+        if not self.project_name or not self.workspace_path or self.offline:
+            return self._workspace_status
+        if time.monotonic() - self._workspace_status_at < max_age:
+            return self._workspace_status
+        try:
+            self._workspace_status = self._transport.send_request(
+                "workspace_status",
+                {},
+                timeout=ATTACH_TIMEOUT,
+            )
+            self._workspace_status_at = time.monotonic()
+        except PackTransportError:
+            pass
+        return self._workspace_status
 
     def read_video_chunk(self, locator: str, offset: int) -> dict[str, Any]:
         """Fetch a bounded video chunk from the remote Pack daemon."""
@@ -472,6 +563,9 @@ class PackTab:
             "tab_id": self.tab_id,
             "name": self.title,
             "conversation_id": self.conversation_id,
+            "project": self.project_name,
+            "workspace_path": self.workspace_path,
+            "project_fingerprint": self.project_fingerprint,
         }
 
     def load_from_data(self, data: dict[str, Any]) -> None:
@@ -490,6 +584,11 @@ class PackTab:
             self.host = data["host"]
         if data.get("session_id"):
             self.session_id = data["session_id"]
+        self.project_name = data.get("project") or self.project_name
+        self.workspace_path = data.get("workspace_path") or self.workspace_path
+        self.project_fingerprint = (
+            data.get("project_fingerprint") or self.project_fingerprint
+        )
 
     def cleanup_resources(self) -> None:
         """Tear down only the local SSH subprocess/threads. Never signals

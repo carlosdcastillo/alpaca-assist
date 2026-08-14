@@ -43,8 +43,10 @@ class TabManager {
    * Mirrors createTab() almost exactly; only the API call and the UI's
    * pack badge differ.
    */
-  async createPackTab(host) {
-    const result = await this.api.create_pack_tab(host);
+  async createPackTab(host, project = "") {
+    const result = project
+      ? await this.api.create_pack_tab(host, "Pack Tab", project)
+      : await this.api.create_pack_tab(host);
 
     if (!result.success) {
       console.error("Failed to create pack tab:", result.error);
@@ -55,7 +57,7 @@ class TabManager {
     const convId = result.conversation_id;
     const title = `#${convId}`;
 
-    this.createTabUI(tabId, title, true, true);
+    this.createTabUI(tabId, title, true, true, result.project || null);
     this._convIds.set(tabId, convId);
     return tabId;
   }
@@ -85,9 +87,9 @@ class TabManager {
   /**
    * Create just the UI for a tab (used when Python already created the tab)
    */
-  createTabUI(tabId, title, autoSwitch = true, isPack = false) {
+  createTabUI(tabId, title, autoSwitch = true, isPack = false, project = null) {
     // Create tab button in UI
-    const tabButton = this._createTabButton(tabId, title, isPack);
+    const tabButton = this._createTabButton(tabId, title, isPack, project);
     this.container.appendChild(tabButton);
 
     // Create tab data structure
@@ -121,10 +123,18 @@ class TabManager {
   /**
    * Create tab button element
    */
-  _createTabButton(tabId, title, isPack = false) {
+  _createTabButton(tabId, title, isPack = false, project = null) {
     const button = document.createElement("div");
     button.className = isPack ? "tab pack" : "tab";
     button.dataset.tabId = tabId;
+
+    if (project) {
+      const projectSpan = document.createElement("span");
+      projectSpan.className = "tab-project";
+      projectSpan.textContent = project;
+      projectSpan.title = `Project: ${project}`;
+      button.appendChild(projectSpan);
+    }
 
     const titleSpan = document.createElement("span");
     titleSpan.className = "tab-title";

@@ -11,6 +11,8 @@ from typing import Optional
 from typing import TYPE_CHECKING
 
 from core.pack_tab import PackTab
+from core.projects import list_projects
+from core.projects import load_project
 from utils import ContentUpdate
 
 if TYPE_CHECKING:
@@ -124,6 +126,17 @@ class WebViewAPI:
             logger.error(f"Error reading pack file: {e}")
             return {"success": True, "hosts": []}
 
+    def get_projects(self) -> dict[str, Any]:
+        """Return configured projects from the user-owned ~/packs directory."""
+        try:
+            return {
+                "success": True,
+                "projects": [project.to_info() for project in list_projects()],
+            }
+        except Exception as e:
+            logger.error(f"Error reading projects: {e}")
+            return {"success": False, "error": str(e), "projects": []}
+
     @staticmethod
     def _read_pack_hosts() -> list[dict[str, str]]:
         """Parse pack.json into a list of {hostname, display_name} dicts.
@@ -181,10 +194,17 @@ class WebViewAPI:
                 if entry["hostname"] == hostname:
                     return entry["display_name"]
         except Exception:
-            logger.warning(f"Could not read pack.json to resolve display name for {hostname!r}")
+            logger.warning(
+                f"Could not read pack.json to resolve display name for {hostname!r}",
+            )
         return hostname
 
-    def create_pack_tab(self, host: str, title: str = "Pack Tab") -> dict[str, Any]:
+    def create_pack_tab(
+        self,
+        host: str,
+        title: str = "Pack Tab",
+        project: str = "",
+    ) -> dict[str, Any]:
         """Create a new Pack tab — a tab whose backend runs on `host` over SSH.
 
         Seeds the remote daemon's first-launch preferences with the local
@@ -197,11 +217,13 @@ class WebViewAPI:
         try:
             session_id = uuid.uuid4().hex
             model = self._app.core.preferences.get("model")
+            project_payload = self._project_payload(project, host, session_id)
             tab_id, tab = self._app.core.create_pack_tab(
                 host,
                 session_id,
                 title,
                 model=model,
+                project_payload=project_payload,
             )
             self._current_answer_index[tab_id] = -1
 
@@ -212,10 +234,40 @@ class WebViewAPI:
                 "conversation_id": tab.conversation_id,
                 "host": host,
                 "session_id": session_id,
+                "project": project_payload.get("name") if project_payload else None,
             }
         except Exception as e:
             logger.error(f"Error creating pack tab: {e}")
             return {"success": False, "error": str(e)}
+
+    @staticmethod
+    def _project_payload(
+        project: str | None,
+        host: str,
+        session_id: str,
+        workspace_path: str | None = None,
+    ) -> dict[str, Any] | None:
+        project_name = (project or "").strip()
+        if not project_name:
+            return None
+        try:
+            return load_project(project_name, host=host).to_payload(session_id)
+        except (OSError, ValueError):
+            if not workspace_path:
+                raise
+            # A removed project definition must not make an existing remote
+            # workspace unreachable. Reattach without runbook/spinup and let
+            # the status UI surface the missing local definition.
+            return {
+                "name": project_name,
+                "repo_url": "",
+                "branch": None,
+                "workspace_path": workspace_path,
+                "runbook": "",
+                "spinup": "",
+                "fingerprint": None,
+                "definition_missing": True,
+            }
 
     def copy_to_clipboard(self, text: str) -> dict[str, Any]:
         """Copy text to the system clipboard — used by code-block Copy buttons."""
@@ -430,6 +482,20 @@ class WebViewAPI:
                 pack_info["display_name"] = self._lookup_pack_display_name(
                     pack_info["host"],
                 )
+                pack_info["project"] = getattr(tab, "project_name", None)
+                pack_info["workspace_path"] = getattr(tab, "workspace_path", None)
+                pack_info["project_setup_error"] = getattr(
+                    tab,
+                    "project_setup_error",
+                    None,
+                )
+                pack_info["project_setup_state"] = getattr(
+                    tab,
+                    "project_setup_state",
+                    None,
+                )
+                if isinstance(tab, PackTab):
+                    pack_info["workspace_status"] = tab.get_workspace_status()
 
             return {
                 "success": True,
@@ -485,12 +551,19 @@ class WebViewAPI:
             title = tab_data.get("name") or tab_data.get("title") or "Chat"
             # Reuse the permanent conversation_id — don't allocate a new one.
             if tab_data.get("tab_type") == "pack":
+                project_kwargs = {}
+                if tab_data.get("project"):
+                    project_kwargs = {
+                        "project": tab_data["project"],
+                        "workspace_path": tab_data.get("workspace_path"),
+                    }
                 result = self.create_pack_tab_and_notify_js(
                     tab_data.get("host", ""),
                     tab_data.get("session_id", ""),
                     title,
                     auto_switch=True,
                     conversation_id=conv_id,
+                    **project_kwargs,
                 )
             else:
                 result = self.create_tab_and_notify_js(
@@ -913,7 +986,12 @@ class WebViewAPI:
             logger.error(f"Error attaching image: {e}")
             return {"success": False, "error": str(e)}
 
-    def get_video_chunk(self, tab_id: str, locator: str, offset: int = 0) -> dict[str, Any]:
+    def get_video_chunk(
+        self,
+        tab_id: str,
+        locator: str,
+        offset: int = 0,
+    ) -> dict[str, Any]:
         """Return one bounded video chunk without storing bytes in chat state."""
         try:
             tab = self._app.core.tabs.get(tab_id)
@@ -1394,6 +1472,8 @@ class WebViewAPI:
         title: str = "Pack Tab",
         auto_switch: bool = True,
         conversation_id: int | None = None,
+        project: str | None = None,
+        workspace_path: str | None = None,
     ) -> dict[str, Any]:
         """Create a new Pack tab and notify JavaScript to create the UI.
 
@@ -1403,17 +1483,25 @@ class WebViewAPI:
         reuse the exact session id the remote daemon is keyed on.
         """
         try:
+            project_payload = self._project_payload(
+                project,
+                host,
+                session_id,
+                workspace_path=workspace_path,
+            )
             tab_id, tab = self._app.core.create_pack_tab(
                 host,
                 session_id,
                 title,
                 conversation_id=conversation_id,
+                project_payload=project_payload,
             )
             self._current_answer_index[tab_id] = -1
 
             self._safe_evaluate_js(
                 f"app.tabManager.createTabUI({json.dumps(tab_id)}, {json.dumps(title)}, "
-                f"{json.dumps(auto_switch)}, true);",
+                f"{json.dumps(auto_switch)}, true, "
+                f"{json.dumps(project_payload.get('name') if project_payload else None)});",
             )
             self._safe_evaluate_js(
                 f"app.tabManager.setConversationId({json.dumps(tab_id)}, {tab.conversation_id});",
@@ -1431,6 +1519,7 @@ class WebViewAPI:
                 "conversation_id": tab.conversation_id,
                 "host": host,
                 "session_id": session_id,
+                "project": project_payload.get("name") if project_payload else None,
             }
         except Exception as e:
             logger.error(f"Error creating pack tab: {e}")

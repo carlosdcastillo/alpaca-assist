@@ -66,12 +66,17 @@ class PythonAPI {
     return this.call("create_tab", title);
   }
 
-  async create_pack_tab(host, title = "Pack Tab") {
-    return this.call("create_pack_tab", host, title);
+  async create_pack_tab(host, title = "Pack Tab", project = "") {
+    if (!project) return this.call("create_pack_tab", host, title);
+    return this.call("create_pack_tab", host, title, project);
   }
 
   async get_pack_hosts() {
     return this.call("get_pack_hosts");
+  }
+
+  async get_projects() {
+    return this.call("get_projects");
   }
 
   async resolve_pack_session_lost(tabId, recreate) {

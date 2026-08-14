@@ -69,6 +69,15 @@ class ChatTabBase:
         self.session_input_tokens: int = 0
         self.session_cached_input_tokens: int = 0
 
+        # Set by the remote Pack daemon for project-bound conversations.
+        # Plain local tabs leave these values empty and behave exactly as before.
+        self.project_name: str | None = None
+        self.workspace_path: str | None = None
+        self.project_fingerprint: str | None = None
+        self.project_runbook = ""
+        self.project_spinup = ""
+        self.project_spinup_pending = False
+
         # One-shot callback fired by on_streaming_complete (e.g. handoff post-processing).
         # Cleared after firing so it only runs once.
         self._on_streaming_complete_callback: Callable[[], None] | None = None
@@ -104,12 +113,22 @@ class ChatTabBase:
 
     def get_serializable_data(self) -> dict[str, Any]:
         """Get serializable data for session saving."""
-        return {
+        data = {
             "chat_state": self.chat_state.to_dict(),
             "tab_id": self.tab_id,
             "name": self.title,
             "conversation_id": self.conversation_id,
         }
+        if self.project_name:
+            data.update(
+                {
+                    "project": self.project_name,
+                    "workspace_path": self.workspace_path,
+                    "project_fingerprint": self.project_fingerprint,
+                    "project_spinup_pending": self.project_spinup_pending,
+                },
+            )
+        return data
 
     def load_from_data(self, data: dict[str, Any]) -> None:
         """Load tab data from serialized form.
@@ -127,3 +146,7 @@ class ChatTabBase:
             self.chat_state = ChatState.from_dict(chat_state_data)
 
         self.title = data.get("name", data.get("title", "Chat"))
+        self.project_name = data.get("project") or None
+        self.workspace_path = data.get("workspace_path") or None
+        self.project_fingerprint = data.get("project_fingerprint") or None
+        self.project_spinup_pending = bool(data.get("project_spinup_pending", False))

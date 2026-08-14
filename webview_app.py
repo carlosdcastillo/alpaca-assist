@@ -174,12 +174,19 @@ class ChatApp:
                     int(saved_conv_id_raw) if saved_conv_id_raw is not None else None
                 )
                 if tab_data.get("tab_type") == "pack":
+                    project_kwargs = {}
+                    if tab_data.get("project"):
+                        project_kwargs = {
+                            "project": tab_data["project"],
+                            "workspace_path": tab_data.get("workspace_path"),
+                        }
                     result = self.api.create_pack_tab_and_notify_js(
                         tab_data.get("host", ""),
                         tab_data.get("session_id", ""),
                         title,
                         auto_switch=False,
                         conversation_id=saved_conv_id,
+                        **project_kwargs,
                     )
                 else:
                     result = self.api.create_tab_and_notify_js(

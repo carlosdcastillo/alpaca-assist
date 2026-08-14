@@ -958,6 +958,9 @@ class OllamaRequestHandler(BaseHTTPRequestHandler):
                     DEFAULT_MODEL,
                 )
                 conversation_id = request_data.get("conversation_id")
+                working_directory = request_data.get("working_directory")
+                if not isinstance(working_directory, str):
+                    working_directory = None
 
                 # Extract tool call token from headers for secure tag-based detection
                 tool_call_token = self.headers.get("X-Tool-Call-Token")
@@ -995,6 +998,7 @@ class OllamaRequestHandler(BaseHTTPRequestHandler):
                     tool_call_token,
                     request_system,
                     conversation_id,
+                    working_directory,
                 )
             except json.JSONDecodeError:
                 self.send_error(400, "Invalid JSON")
@@ -1011,6 +1015,7 @@ class OllamaRequestHandler(BaseHTTPRequestHandler):
         tool_call_token: str | None = None,
         request_system: str | None = None,
         conversation_id: int | str | None = None,
+        working_directory: str | None = None,
     ):
         """Handle requests with optional tools."""
         anthropic_tools = None
@@ -1040,6 +1045,7 @@ class OllamaRequestHandler(BaseHTTPRequestHandler):
             tools=anthropic_tools,
             tool_choice=tool_choice,
             conversation_id=conversation_id,
+            working_directory=working_directory,
         )
         self._process_stream(stream, tool_call_token)
 
@@ -1118,6 +1124,7 @@ class ClaudeClient:
         tools: list[dict] | None = None,
         tool_choice: dict | None = None,
         conversation_id: int | str | None = None,
+        working_directory: str | None = None,
     ) -> Generator[dict[str, Any], None, None]:
         """
         Send a streaming completion request to Claude 3.7 Sonnet
@@ -1253,6 +1260,7 @@ class FireworksClient:
         tools: list[dict] | None = None,
         tool_choice: dict | None = None,
         conversation_id: int | str | None = None,
+        working_directory: str | None = None,
     ) -> Generator[dict[str, Any], None, None]:
         url = f"{self.base_url}/messages"
 
@@ -1390,7 +1398,11 @@ def _build_claude_mcp_config_file() -> str | None:
     return path
 
 
-def _run_cli_jsonl(cmd: list[str], prompt: str) -> Generator[dict[str, Any], None, None]:
+def _run_cli_jsonl(
+    cmd: list[str],
+    prompt: str,
+    working_directory: str | None = None,
+) -> Generator[dict[str, Any], None, None]:
     """Run a CLI subprocess, feed it `prompt` on stdin, yield parsed JSONL stdout lines."""
     proc = subprocess.Popen(
         cmd,
@@ -1400,6 +1412,7 @@ def _run_cli_jsonl(cmd: list[str], prompt: str) -> Generator[dict[str, Any], Non
         text=True,
         bufsize=1,
         encoding="utf-8",
+        cwd=working_directory,
     )
     try:
         assert proc.stdin is not None and proc.stdout is not None
@@ -1451,6 +1464,7 @@ class ClaudeCodeCLIClient:
         tools: list[dict] | None = None,
         tool_choice: dict | None = None,
         conversation_id: int | str | None = None,
+        working_directory: str | None = None,
     ) -> Generator[dict[str, Any], None, None]:
         alias = model.split("/", 1)[1] if "/" in model else model
 
@@ -1491,7 +1505,7 @@ class ClaudeCodeCLIClient:
         text_block_indices: set[int] = set()
 
         try:
-            for line in _run_cli_jsonl(cmd, prompt):
+            for line in _run_cli_jsonl(cmd, prompt, working_directory):
                 line_type = line.get("type")
 
                 if line_type == "result":
@@ -1578,9 +1592,18 @@ class CodexCLIClient:
         tools: list[dict] | None = None,
         tool_choice: dict | None = None,
         conversation_id: int | str | None = None,
+        working_directory: str | None = None,
     ) -> Generator[dict[str, Any], None, None]:
         alias = model.split("/", 1)[1] if "/" in model else model
         prompt = _flatten_transcript(messages)
+
+        system_text = SYSTEM_PROMPT
+        if isinstance(system, list):
+            system_text = "\n\n".join(
+                block.get("text", "") for block in system if isinstance(block, dict)
+            )
+        elif isinstance(system, str):
+            system_text = system
 
         # No --ask-for-approval on `codex exec` in this CLI version (0.147.0)
         # — verified against `codex exec --help`, which has no such flag at
@@ -1600,10 +1623,12 @@ class CodexCLIClient:
             "--skip-git-repo-check",
             "-m",
             alias,
+            "-c",
+            f"developer_instructions={json.dumps(system_text)}",
         ]
 
         yielded_start = False
-        for line in _run_cli_jsonl(cmd, prompt):
+        for line in _run_cli_jsonl(cmd, prompt, working_directory):
             if not yielded_start:
                 yield {"type": "message_start", "message": {"usage": {}}}
                 yielded_start = True
@@ -1714,13 +1739,17 @@ if __name__ == "__main__":
         claude_code_cli_client = ClaudeCodeCLIClient()
         print("claude CLI found on PATH — claude-code/* models available")
     else:
-        print("Warning: `claude` not found on PATH — claude-code/* models will not be available")
+        print(
+            "Warning: `claude` not found on PATH — claude-code/* models will not be available"
+        )
 
     if shutil.which("codex"):
         codex_cli_client = CodexCLIClient()
         print("codex CLI found on PATH — codex/* models available (UNVERIFIED backend)")
     else:
-        print("Warning: `codex` not found on PATH — codex/* models will not be available")
+        print(
+            "Warning: `codex` not found on PATH — codex/* models will not be available"
+        )
 
     local_client = ClaudeClient(
         api_key="local",

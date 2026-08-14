@@ -543,18 +543,41 @@ class AlpacaApp {
           value: h.hostname,
           label: h.display_name,
         }));
-        const host = await this._showMessageDialog(
-          "Remote host (user@host):",
+        const host = await this._showMessageDialog("Remote host (user@host):", {
+          title: "New Pack Tab",
+          cancelText: "Cancel",
+          withInput: true,
+          selectOptions,
+        });
+        if (!host || !host.trim()) break;
+
+        const projectsResult = await this.api.get_projects();
+        const projects =
+          projectsResult && projectsResult.success
+            ? projectsResult.projects || []
+            : [];
+        const projectOptions = [
+          { value: "", label: "None — raw Pack tab" },
+          ...projects.map((project) => ({
+            value: project.name,
+            label: `${project.name} — ${project.repo_url}${
+              project.branch ? ` (${project.branch})` : ""
+            }`,
+          })),
+        ];
+        const project = await this._showMessageDialog(
+          "Choose a project for this remote conversation:",
           {
-            title: "New Pack Tab",
+            title: "New Pack Tab · Project",
+            okText: "Create",
             cancelText: "Cancel",
-            withInput: true,
-            selectOptions,
+            selectOptions: projectOptions,
+            selectCustomLabel: null,
           },
         );
-        if (host && host.trim()) {
-          await this.tabManager.createPackTab(host.trim());
-        }
+        if (project === null) break;
+
+        await this.tabManager.createPackTab(host.trim(), project);
         break;
       }
       case "close-tab":
@@ -1094,7 +1117,8 @@ class AlpacaApp {
     list.innerHTML = "";
     for (const conv of conversations) {
       const row = document.createElement("div");
-      row.className = conv.tab_type === "pack" ? "history-row pack" : "history-row";
+      row.className =
+        conv.tab_type === "pack" ? "history-row pack" : "history-row";
       row.dataset.convId = conv.id;
 
       const closedDate = this._formatHistoryDate(conv.closed_date);
@@ -2189,15 +2213,20 @@ class AlpacaApp {
           option.textContent = label;
           select.appendChild(option);
         }
-        const customOption = document.createElement("option");
-        customOption.value = "__custom__";
-        customOption.textContent = selectCustomLabel;
-        select.appendChild(customOption);
+        if (selectCustomLabel !== null) {
+          const customOption = document.createElement("option");
+          customOption.value = "__custom__";
+          customOption.textContent = selectCustomLabel;
+          select.appendChild(customOption);
+        }
         select.value = selectOptions[0].value;
       }
 
       const showInputNow = withInput && !hasSelect;
-      input.classList.toggle("active", showInputNow || (hasSelect && select.value === "__custom__"));
+      input.classList.toggle(
+        "active",
+        showInputNow || (hasSelect && select.value === "__custom__"),
+      );
       input.value = resolvesToText ? inputDefault : "";
 
       const overlay = document.getElementById("message-dialog-overlay");
@@ -2224,7 +2253,11 @@ class AlpacaApp {
           resolve(null);
           return;
         }
-        resolve(hasSelect && select.value !== "__custom__" ? select.value : input.value);
+        resolve(
+          hasSelect && select.value !== "__custom__"
+            ? select.value
+            : input.value,
+        );
       };
       const onOk = () => cleanup(true);
       const onCancel = () => cleanup(false);
@@ -2504,6 +2537,28 @@ class AlpacaApp {
     const leftParts = [
       `Chat: ${result.char_count.toLocaleString()} chars, ${result.line_count.toLocaleString()} lines`,
     ];
+    if (result.project) {
+      const workspace = result.workspace_status || {};
+      const projectParts = [result.workspace_path || result.project];
+      if (result.project_setup_state === "setting_up") {
+        projectParts.push("setting up…");
+      }
+      if (workspace.branch) projectParts.push(workspace.branch);
+      if (workspace.dirty !== null && workspace.dirty !== undefined) {
+        projectParts.push(
+          workspace.dirty ? `● ${workspace.dirty} dirty` : "✓ clean",
+        );
+      }
+      if (workspace.unpushed !== null && workspace.unpushed !== undefined) {
+        projectParts.push(`↑ ${workspace.unpushed} unpushed`);
+      } else if (workspace.is_git) {
+        projectParts.push("no upstream");
+      }
+      if (result.project_setup_error) {
+        projectParts.push(`setup failed: ${result.project_setup_error}`);
+      }
+      leftParts.unshift(projectParts.join(" · "));
+    }
     if (result.session_output_tokens > 0 || result.session_input_tokens > 0) {
       // "in" already includes cached tokens (both cache writes and cache
       // reads) — surface how much of it was cache-discounted rather than
@@ -2523,6 +2578,7 @@ class AlpacaApp {
       leftParts.push(`~${result.token_estimate.toLocaleString()} tokens (est)`);
     }
     statusText.textContent = leftParts.join(", ");
+    statusText.title = result.workspace_path || "";
 
     // Right: streaming indicator + skills
     const rightParts = [isStreaming ? "🟢 Streaming" : "⚪ Idle"];
@@ -2571,11 +2627,21 @@ class AlpacaApp {
       const host = info.host || "unknown host";
       const label = info.display_name || host;
       if (info.connected) {
-        badge.textContent = `Pack: ${label}`;
-        badge.title = `Connected to ${host}`;
+        if (info.project) {
+          const setupSuffix =
+            info.project_setup_state === "setting_up" ? " (setting up…)" : "";
+          badge.textContent = `${info.project} · ${label}${setupSuffix}`;
+        } else {
+          badge.textContent = `Pack: ${label}`;
+        }
+        badge.title = info.workspace_path
+          ? `Connected to ${host}\n${info.workspace_path}`
+          : `Connected to ${host}`;
         badge.classList.add("status-connection--connected");
       } else {
-        badge.textContent = `Pack: ${label} (offline)`;
+        badge.textContent = info.project
+          ? `${info.project} · ${label} (offline)`
+          : `Pack: ${label} (offline)`;
         badge.title = `Disconnected from ${host}`;
         badge.classList.add("status-connection--disconnected");
       }

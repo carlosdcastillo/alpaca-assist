@@ -139,6 +139,34 @@ class AppCore:
         """Return the <available_skills> XML block for system prompt injection."""
         return self.skill_manager.to_prompt_xml()
 
+    def get_system_prompt(self, tab: Any) -> str:
+        """Compose global skills with an optional Pack project runbook."""
+        sections = [self.get_skills_xml()]
+        project_name = getattr(tab, "project_name", None)
+        workspace_path = getattr(tab, "workspace_path", None)
+        if project_name and workspace_path:
+            sections.append(
+                "<project_context>\n"
+                f"Project: {project_name}\n"
+                f"Workspace: {workspace_path}\n"
+                "Perform all project filesystem and shell work in this workspace. "
+                "Relative tool paths resolve there by default.\n"
+                "</project_context>",
+            )
+            runbook = getattr(tab, "project_runbook", "")
+            if runbook:
+                sections.append(f"<project_runbook>\n{runbook}\n</project_runbook>")
+            spinup = getattr(tab, "project_spinup", "")
+            if spinup and getattr(tab, "project_spinup_pending", False):
+                sections.append(
+                    "<project_spinup>\n"
+                    "Before addressing the user's request, perform the following setup "
+                    "in the project workspace. Stop and report the failure if setup fails.\n\n"
+                    f"{spinup}\n"
+                    "</project_spinup>",
+                )
+        return "\n\n".join(section for section in sections if section)
+
     def reload_mcp_servers(self) -> None:
         """Tear down all MCP connections and reload config from disk."""
         if not self.event_loop:
@@ -339,6 +367,7 @@ class AppCore:
         title: str | None = None,
         model: str | None = None,
         conversation_id: int | None = None,
+        project_payload: dict[str, Any] | None = None,
     ) -> tuple[str, PackTab]:
         """Create a new Pack tab — a tab whose backend runs on a remote
 
@@ -357,7 +386,15 @@ class AppCore:
         if conversation_id is None:
             conversation_id = self.db.allocate_conversation_id()
 
-        tab = PackTab(tab_id, title, self, conversation_id, host, session_id)
+        tab = PackTab(
+            tab_id,
+            title,
+            self,
+            conversation_id,
+            host,
+            session_id,
+            project_payload=project_payload,
+        )
         self.tabs[tab_id] = tab
         tab.connect_async(model=model)
         return tab_id, tab

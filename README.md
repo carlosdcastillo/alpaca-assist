@@ -99,6 +99,37 @@ External tool servers are configured in `mcp_servers.json` (see
 `mcp_servers.json.example`). Server-provided tools appear in chat as collapsible
 fold widgets.
 
+### Pack projects
+
+Remote Pack tabs can optionally bind each new conversation to a project. Local
+tabs remain projectless. Project definitions live on the local machine under
+`~/packs`; choose **None — raw Pack tab** to retain the original unmanaged
+remote behavior.
+
+```text
+~/packs/
+└── my-project/
+    ├── project.toml
+    ├── RUNBOOK.md
+    ├── SPINUP.md
+    └── hosts/
+        └── build-host.md
+```
+
+```toml
+repo_url = "git@github.com:example/my-project.git"
+branch = "main"                         # optional
+workspace_base = "~/workspaces"        # optional
+workspace_naming = "{project}-{session_id}" # optional
+```
+
+The app clones the repository into an independent workspace on the selected
+Pack host. `RUNBOOK.md` (plus an optional matching host overlay) is included in
+every model request. `SPINUP.md` is included on the first turn so the agent
+performs project-specific setup before the user's task. Relative built-in file,
+search, and shell tool paths default to the managed workspace. Reopening the
+conversation reuses the same workspace; closing it never deletes remote files.
+
 ## Features
 
 - **Streaming responses** with live markdown rendering and syntax-highlighted

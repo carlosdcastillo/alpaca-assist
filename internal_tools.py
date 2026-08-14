@@ -87,7 +87,19 @@ def _get_filepath(arguments: dict[str, Any], required: bool = True) -> str:
         raise ValueError(
             "Missing required argument: 'filepath' or 'file_path' must be provided",
         )
-    return fp or ""
+    return _workspace_relative(fp or "")
+
+
+def _workspace_relative(path: str) -> str:
+    """Resolve relative project-tool paths inside a configured Pack workspace."""
+    workspace = os.environ.get("ALPACA_WORKSPACE")
+    if workspace and path and not os.path.isabs(path):
+        return os.path.join(workspace, path)
+    return path
+
+
+def _default_tool_directory() -> str:
+    return os.environ.get("ALPACA_WORKSPACE") or "."
 
 
 def _file_exists(filepath: str, tramp: Any) -> tuple[bool, str]:
@@ -163,7 +175,7 @@ def get_time(arguments: dict[str, Any]) -> dict[str, Any]:
 
 def list_files(arguments: dict[str, Any]) -> dict[str, Any]:
     tramp, tramp_error = _get_tramp()
-    path = arguments.get("path", ".")
+    path = _workspace_relative(arguments.get("path") or _default_tool_directory())
     try:
         if tramp and tramp.is_tramp_path(path):
             if not tramp:
@@ -404,7 +416,9 @@ def view_image(arguments: dict[str, Any]) -> dict[str, Any]:
             f"Loaded '{filepath}' ({orig_size[0]}x{orig_size[1]} {orig_format}"
             f"{resized_note}, {len(encoded_bytes)} bytes as {mime_type})."
         )
-        return _ok(image_tool_result.encode_image_result(mime_type, b64_data, description))
+        return _ok(
+            image_tool_result.encode_image_result(mime_type, b64_data, description),
+        )
     except Exception as e:
         return _err(f"Error loading image: {e}")
 
@@ -566,7 +580,9 @@ def modify_file(arguments: dict[str, Any]) -> dict[str, Any]:
 
 
 def search_files_for_text(arguments: dict[str, Any]) -> dict[str, Any]:
-    directory = arguments.get("directory", ".")
+    directory = _workspace_relative(
+        arguments.get("directory") or _default_tool_directory(),
+    )
     pattern = arguments.get("search_pattern", "")
     file_pattern = arguments.get("file_pattern")
     case_insensitive = arguments.get("case_insensitive", False)

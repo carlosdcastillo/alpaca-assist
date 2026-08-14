@@ -97,9 +97,9 @@ class StreamingHandler:
         if api is not None:
             api.on_streaming_start(self._chat.tab_id, answer_index)
 
-        # Get available tools and skills
+        # Get available tools and the tab-specific system prompt.
         tools = self._chat._app_core.get_available_mcp_tools()
-        skills_xml = self._chat._app_core.get_skills_xml()
+        system_prompt = self._chat._app_core.get_system_prompt(self._chat)
 
         # Prepare data payload
         chat_history_images: list[list[str]] = (
@@ -128,7 +128,7 @@ class StreamingHandler:
         # Start the streaming request thread
         self._current_thread = threading.Thread(
             target=self._fetch_response,
-            args=(answer_index, data_payload, tools, skills_xml),
+            args=(answer_index, data_payload, tools, system_prompt),
             daemon=True,
         )
         self._current_thread.start()
@@ -212,6 +212,13 @@ class StreamingHandler:
                 ollama_payload["tools"] = tools
                 logger.info(f"[CONTINUATION] Added {len(tools)} tools")
 
+            system_prompt = self._chat._app_core.get_system_prompt(self._chat)
+            if system_prompt:
+                ollama_payload["system"] = system_prompt
+            workspace_path = getattr(self._chat, "workspace_path", None)
+            if workspace_path:
+                ollama_payload["working_directory"] = workspace_path
+
             # Make the continuation request
             api_url = self._chat.preferences.get(
                 "api_url",
@@ -263,7 +270,7 @@ class StreamingHandler:
         answer_index: int,
         data_payload: dict[str, Any],
         tools: list[dict[str, Any]] | None,
-        skills_xml: str | None,
+        system_prompt: str | None,
     ) -> None:
         """Execute HTTP request and hand response to processor.
 
@@ -271,7 +278,7 @@ class StreamingHandler:
             answer_index: Index of the answer being generated.
             data_payload: Complete payload for the request (replaces input_queue pattern).
             tools: Available MCP tools for the request.
-            skills_xml: Skills XML for system prompt (if any).
+            system_prompt: Skills and project instructions (if any).
 
         Note:
             Streaming flags (_streaming, is_streaming) are reset here after
@@ -315,9 +322,11 @@ class StreamingHandler:
             if tools:
                 ollama_payload["tools"] = tools
 
-            # Add skills XML if available
-            if skills_xml:
-                ollama_payload["system"] = skills_xml
+            if system_prompt:
+                ollama_payload["system"] = system_prompt
+            workspace_path = getattr(self._chat, "workspace_path", None)
+            if workspace_path:
+                ollama_payload["working_directory"] = workspace_path
 
             # Make the streaming request
             api_url = self._chat.preferences.get(
