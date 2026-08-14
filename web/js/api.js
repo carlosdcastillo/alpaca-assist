@@ -278,8 +278,8 @@ class PythonAPI {
   // Conversation History
   // =======================================================================
 
-  async get_history(searchTerm = "") {
-    return this.call("get_history", searchTerm);
+  async get_history(searchTerm = "", folder = null, archived = false) {
+    return this.call("get_history", searchTerm, folder, archived);
   }
 
   async revive_conversation(convId) {
@@ -288,6 +288,22 @@ class PythonAPI {
 
   async delete_history_entry(convId) {
     return this.call("delete_history_entry", convId);
+  }
+
+  async update_history_entry(convId, changes) {
+    return this.call("update_history_entry", convId, changes);
+  }
+
+  async delete_history_entries(convIds) {
+    return this.call("delete_history_entries", convIds);
+  }
+
+  async export_history_backup(convIds = []) {
+    return this.call("export_history_backup", convIds);
+  }
+
+  async import_history_backup() {
+    return this.call("import_history_backup");
   }
 
   // =======================================================================

@@ -106,10 +106,11 @@ class TestGetHistoryReportsTabType:
 
     def test_pack_and_regular_rows_both_report_their_tab_type(self) -> None:
         mock_app = Mock()
-        mock_app.core.db.get_conversations.return_value = [
-            (1, "Remote Chat", "2026-01-01", "2026-01-02", 0, "pack"),
-            (2, "Local Chat", "2026-01-01", "2026-01-02", 0, None),
+        mock_app.core.db.get_history_records.return_value = [
+            {"id": 1, "title": "Remote Chat", "tab_type": "pack"},
+            {"id": 2, "title": "Local Chat", "tab_type": None},
         ]
+        mock_app.core.db.get_history_facets.return_value = {"folders": []}
         api = WebViewAPI(mock_app)
 
         result = api.get_history()

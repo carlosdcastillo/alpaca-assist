@@ -266,6 +266,35 @@ class AlpacaApp {
     document
       .getElementById("history-delete-btn")
       .addEventListener("click", () => this._deleteHistoryEntry());
+    document
+      .getElementById("history-rename-btn")
+      .addEventListener("click", () => this._renameHistoryEntry());
+    document
+      .getElementById("history-pin-btn")
+      .addEventListener("click", () => this._toggleHistoryMetadata("pinned"));
+    document
+      .getElementById("history-archive-btn")
+      .addEventListener("click", () => this._toggleHistoryMetadata("archived"));
+    document
+      .getElementById("history-folder-btn")
+      .addEventListener("click", () => this._editHistoryFolder());
+    document
+      .getElementById("history-tags-btn")
+      .addEventListener("click", () => this._editHistoryTags());
+    document
+      .getElementById("history-backup-btn")
+      .addEventListener("click", () => this._backupHistory());
+    document
+      .getElementById("history-import-btn")
+      .addEventListener("click", () => this._importHistory());
+    document
+      .getElementById("history-select-all")
+      .addEventListener("change", (e) =>
+        this._selectAllHistory(e.target.checked),
+      );
+    document.querySelectorAll("[data-history-filter]").forEach((button) => {
+      button.addEventListener("click", () => this._setHistoryFilter(button));
+    });
 
     // History search (debounced)
     document.getElementById("history-search").addEventListener("input", (e) => {
@@ -1081,7 +1110,15 @@ class AlpacaApp {
    */
   async _showHistoryDialog() {
     this._showDialog("history-dialog");
+    document.getElementById("history-more-menu").removeAttribute("open");
     document.getElementById("history-search").value = "";
+    this._historyFilter = "all";
+    this._historyFolder = null;
+    this._historyConversations = [];
+    this._historySelectedIds = new Set();
+    document.querySelectorAll("[data-history-filter]").forEach((button) => {
+      button.classList.toggle("active", button.dataset.historyFilter === "all");
+    });
     document.getElementById("history-search").focus();
     await this._loadHistory("");
   }
@@ -1093,14 +1130,29 @@ class AlpacaApp {
     const list = document.getElementById("history-list");
     list.innerHTML = '<div class="history-empty">Loading...</div>';
 
-    const result = await this.api.get_history(searchTerm);
+    const archived = this._historyFilter === "archived";
+    const result = await this.api.get_history(
+      searchTerm,
+      this._historyFolder,
+      archived,
+    );
     if (!result.success) {
       list.innerHTML =
         '<div class="history-empty">Failed to load history.</div>';
       return;
     }
 
-    const conversations = result.conversations || [];
+    let conversations = result.conversations || [];
+    if (this._historyFilter === "pinned") {
+      conversations = conversations.filter((conv) => conv.pinned);
+    }
+    this._historyConversations = conversations;
+    this._historySelectedIds = new Set(
+      [...(this._historySelectedIds || [])].filter((id) =>
+        conversations.some((conv) => conv.id === id),
+      ),
+    );
+    this._renderHistoryFolders(result.folders || []);
     document.getElementById("history-count").textContent =
       conversations.length === 0
         ? ""
@@ -1111,6 +1163,7 @@ class AlpacaApp {
     if (conversations.length === 0) {
       list.innerHTML =
         '<div class="history-empty">No conversations found.</div>';
+      this._updateHistorySelection();
       return;
     }
 
@@ -1123,24 +1176,90 @@ class AlpacaApp {
 
       const closedDate = this._formatHistoryDate(conv.closed_date);
       const createdDate = this._formatHistoryDate(conv.created_date);
+      const check = document.createElement("input");
+      check.type = "checkbox";
+      check.className = "history-row-check";
+      check.checked = this._historySelectedIds.has(conv.id);
+      check.setAttribute("aria-label", `Select ${conv.title}`);
+      check.addEventListener("click", (event) => event.stopPropagation());
+      check.addEventListener("change", () => {
+        if (check.checked) this._historySelectedIds.add(conv.id);
+        else this._historySelectedIds.delete(conv.id);
+        this._updateHistorySelection();
+      });
+
+      const pinEl = document.createElement("span");
+      pinEl.className = "history-row-pin";
+      pinEl.textContent = conv.pinned ? "★" : "";
+
+      const mainEl = document.createElement("div");
+      mainEl.className = "history-row-main";
       const titleEl = document.createElement("div");
       titleEl.className = "history-row-title";
       titleEl.textContent = conv.title;
       titleEl.title = conv.title;
+      const snippetEl = document.createElement("div");
+      snippetEl.className = "history-row-snippet";
+      snippetEl.textContent = conv.preview || "No text preview available";
+      const badgesEl = document.createElement("div");
+      badgesEl.className = "history-row-badges";
+      [conv.folder, ...(conv.tags || [])].filter(Boolean).forEach((label) => {
+        const badge = document.createElement("span");
+        badge.className = "history-badge";
+        badge.textContent = label;
+        badgesEl.appendChild(badge);
+      });
+      mainEl.append(titleEl, snippetEl, badgesEl);
 
       const dateEl = document.createElement("div");
       dateEl.className = "history-row-date";
       dateEl.textContent = closedDate;
       dateEl.title = `Created: ${createdDate}\nClosed: ${closedDate}`;
 
-      row.appendChild(titleEl);
-      row.appendChild(dateEl);
-      row.addEventListener("click", () => this._selectHistoryRow(row));
+      row.append(check, pinEl, mainEl, dateEl);
+      row.addEventListener("click", () => this._selectHistoryRow(row, conv));
       row.addEventListener("dblclick", () =>
         this._reviveSelectedConversation(),
       );
       list.appendChild(row);
     }
+    this._updateHistorySelection();
+  }
+
+  _renderHistoryFolders(folders) {
+    const container = document.getElementById("history-folders");
+    container.innerHTML = "";
+    for (const folder of folders) {
+      const button = document.createElement("button");
+      button.className = "history-filter";
+      button.textContent = `▱ ${folder}`;
+      button.title = folder;
+      button.classList.toggle("active", this._historyFolder === folder);
+      button.addEventListener("click", () => {
+        this._historyFolder = folder;
+        this._historyFilter = "all";
+        document
+          .querySelectorAll(".history-filter")
+          .forEach((item) => item.classList.toggle("active", item === button));
+        this._reloadHistory();
+      });
+      container.appendChild(button);
+    }
+  }
+
+  _setHistoryFilter(button) {
+    this._historyFilter = button.dataset.historyFilter;
+    this._historyFolder = null;
+    document
+      .querySelectorAll(".history-filter")
+      .forEach((item) => item.classList.toggle("active", item === button));
+    this._reloadHistory();
+  }
+
+  _reloadHistory() {
+    return this._loadHistory(
+      document.getElementById("history-search").value.trim(),
+    );
   }
 
   _formatHistoryDate(dateStr) {
@@ -1159,11 +1278,87 @@ class AlpacaApp {
     }
   }
 
-  _selectHistoryRow(row) {
+  _selectHistoryRow(row, conversation = null) {
     document
       .querySelectorAll("#history-list .history-row.selected")
       .forEach((r) => r.classList.remove("selected"));
     row.classList.add("selected");
+    const conv =
+      conversation ||
+      this._historyConversations.find(
+        (item) => item.id === parseInt(row.dataset.convId, 10),
+      );
+    if (conv) {
+      this._renderHistoryPreview(conv);
+      document.getElementById("history-pin-btn").textContent = conv.pinned
+        ? "Unpin"
+        : "Pin";
+      document.getElementById("history-archive-btn").textContent = conv.archived
+        ? "Restore"
+        : "Archive";
+    }
+  }
+
+  _renderHistoryPreview(conv) {
+    const preview = document.getElementById("history-preview");
+    preview.innerHTML = "";
+    const title = document.createElement("h4");
+    title.className = "history-preview-title";
+    title.textContent = conv.title;
+    const meta = document.createElement("div");
+    meta.className = "history-preview-meta";
+    meta.textContent = [
+      `Created ${this._formatHistoryDate(conv.created_date)}`,
+      `Last closed ${this._formatHistoryDate(conv.closed_date)}`,
+      conv.folder ? `Folder: ${conv.folder}` : "",
+      conv.tags?.length ? `Tags: ${conv.tags.join(", ")}` : "",
+    ]
+      .filter(Boolean)
+      .join("\n");
+    const text = document.createElement("div");
+    text.className = "history-preview-text";
+    text.textContent =
+      conv.preview || "No text preview is available for this conversation.";
+    preview.append(title, meta, text);
+  }
+
+  _selectedHistoryIds() {
+    if (this._historySelectedIds?.size) return [...this._historySelectedIds];
+    const primary = document.querySelector(
+      "#history-list .history-row.selected",
+    );
+    return primary ? [parseInt(primary.dataset.convId, 10)] : [];
+  }
+
+  _primaryHistoryConversation() {
+    const primary = document.querySelector(
+      "#history-list .history-row.selected",
+    );
+    if (!primary) return null;
+    const id = parseInt(primary.dataset.convId, 10);
+    return this._historyConversations.find((conv) => conv.id === id) || null;
+  }
+
+  _selectAllHistory(checked) {
+    this._historySelectedIds = new Set(
+      checked ? this._historyConversations.map((conv) => conv.id) : [],
+    );
+    document.querySelectorAll(".history-row-check").forEach((input) => {
+      input.checked = checked;
+    });
+    this._updateHistorySelection();
+  }
+
+  _updateHistorySelection() {
+    const count = this._historySelectedIds?.size || 0;
+    document.getElementById("history-selection-count").textContent = count
+      ? `${count} selected`
+      : "";
+    const selectAll = document.getElementById("history-select-all");
+    selectAll.checked =
+      count > 0 && count === this._historyConversations.length;
+    selectAll.indeterminate =
+      count > 0 && count < this._historyConversations.length;
   }
 
   async _reviveSelectedConversation() {
@@ -1182,37 +1377,126 @@ class AlpacaApp {
       // Nothing to do — user can see the tab is already there
     } else {
       await this._showAlert(
-        `Failed to revive conversation: ${result.error || "unknown error"}`,
+        `Failed to open conversation: ${result.error || "unknown error"}`,
+      );
+    }
+  }
+
+  async _updateSelectedHistory(changes) {
+    const ids = this._selectedHistoryIds();
+    if (!ids.length) return;
+    const results = await Promise.all(
+      ids.map((id) => this.api.update_history_entry(id, { ...changes })),
+    );
+    if (results.some((result) => !result.success)) {
+      await this._showAlert("One or more conversations could not be updated.");
+    }
+    await this._reloadHistory();
+  }
+
+  async _renameHistoryEntry() {
+    const conv = this._primaryHistoryConversation();
+    if (!conv) return;
+    const title = await this._showPrompt(
+      "Conversation name",
+      conv.title,
+      "Rename conversation",
+    );
+    if (title && title.trim()) {
+      await this.api.update_history_entry(conv.id, { title: title.trim() });
+      await this._reloadHistory();
+    }
+  }
+
+  async _toggleHistoryMetadata(field) {
+    const conv = this._primaryHistoryConversation();
+    if (!conv) return;
+    await this._updateSelectedHistory({ [field]: !conv[field] });
+  }
+
+  async _editHistoryFolder() {
+    const conv = this._primaryHistoryConversation();
+    if (!conv) return;
+    const folder = await this._showPrompt(
+      "Folder name (leave blank to remove from a folder)",
+      conv.folder || "",
+      "Move conversation",
+    );
+    if (folder !== null)
+      await this._updateSelectedHistory({ folder: folder.trim() });
+  }
+
+  async _editHistoryTags() {
+    const conv = this._primaryHistoryConversation();
+    if (!conv) return;
+    const tags = await this._showPrompt(
+      "Comma-separated tags",
+      (conv.tags || []).join(", "),
+      "Edit tags",
+    );
+    if (tags !== null) {
+      await this._updateSelectedHistory({
+        tags: tags
+          .split(",")
+          .map((tag) => tag.trim())
+          .filter(Boolean),
+      });
+    }
+  }
+
+  async _backupHistory() {
+    document.getElementById("history-more-menu").removeAttribute("open");
+    const result = await this.api.export_history_backup(
+      this._selectedHistoryIds(),
+    );
+    if (result.success) {
+      await this._showAlert(
+        `Backed up ${result.count} conversation${
+          result.count === 1 ? "" : "s"
+        }.`,
+      );
+    } else if (!result.cancelled) {
+      await this._showAlert(
+        `Backup failed: ${result.error || "unknown error"}`,
+      );
+    }
+  }
+
+  async _importHistory() {
+    document.getElementById("history-more-menu").removeAttribute("open");
+    const result = await this.api.import_history_backup();
+    if (result.success) {
+      await this._reloadHistory();
+      await this._showAlert(
+        `Imported ${result.imported} conversation${
+          result.imported === 1 ? "" : "s"
+        }.`,
+      );
+    } else if (!result.cancelled) {
+      await this._showAlert(
+        `Import failed: ${result.error || "unknown error"}`,
       );
     }
   }
 
   async _deleteHistoryEntry() {
-    const selected = document.querySelector(
-      "#history-list .history-row.selected",
-    );
-    if (!selected) return;
+    const ids = this._selectedHistoryIds();
+    if (!ids.length) return;
 
     const confirmed = await this._showConfirm(
-      "Permanently delete this conversation? This cannot be undone.",
-      "Delete Conversation",
+      `Permanently delete ${ids.length} conversation${
+        ids.length === 1 ? "" : "s"
+      }? This cannot be undone.`,
+      "Delete conversations",
     );
     if (!confirmed) return;
 
-    const convId = parseInt(selected.dataset.convId, 10);
-    const result = await this.api.delete_history_entry(convId);
+    const result = await this.api.delete_history_entries(ids);
     if (result.success) {
-      selected.remove();
-      const list = document.getElementById("history-list");
-      const remaining = list.querySelectorAll(".history-row").length;
-      document.getElementById("history-count").textContent =
-        remaining === 0
-          ? ""
-          : `${remaining} conversation${remaining !== 1 ? "s" : ""}`;
-      if (remaining === 0) {
-        list.innerHTML =
-          '<div class="history-empty">No conversations found.</div>';
-      }
+      this._historySelectedIds.clear();
+      document.getElementById("history-preview").innerHTML =
+        '<div class="history-preview-empty">Select a conversation to see its preview.</div>';
+      await this._reloadHistory();
     }
   }
 

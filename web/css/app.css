@@ -2063,7 +2063,16 @@ mark.find-current {
 
 /* History Dialog */
 #history-dialog {
-    max-width: 700px;
+    width: min(1180px, 94vw);
+    max-width: 1180px;
+    height: min(720px, 88vh);
+}
+
+.history-subtitle {
+    margin-top: 2px;
+    color: var(--text-secondary);
+    font-size: 12px;
+    font-weight: 400;
 }
 
 .history-dialog-body {
@@ -2077,11 +2086,15 @@ mark.find-current {
 
 .history-search-row {
     flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    position: relative;
 }
 
 #history-search {
-    width: 100%;
-    padding: 6px 10px;
+    flex: 1;
+    padding: 9px 12px 9px 34px;
     background: var(--bg-primary);
     border: 1px solid var(--border-color);
     color: var(--text-primary);
@@ -2090,6 +2103,89 @@ mark.find-current {
     outline: none;
 }
 
+.history-search-icon {
+    position: absolute;
+    left: 11px;
+    color: var(--text-secondary);
+    font-size: 17px;
+    pointer-events: none;
+}
+
+.history-workspace {
+    display: grid;
+    grid-template-columns: 150px minmax(360px, 1fr) minmax(220px, 300px);
+    min-height: 0;
+    flex: 1;
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    overflow: hidden;
+}
+
+.history-sidebar {
+    padding: 10px 8px;
+    background: var(--bg-tertiary);
+    border-right: 1px solid var(--border-color);
+    overflow-y: auto;
+}
+
+.history-filter {
+    width: 100%;
+    padding: 7px 9px;
+    border: 0;
+    border-radius: 4px;
+    background: transparent;
+    color: var(--text-primary);
+    text-align: left;
+    cursor: pointer;
+    font-size: 12px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.history-filter:hover { background: var(--bg-hover); }
+.history-filter.active { background: var(--accent-secondary); color: var(--text-highlight); }
+
+.history-sidebar-heading {
+    margin: 16px 9px 5px;
+    color: var(--text-secondary);
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+}
+
+.history-results {
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+}
+
+.history-actionbar {
+    min-height: 42px;
+    padding: 7px 10px;
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.history-select-all,
+.history-selection-count { font-size: 11px; color: var(--text-secondary); white-space: nowrap; }
+.history-selection-count { flex: 1; }
+
+.history-row-actions { display: flex; gap: 3px; }
+.history-row-actions button {
+    padding: 4px 6px;
+    border: 0;
+    border-radius: 3px;
+    background: transparent;
+    color: var(--text-secondary);
+    cursor: pointer;
+    font-size: 11px;
+}
+.history-row-actions button:hover { background: var(--bg-hover); color: var(--text-primary); }
+
 #history-search:focus {
     border-color: var(--accent-primary);
 }
@@ -2097,17 +2193,16 @@ mark.find-current {
 .history-list {
     flex: 1;
     overflow-y: auto;
-    border: 1px solid var(--border-color);
-    border-radius: 4px;
     min-height: 150px;
 }
 
 .history-row {
-    display: flex;
-    align-items: baseline;
-    padding: 8px 12px;
+    display: grid;
+    grid-template-columns: 18px 18px minmax(0, 1fr) auto;
+    align-items: center;
+    padding: 10px 12px;
     cursor: pointer;
-    gap: 16px;
+    gap: 8px;
     border-bottom: 1px solid var(--border-color);
     font-size: 13px;
 }
@@ -2121,15 +2216,37 @@ mark.find-current {
 }
 
 .history-row.selected {
-    background: var(--accent-primary);
-    color: white;
+    background: var(--accent-secondary);
+    box-shadow: inset 3px 0 0 var(--accent-primary);
 }
 
+.history-row-pin { color: var(--warning-color); text-align: center; }
+.history-row-check { margin: 0; }
+.history-row-main { min-width: 0; }
+
 .history-row-title {
-    flex: 1;
+    font-weight: 600;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+}
+
+.history-row-snippet {
+    margin-top: 3px;
+    overflow: hidden;
+    color: var(--text-secondary);
+    font-size: 11px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.history-row-badges { display: flex; gap: 4px; margin-top: 5px; }
+.history-badge {
+    padding: 1px 6px;
+    border-radius: 10px;
+    background: var(--bg-tertiary);
+    color: var(--text-secondary);
+    font-size: 9px;
 }
 
 /* Pack tab badge — same glyph and rationale as .tab.pack in the tab bar. */
@@ -2146,9 +2263,17 @@ mark.find-current {
     flex-shrink: 0;
 }
 
-.history-row.selected .history-row-date {
-    color: rgba(255, 255, 255, 0.75);
+.history-preview {
+    padding: 18px;
+    border-left: 1px solid var(--border-color);
+    background: var(--bg-primary);
+    overflow-y: auto;
 }
+
+.history-preview-title { margin-bottom: 8px; font-size: 16px; color: var(--text-highlight); }
+.history-preview-meta { margin-bottom: 16px; color: var(--text-secondary); font-size: 11px; line-height: 1.7; }
+.history-preview-text { white-space: pre-wrap; color: var(--text-primary); font-family: var(--font-content); font-size: 13px; line-height: 1.6; }
+.history-preview-empty { margin-top: 40px; color: var(--text-secondary); text-align: center; font-size: 12px; }
 
 .history-empty {
     padding: 32px 16px;
@@ -2162,6 +2287,58 @@ mark.find-current {
     font-size: 12px;
     color: var(--text-secondary);
     align-self: center;
+}
+
+.history-danger-btn { color: var(--error-color); }
+
+.history-more-menu {
+    position: relative;
+}
+
+.history-more-menu summary {
+    list-style: none;
+    user-select: none;
+}
+
+.history-more-menu summary::-webkit-details-marker {
+    display: none;
+}
+
+.history-more-popover {
+    position: absolute;
+    right: 0;
+    bottom: calc(100% + 6px);
+    z-index: 10;
+    min-width: 190px;
+    padding: 4px;
+    border: 1px solid var(--border-color);
+    border-radius: 5px;
+    background: var(--bg-secondary);
+    box-shadow: 0 5px 18px rgba(0, 0, 0, 0.35);
+}
+
+.history-more-popover button {
+    display: block;
+    width: 100%;
+    padding: 7px 9px;
+    border: 0;
+    border-radius: 3px;
+    background: transparent;
+    color: var(--text-primary);
+    text-align: left;
+    cursor: pointer;
+    font-size: 12px;
+}
+
+.history-more-popover button:hover {
+    background: var(--bg-hover);
+}
+
+@media (max-width: 850px) {
+    .history-workspace { grid-template-columns: 125px 1fr; }
+    .history-preview { display: none; }
+    .history-row-actions button { font-size: 0; }
+    .history-row-actions button::first-letter { font-size: 11px; }
 }
 
 /* MCP Config Dialog */

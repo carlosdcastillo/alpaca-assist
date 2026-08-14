@@ -201,21 +201,57 @@
         <!-- History Dialog -->
         <div class="dialog" id="history-dialog">
             <div class="dialog-header">
-                <h3>Conversation History</h3>
+                <div>
+                    <h3>History</h3>
+                    <p class="history-subtitle">Search, organize, and reopen past conversations</p>
+                </div>
                 <button class="dialog-close" id="history-dialog-close">&times;</button>
             </div>
             <div class="history-dialog-body">
                 <div class="history-search-row">
-                    <input type="text" id="history-search" placeholder="Search conversations..." autocomplete="off" spellcheck="false" />
+                    <span class="history-search-icon">⌕</span>
+                    <input type="text" id="history-search" placeholder="Search titles and conversation contents..." autocomplete="off" spellcheck="false" />
                 </div>
-                <div class="history-list" id="history-list">
-                    <div class="history-empty">Loading...</div>
+                <div class="history-workspace">
+                    <nav class="history-sidebar" aria-label="History filters">
+                        <button class="history-filter active" data-history-filter="all">All conversations</button>
+                        <button class="history-filter" data-history-filter="pinned">Pinned</button>
+                        <button class="history-filter" data-history-filter="archived">Archived</button>
+                        <div class="history-sidebar-heading">Folders</div>
+                        <div id="history-folders"></div>
+                    </nav>
+                    <div class="history-results">
+                        <div class="history-actionbar">
+                            <label class="history-select-all"><input type="checkbox" id="history-select-all"> Select all</label>
+                            <span class="history-selection-count" id="history-selection-count"></span>
+                            <div class="history-row-actions">
+                                <button id="history-pin-btn">Pin</button>
+                                <button id="history-rename-btn">Rename</button>
+                                <button id="history-folder-btn">Move</button>
+                                <button id="history-tags-btn">Tags</button>
+                                <button id="history-archive-btn">Archive</button>
+                            </div>
+                        </div>
+                        <div class="history-list" id="history-list">
+                            <div class="history-empty">Loading...</div>
+                        </div>
+                    </div>
+                    <aside class="history-preview" id="history-preview">
+                        <div class="history-preview-empty">Select a conversation to see its preview.</div>
+                    </aside>
                 </div>
             </div>
             <div class="dialog-footer">
                 <span class="history-count" id="history-count"></span>
-                <button class="btn-secondary" id="history-delete-btn">Delete</button>
-                <button class="btn-primary" id="history-revive-btn">Revive</button>
+                <details class="history-more-menu" id="history-more-menu">
+                    <summary class="btn-secondary">More <span aria-hidden="true">▾</span></summary>
+                    <div class="history-more-popover">
+                        <button id="history-backup-btn">Back up conversations…</button>
+                        <button id="history-import-btn">Import backup…</button>
+                    </div>
+                </details>
+                <button class="btn-secondary history-danger-btn" id="history-delete-btn">Delete</button>
+                <button class="btn-primary" id="history-revive-btn">Open</button>
                 <button class="btn-secondary" id="history-close-btn">Close</button>
             </div>
         </div>

@@ -398,10 +398,10 @@ class TestConversationSearch:
         self,
         mock_db: ConversationDatabase,
     ) -> None:
-        """Test searching conversations — search operates on title only."""
+        """Search includes readable conversation content, not only titles."""
         _store(
             mock_db,
-            "Python Chat",
+            "Language notes",
             {"questions": ["What is Python?"], "answers": []},
         )
         _store(
@@ -413,7 +413,77 @@ class TestConversationSearch:
         results = mock_db.search_conversations("Python")
 
         assert len(results) == 1
-        assert results[0][1] == "Python Chat"
+        assert results[0][1] == "Language notes"
+
+    def test_history_records_include_preview_and_metadata(
+        self,
+        mock_db: ConversationDatabase,
+    ) -> None:
+        conversation_id = _store(
+            mock_db,
+            "Planning",
+            {"questions": ["Plan the database migration"], "answers": []},
+        )
+        mock_db.update_history_metadata(
+            conversation_id,
+            pinned=True,
+            folder="Work",
+            tags=["database", "planning"],
+        )
+
+        record = mock_db.get_history_records()[0]
+
+        assert record["preview"] == "Plan the database migration"
+        assert record["pinned"] is True
+        assert record["folder"] == "Work"
+        assert record["tags"] == ["database", "planning"]
+
+    def test_history_metadata_survives_reclosing_conversation(
+        self,
+        mock_db: ConversationDatabase,
+    ) -> None:
+        conversation_id = _store(mock_db, "Original", {"questions": ["First"]})
+        mock_db.update_history_metadata(
+            conversation_id,
+            title="Renamed",
+            pinned=True,
+            folder="Work",
+            tags=["keep"],
+            archived=True,
+        )
+
+        mock_db.store_conversation(
+            conversation_id,
+            "Renamed",
+            {"questions": ["Updated content"]},
+        )
+
+        record = mock_db.get_history_records(archived=True)[0]
+        assert record["title"] == "Renamed"
+        assert record["pinned"] is True
+        assert record["folder"] == "Work"
+        assert record["tags"] == ["keep"]
+        assert record["preview"] == "Updated content"
+
+    def test_export_import_history_round_trip(
+        self,
+        temp_dir: Path,
+    ) -> None:
+        source = ConversationDatabase(str(temp_dir / "source.db"))
+        conversation_id = _store(source, "Backup me", {"questions": ["Keep this"]})
+        source.update_history_metadata(
+            conversation_id, folder="Saved", tags=["important"]
+        )
+
+        target = ConversationDatabase(str(temp_dir / "target.db"))
+        imported = target.import_history(source.export_history())
+
+        assert imported == 1
+        record = target.get_history_records()[0]
+        assert record["title"] == "Backup me"
+        assert record["folder"] == "Saved"
+        assert record["tags"] == ["important"]
+        assert target.search_conversations("Keep this")
 
     def test_search_conversations_case_insensitive(
         self,
@@ -655,7 +725,7 @@ class TestDatabaseMigration:
                 "INSERT INTO conversations "
                 "(id, title, chat_data, created_date, closed_date) "
                 "VALUES (2, 'Pre-migration Pack', "
-                "'{\"tab_type\": \"pack\", \"host\": \"user@host\"}', "
+                '\'{"tab_type": "pack", "host": "user@host"}\', '
                 "'2026-01-01', '2026-01-01')",
             )
             conn.commit()

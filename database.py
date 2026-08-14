@@ -13,6 +13,15 @@ CONVERSATIONS_DB: str = "conversations.db"
 
 logger = logging.getLogger(__name__)
 
+_HISTORY_METADATA_COLUMNS = {
+    "pinned": "INTEGER NOT NULL DEFAULT 0",
+    "folder": "TEXT NOT NULL DEFAULT ''",
+    "tags": "TEXT NOT NULL DEFAULT '[]'",
+    "archived": "INTEGER NOT NULL DEFAULT 0",
+    "search_text": "TEXT NOT NULL DEFAULT ''",
+    "preview": "TEXT NOT NULL DEFAULT ''",
+}
+
 
 class ConversationDatabase:
     def __init__(self, db_path: str = CONVERSATIONS_DB):
@@ -62,6 +71,24 @@ class ConversationDatabase:
                             "UPDATE conversations SET tab_type = ? WHERE id = ?",
                             (tab_type, row_id),
                         )
+            for column, definition in _HISTORY_METADATA_COLUMNS.items():
+                if column not in existing_columns:
+                    cursor.execute(
+                        f"ALTER TABLE conversations ADD COLUMN {column} {definition}",
+                    )
+            for row_id, chat_data_json in cursor.execute(
+                "SELECT id, chat_data FROM conversations WHERE search_text = ''",
+            ).fetchall():
+                try:
+                    search_text, preview = self._history_text(
+                        json.loads(chat_data_json)
+                    )
+                except json.JSONDecodeError:
+                    continue
+                cursor.execute(
+                    "UPDATE conversations SET search_text = ?, preview = ? WHERE id = ?",
+                    (search_text, preview, row_id),
+                )
             cursor.execute(
                 """
                 CREATE TABLE IF NOT EXISTS sequences (
@@ -140,14 +167,187 @@ class ConversationDatabase:
         self,
         search_term: str,
     ) -> list[tuple[int, str, str, str, bool, str | None]]:
-        """Search conversations by title."""
+        """Search conversations by title or readable conversation content."""
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.cursor()
             cursor.execute(
-                "\n                SELECT id, title, created_date, closed_date, summary_generated, tab_type\n                FROM conversations\n                WHERE title LIKE ?\n                ORDER BY closed_date DESC\n            ",
-                (f"%{search_term}%",),
+                "\n                SELECT id, title, created_date, closed_date, summary_generated, tab_type\n                FROM conversations\n                WHERE title LIKE ? OR search_text LIKE ?\n                ORDER BY closed_date DESC\n            ",
+                (f"%{search_term}%", f"%{search_term}%"),
             )
             return cursor.fetchall()
+
+    @staticmethod
+    def _history_text(chat_data: dict[str, Any]) -> tuple[str, str]:
+        """Extract human-readable text for history search and previews."""
+        parts: list[str] = []
+        skipped_keys = {"images", "question_images", "image_data", "data"}
+
+        def collect(value: Any, parent_key: str = "") -> None:
+            if parent_key in skipped_keys:
+                return
+            if isinstance(value, str):
+                if len(value) < 100_000:
+                    parts.append(value)
+            elif isinstance(value, list):
+                for item in value:
+                    collect(item, parent_key)
+            elif isinstance(value, dict):
+                if value.get("type") in {"tool_call", "tool_result"}:
+                    return
+                for key, item in value.items():
+                    if key not in {"id", "tab_id", "session_id", "created_at", "type"}:
+                        collect(item, key)
+
+        collect(chat_data.get("chat_state", chat_data))
+        normalized = " ".join(" ".join(parts).split())
+        preview = normalized[:280]
+        if len(normalized) > 280:
+            preview += "…"
+        return normalized, preview
+
+    def get_history_records(
+        self,
+        search_term: str = "",
+        folder: str | None = None,
+        archived: bool = False,
+    ) -> list[dict[str, Any]]:
+        """Return rich history records for the history manager UI."""
+        where = ["archived = ?"]
+        params: list[Any] = [int(archived)]
+        if folder is not None:
+            where.append("folder = ?")
+            params.append(folder)
+        if search_term:
+            where.append("(title LIKE ? OR search_text LIKE ? OR tags LIKE ?)")
+            pattern = f"%{search_term}%"
+            params.extend((pattern, pattern, pattern))
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            rows = conn.execute(
+                f"""
+                SELECT id, title, created_date, closed_date, tab_type,
+                       pinned, folder, tags, archived, preview
+                FROM conversations
+                WHERE {' AND '.join(where)}
+                ORDER BY pinned DESC, closed_date DESC
+                """,
+                params,
+            ).fetchall()
+        records = []
+        for row in rows:
+            record = dict(row)
+            record["pinned"] = bool(record["pinned"])
+            record["archived"] = bool(record["archived"])
+            try:
+                record["tags"] = json.loads(record["tags"])
+            except (json.JSONDecodeError, TypeError):
+                record["tags"] = []
+            records.append(record)
+        return records
+
+    def get_history_facets(self) -> dict[str, list[str]]:
+        with sqlite3.connect(self.db_path) as conn:
+            folders = [
+                row[0]
+                for row in conn.execute(
+                    "SELECT DISTINCT folder FROM conversations WHERE folder != '' ORDER BY folder",
+                )
+            ]
+        return {"folders": folders}
+
+    def update_history_metadata(self, conversation_id: int, **changes: Any) -> bool:
+        allowed = {"title", "pinned", "folder", "tags", "archived"}
+        values = {key: value for key, value in changes.items() if key in allowed}
+        if not values:
+            return False
+        if "tags" in values:
+            values["tags"] = json.dumps(values["tags"], ensure_ascii=False)
+        with sqlite3.connect(self.db_path) as conn:
+            if "title" in values:
+                row = conn.execute(
+                    "SELECT chat_data FROM conversations WHERE id = ?",
+                    (conversation_id,),
+                ).fetchone()
+                if row:
+                    chat_data = json.loads(row[0])
+                    chat_data["name"] = values["title"]
+                    chat_data["title"] = values["title"]
+                    values["chat_data"] = json.dumps(chat_data, ensure_ascii=False)
+            assignments = ", ".join(f"{key} = ?" for key in values)
+            cursor = conn.execute(
+                f"UPDATE conversations SET {assignments} WHERE id = ?",
+                (*values.values(), conversation_id),
+            )
+            conn.commit()
+            return cursor.rowcount > 0
+
+    def delete_conversations(self, conversation_ids: list[int]) -> int:
+        if not conversation_ids:
+            return 0
+        placeholders = ",".join("?" for _ in conversation_ids)
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.execute(
+                f"DELETE FROM conversations WHERE id IN ({placeholders})",
+                conversation_ids,
+            )
+            conn.commit()
+            return cursor.rowcount
+
+    def export_history(
+        self, conversation_ids: list[int] | None = None
+    ) -> dict[str, Any]:
+        where = ""
+        params: list[Any] = []
+        if conversation_ids:
+            where = f"WHERE id IN ({','.join('?' for _ in conversation_ids)})"
+            params = conversation_ids
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            rows = conn.execute(
+                f"""SELECT id, title, chat_data, created_date, closed_date,
+                            summary_generated, original_id, tab_type, pinned,
+                            folder, tags, archived FROM conversations {where}
+                     ORDER BY closed_date""",
+                params,
+            ).fetchall()
+        conversations = []
+        for row in rows:
+            item = dict(row)
+            item["chat_data"] = json.loads(item["chat_data"])
+            item["tags"] = json.loads(item["tags"] or "[]")
+            conversations.append(item)
+        return {
+            "format": "alpaca-assist-history",
+            "version": 1,
+            "conversations": conversations,
+        }
+
+    def import_history(self, backup: dict[str, Any]) -> int:
+        if backup.get("format") != "alpaca-assist-history" or not isinstance(
+            backup.get("conversations"), list
+        ):
+            raise ValueError("Not an Alpaca Assist history backup")
+        imported = 0
+        for item in backup["conversations"]:
+            if not isinstance(item, dict) or not isinstance(
+                item.get("chat_data"), dict
+            ):
+                raise ValueError("Backup contains an invalid conversation")
+            conversation_id = self.allocate_conversation_id()
+            self.store_conversation(
+                conversation_id,
+                str(item.get("title") or "Imported conversation"),
+                item["chat_data"],
+            )
+            self.update_history_metadata(
+                conversation_id,
+                pinned=bool(item.get("pinned")),
+                folder=str(item.get("folder") or ""),
+                tags=[str(tag) for tag in item.get("tags", [])],
+                archived=bool(item.get("archived")),
+            )
+            imported += 1
+        return imported
 
     def find_conversation_by_tab_id(self, tab_id: str) -> int | None:
         """Find a conversation ID by the tab_id stored in its chat_data.
@@ -195,19 +395,27 @@ class ConversationDatabase:
             cursor = conn.cursor()
             fallback_date = chat_data.get("created_date", datetime.now().isoformat())
             json_data = json.dumps(chat_data, ensure_ascii=False)
+            search_text, preview = self._history_text(chat_data)
             logger.debug(
                 f"Storing conversation {conversation_id} with {len(json_data)} bytes",
             )
             cursor.execute(
                 """
                 INSERT OR REPLACE INTO conversations
-                    (id, title, chat_data, created_date, closed_date, summary_generated, tab_type)
+                    (id, title, chat_data, created_date, closed_date, summary_generated,
+                     tab_type, pinned, folder, tags, archived, search_text, preview)
                 VALUES (
                     ?,
                     ?,
                     ?,
                     COALESCE((SELECT created_date FROM conversations WHERE id = ?), ?),
                     ?,
+                    ?,
+                    ?,
+                    COALESCE((SELECT pinned FROM conversations WHERE id = ?), 0),
+                    COALESCE((SELECT folder FROM conversations WHERE id = ?), ''),
+                    COALESCE((SELECT tags FROM conversations WHERE id = ?), '[]'),
+                    COALESCE((SELECT archived FROM conversations WHERE id = ?), 0),
                     ?,
                     ?
                 )
@@ -221,6 +429,12 @@ class ConversationDatabase:
                     datetime.now().isoformat(),
                     int(chat_data.get("summary_generated", False)),
                     chat_data.get("tab_type"),
+                    conversation_id,
+                    conversation_id,
+                    conversation_id,
+                    conversation_id,
+                    search_text,
+                    preview,
                 ),
             )
             conn.commit()

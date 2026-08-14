@@ -513,26 +513,101 @@ class WebViewAPI:
             logger.error(f"Error getting status info: {e}")
             return {"success": False, "error": str(e)}
 
-    def get_history(self, search_term: str = "") -> dict[str, Any]:
-        """Return closed conversation history from the database."""
+    def get_history(
+        self,
+        search_term: str = "",
+        folder: str | None = None,
+        archived: bool = False,
+    ) -> dict[str, Any]:
+        """Return searchable, organized closed-conversation history."""
         try:
-            if search_term:
-                rows = self._app.core.db.search_conversations(search_term)
-            else:
-                rows = self._app.core.db.get_conversations()
-            conversations = [
-                {
-                    "id": row[0],
-                    "title": row[1],
-                    "created_date": row[2],
-                    "closed_date": row[3],
-                    "tab_type": row[5],
-                }
-                for row in rows
-            ]
-            return {"success": True, "conversations": conversations}
+            conversations = self._app.core.db.get_history_records(
+                search_term,
+                folder,
+                archived,
+            )
+            facets = self._app.core.db.get_history_facets()
+            return {"success": True, "conversations": conversations, **facets}
         except Exception as e:
             logger.error(f"Error getting history: {e}")
+            return {"success": False, "error": str(e)}
+
+    def update_history_entry(
+        self,
+        conv_id: int,
+        changes: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Rename, pin, folder, tag, or archive one history entry."""
+        try:
+            if "tags" in changes:
+                changes["tags"] = [
+                    str(tag).strip() for tag in changes["tags"] if str(tag).strip()
+                ]
+            updated = self._app.core.db.update_history_metadata(int(conv_id), **changes)
+            return {"success": updated}
+        except Exception as e:
+            logger.error(f"Error updating history entry: {e}")
+            return {"success": False, "error": str(e)}
+
+    def delete_history_entries(self, conv_ids: list[int]) -> dict[str, Any]:
+        """Permanently delete multiple conversations from history."""
+        try:
+            ids = [int(conv_id) for conv_id in conv_ids]
+            deleted = self._app.core.db.delete_conversations(ids)
+            return {"success": True, "deleted": deleted}
+        except Exception as e:
+            logger.error(f"Error deleting history entries: {e}")
+            return {"success": False, "error": str(e)}
+
+    def export_history_backup(self, conv_ids: list[int]) -> dict[str, Any]:
+        """Save selected conversations, or all history when none are selected, as JSON."""
+        try:
+            import webview as _wv
+
+            if self._window is None:
+                return {"success": False, "error": "Window not initialized"}
+            result = self._window.create_file_dialog(
+                _wv.SAVE_DIALOG,
+                save_filename="alpaca-assist-history.json",
+                file_types=("JSON files (*.json)", "All files (*.*)"),
+            )
+            if not result:
+                return {"success": False, "cancelled": True}
+            path = result[0] if isinstance(result, (list, tuple)) else result
+            backup = self._app.core.db.export_history(
+                [int(i) for i in conv_ids] or None
+            )
+            with open(path, "w", encoding="utf-8") as handle:
+                json.dump(backup, handle, ensure_ascii=False, indent=2)
+            return {
+                "success": True,
+                "count": len(backup["conversations"]),
+                "path": str(path),
+            }
+        except Exception as e:
+            logger.error(f"Error exporting history backup: {e}")
+            return {"success": False, "error": str(e)}
+
+    def import_history_backup(self) -> dict[str, Any]:
+        """Import conversations from an Alpaca Assist JSON backup."""
+        try:
+            import webview as _wv
+
+            if self._window is None:
+                return {"success": False, "error": "Window not initialized"}
+            result = self._window.create_file_dialog(
+                _wv.OPEN_DIALOG,
+                file_types=("JSON files (*.json)", "All files (*.*)"),
+            )
+            if not result:
+                return {"success": False, "cancelled": True}
+            path = result[0] if isinstance(result, (list, tuple)) else result
+            with open(path, encoding="utf-8") as handle:
+                backup = json.load(handle)
+            imported = self._app.core.db.import_history(backup)
+            return {"success": True, "imported": imported}
+        except Exception as e:
+            logger.error(f"Error importing history backup: {e}")
             return {"success": False, "error": str(e)}
 
     def revive_conversation(self, conv_id: int) -> dict[str, Any]:
