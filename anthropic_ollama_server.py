@@ -8,7 +8,9 @@ import json
 import math
 import os
 import random
+import subprocess
 import sys
+import tempfile
 import time
 from collections.abc import Generator
 from http.server import BaseHTTPRequestHandler
@@ -25,6 +27,7 @@ import yaml
 
 import image_tool_result
 import video_tool_result
+from core.config import MCP_SERVERS_FILE
 
 SYSTEM_PROMPT = """
 You are a highly skilled software engineer with extensive knowledge in many programming languages, frameworks, design patterns, and best practices. You are also an eloquent and professional writer who communicates clearly and effectively.
@@ -304,6 +307,84 @@ MODELS_JSON: str = """
         "parameter_size": "35B",
         "quantization_level": "none"
       }
+    },
+    {
+      "name": "claude-code/opus",
+      "modified_at": "2026-08-13T00:00:00.000000000+00:00",
+      "size": 0,
+      "digest": "0000000000000000000000000000000000000000000000000000000000000000",
+      "details": {
+        "format": "gguf",
+        "family": "claude-code-cli",
+        "families": null,
+        "parameter_size": "n/a",
+        "quantization_level": "none"
+      }
+    },
+    {
+      "name": "claude-code/sonnet",
+      "modified_at": "2026-08-13T00:00:00.000000000+00:00",
+      "size": 0,
+      "digest": "0000000000000000000000000000000000000000000000000000000000000000",
+      "details": {
+        "format": "gguf",
+        "family": "claude-code-cli",
+        "families": null,
+        "parameter_size": "n/a",
+        "quantization_level": "none"
+      }
+    },
+    {
+      "name": "claude-code/haiku",
+      "modified_at": "2026-08-13T00:00:00.000000000+00:00",
+      "size": 0,
+      "digest": "0000000000000000000000000000000000000000000000000000000000000000",
+      "details": {
+        "format": "gguf",
+        "family": "claude-code-cli",
+        "families": null,
+        "parameter_size": "n/a",
+        "quantization_level": "none"
+      }
+    },
+    {
+      "name": "codex/gpt-5.6-sol",
+      "modified_at": "2026-08-13T00:00:00.000000000+00:00",
+      "size": 0,
+      "digest": "0000000000000000000000000000000000000000000000000000000000000000",
+      "details": {
+        "format": "gguf",
+        "family": "codex-cli",
+        "families": null,
+        "parameter_size": "n/a",
+        "quantization_level": "none"
+      }
+    },
+    {
+      "name": "codex/gpt-5.6-terra",
+      "modified_at": "2026-08-13T00:00:00.000000000+00:00",
+      "size": 0,
+      "digest": "0000000000000000000000000000000000000000000000000000000000000000",
+      "details": {
+        "format": "gguf",
+        "family": "codex-cli",
+        "families": null,
+        "parameter_size": "n/a",
+        "quantization_level": "none"
+      }
+    },
+    {
+      "name": "codex/gpt-5.6-luna",
+      "modified_at": "2026-08-13T00:00:00.000000000+00:00",
+      "size": 0,
+      "digest": "0000000000000000000000000000000000000000000000000000000000000000",
+      "details": {
+        "format": "gguf",
+        "family": "codex-cli",
+        "families": null,
+        "parameter_size": "n/a",
+        "quantization_level": "none"
+      }
     }
 
   ]
@@ -396,10 +477,20 @@ def map_ollama_to_model(ollama_model: str) -> str:
         "kimi-k3": "accounts/fireworks/models/kimi-k3",
         "glm-5p1": "accounts/fireworks/models/glm-5p1",
         "glm-5p2": "accounts/fireworks/models/glm-5p2",
+        # Claude Code / Codex CLI backends (subscription usage, not API-key
+        # billed — see ClaudeCodeCLIClient/CodexCLIClient)
+        "claude-code/opus": "claude-code/opus",
+        "claude-code/sonnet": "claude-code/sonnet",
+        "claude-code/haiku": "claude-code/haiku",
+        "codex/gpt-5.6-sol": "codex/gpt-5.6-sol",
+        "codex/gpt-5.6-terra": "codex/gpt-5.6-terra",
+        "codex/gpt-5.6-luna": "codex/gpt-5.6-luna",
         # Legacy placeholder mappings (for backwards compatibility)
         "codellama:13b": DEFAULT_MODEL,
         "llama3:latest": DEFAULT_MODEL,
     }
+    if ollama_model.startswith("claude-code/") or ollama_model.startswith("codex/"):
+        return ollama_model
     return model_mapping.get(ollama_model, DEFAULT_MODEL)
 
 
@@ -1226,16 +1317,340 @@ class FireworksClient:
                 print(f"Failed to decode JSON: {json_str}")
 
 
+def _flatten_transcript(messages: list[dict[str, Any]]) -> str:
+    """Turn an Ollama-style message list into a plain-text transcript.
+
+    Used for the CLI-backed clients, which take one prompt per turn
+    rather than a structured message array. This intentionally discards
+    tool_use_call/tool_result blocks — under the CLI backends, tool
+    execution happens inside the CLI's own agent loop (see
+    ClaudeCodeCLIClient/CodexCLIClient), not via messages this app sent,
+    so any such blocks in history came from a different backend and
+    aren't reproducible here. Best-effort str() rendering keeps those
+    turns visible rather than dropping them silently.
+    """
+    lines: list[str] = []
+    for item in messages:
+        if not isinstance(item, dict):
+            continue
+        role = item.get("role", "user")
+        content = item.get("content", "")
+        if isinstance(content, list):
+            parts = []
+            for block in content:
+                if isinstance(block, dict):
+                    parts.append(block.get("text") or str(block))
+                else:
+                    parts.append(str(block))
+            content = "\n".join(parts)
+        label = "Assistant" if role == "assistant" else "User"
+        lines.append(f"{label}: {content}")
+    return "\n\n".join(lines)
+
+
+def _build_claude_mcp_config_file() -> str | None:
+    """Translate alpaca-assist's mcp_servers.json into the schema `claude
+    --mcp-config` actually expects.
+
+    alpaca's own format (read directly by mcp_manager.py) is a flat
+    {name: {command: [...], args: [...]}} map. Claude Code's MCP config
+    schema is {"mcpServers": {name: {"command": <string>, "args": [...]}}}
+    — confirmed against a real `claude -p --mcp-config` run, which
+    rejects alpaca's raw file with "mcpServers: Invalid input: expected
+    record, received undefined". Returns a temp file path the caller must
+    delete, or None if mcp_servers.json doesn't exist / doesn't parse.
+    """
+    if not os.path.exists(MCP_SERVERS_FILE):
+        return None
+    try:
+        with open(MCP_SERVERS_FILE, encoding="utf-8") as f:
+            raw = json.load(f)
+    except (OSError, json.JSONDecodeError) as e:
+        print(f"[warn] Could not read {MCP_SERVERS_FILE} for claude --mcp-config: {e}")
+        return None
+
+    mcp_servers: dict[str, Any] = {}
+    for name, spec in raw.items():
+        if not isinstance(spec, dict):
+            continue
+        command_list = spec.get("command", [])
+        if not command_list:
+            continue
+        mcp_servers[name] = {
+            "command": command_list[0],
+            "args": list(command_list[1:]) + list(spec.get("args", [])),
+        }
+
+    if not mcp_servers:
+        return None
+
+    fd, path = tempfile.mkstemp(prefix="alpaca_claude_mcp_", suffix=".json")
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
+        json.dump({"mcpServers": mcp_servers}, f)
+    return path
+
+
+def _run_cli_jsonl(cmd: list[str], prompt: str) -> Generator[dict[str, Any], None, None]:
+    """Run a CLI subprocess, feed it `prompt` on stdin, yield parsed JSONL stdout lines."""
+    proc = subprocess.Popen(
+        cmd,
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        bufsize=1,
+        encoding="utf-8",
+    )
+    try:
+        assert proc.stdin is not None and proc.stdout is not None
+        proc.stdin.write(prompt)
+        proc.stdin.close()
+        for line in proc.stdout:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                yield json.loads(line)
+            except json.JSONDecodeError:
+                print(f"[warn] Non-JSON line from {cmd[0]}: {line[:200]}")
+    finally:
+        stderr_output = proc.stderr.read() if proc.stderr else ""
+        returncode = proc.wait()
+        if returncode != 0:
+            print(f"[warn] {cmd[0]} exited {returncode}: {stderr_output[:2000]}")
+
+
+class ClaudeCodeCLIClient:
+    """Routes chat turns through the locally-installed `claude` CLI in
+    headless mode, spending the logged-in Claude Code subscription's
+    usage instead of a metered ANTHROPIC_API_KEY.
+
+    Tool calls are NOT executed by this app for these models — `claude -p`
+    is handed the app's own MCP server config (mcp_servers.json) and runs
+    its own agent loop, resolving tool_use/tool_result internally before
+    ever emitting a stream event. Only "text" content blocks are
+    forwarded to _process_stream; tool_use content blocks are consumed
+    here so alpaca-assist's own tool executor (chat_tab_tools.py) never
+    sees them and never tries to double-execute them.
+
+    Runs with --dangerously-skip-permissions because headless mode has no
+    TTY to answer an interactive permission prompt on — it would just
+    hang. --setting-sources "" and --strict-mcp-config keep it isolated
+    from whatever personal Claude Code config exists on this machine
+    (skills, memory, other MCP servers), so the app's behavior doesn't
+    depend on who's logged into `claude` on the host running this server.
+    """
+
+    def stream_complete(
+        self,
+        messages: list[dict[str, str]] = [],
+        model: str = "sonnet",
+        max_tokens: int = 8192,
+        temperature: float = 0.7,
+        system: str | list[dict[str, Any]] | None = None,
+        tools: list[dict] | None = None,
+        tool_choice: dict | None = None,
+        conversation_id: int | str | None = None,
+    ) -> Generator[dict[str, Any], None, None]:
+        alias = model.split("/", 1)[1] if "/" in model else model
+
+        system_text = SYSTEM_PROMPT
+        if isinstance(system, list):
+            system_text = "\n\n".join(
+                b.get("text", "") for b in system if isinstance(b, dict)
+            )
+        elif isinstance(system, str):
+            system_text = system
+
+        prompt = _flatten_transcript(messages)
+
+        cmd = [
+            "claude",
+            "-p",
+            "--output-format",
+            "stream-json",
+            "--include-partial-messages",
+            "--verbose",
+            "--model",
+            alias,
+            "--append-system-prompt",
+            system_text,
+            "--setting-sources",
+            "",
+            "--no-session-persistence",
+            "--dangerously-skip-permissions",
+        ]
+        # mcp_servers.json is in alpaca's own flat schema, not the
+        # {"mcpServers": {...}} shape `claude --mcp-config` requires — and
+        # it's optional/git-ignored, so a missing/unusable file just means
+        # this turn runs with no tools rather than failing outright.
+        mcp_config_path = _build_claude_mcp_config_file()
+        if mcp_config_path:
+            cmd += ["--strict-mcp-config", "--mcp-config", mcp_config_path]
+
+        text_block_indices: set[int] = set()
+
+        try:
+            for line in _run_cli_jsonl(cmd, prompt):
+                line_type = line.get("type")
+
+                if line_type == "result":
+                    if line.get("is_error"):
+                        yield {
+                            "type": "content_block_delta",
+                            "delta": {
+                                "text": f"\n\n[claude CLI error: {line.get('result') or line.get('subtype')}]\n",
+                            },
+                        }
+                    continue
+
+                if line_type != "stream_event":
+                    continue
+
+                event = line.get("event", {})
+                event_type = event.get("type")
+                index = event.get("index")
+
+                if event_type == "message_start":
+                    yield event
+                elif event_type == "content_block_start":
+                    block_type = event.get("content_block", {}).get("type")
+                    if block_type == "text":
+                        text_block_indices.add(index)
+                        yield event
+                    # tool_use blocks: recorded as NOT text, silently
+                    # consumed below — the CLI already executed them
+                    # internally.
+                elif event_type == "content_block_delta":
+                    if index in text_block_indices and "text" in event.get(
+                        "delta",
+                        {},
+                    ):
+                        yield event
+                elif event_type == "content_block_stop":
+                    if index in text_block_indices:
+                        yield event
+                    text_block_indices.discard(index)
+                elif event_type in ("message_delta", "message_stop"):
+                    yield event
+        finally:
+            if mcp_config_path:
+                try:
+                    os.remove(mcp_config_path)
+                except OSError:
+                    pass
+
+
+class CodexCLIClient:
+    """Routes chat turns through the locally-installed `codex` CLI in
+    headless mode (`codex exec --json`), spending ChatGPT subscription
+    usage instead of a metered API key.
+
+    Verified against a real codex-cli 0.147.0 binary: plain text turns,
+    and a real shell-tool round trip (item.completed/command_execution
+    items get filtered out by _extract_codex_text; only
+    item.completed/agent_message text surfaces), both confirmed by
+    actually running the subprocess and inspecting the JSONL output —
+    not just read off docs. --ask-for-approval doesn't exist on this
+    version's `codex exec` (would have hard-failed every call) and
+    --sandbox conflicts with --approve-for-me; both caught by running it.
+
+    Known gap: unlike ClaudeCodeCLIClient, this does NOT wire up
+    alpaca-assist's own mcp_servers.json — `codex exec` has no
+    per-invocation --mcp-config flag (verified via --help); MCP servers
+    for codex are configured only via ~/.codex/config.toml, so today this
+    only sees the CLI's ambient global config, not the app's. Doable via
+    repeated `-c mcp_servers.<name>.command=...` overrides, but that
+    wasn't built here since I don't have the exact TOML schema verified.
+
+    Same rationale as ClaudeCodeCLIClient for suppressing tool-call
+    content: tool execution happens inside codex's own agent loop, not
+    this app's tool executor.
+    """
+
+    def stream_complete(
+        self,
+        messages: list[dict[str, str]] = [],
+        model: str = "gpt-5.6-sol",
+        max_tokens: int = 8192,
+        temperature: float = 0.7,
+        system: str | list[dict[str, Any]] | None = None,
+        tools: list[dict] | None = None,
+        tool_choice: dict | None = None,
+        conversation_id: int | str | None = None,
+    ) -> Generator[dict[str, Any], None, None]:
+        alias = model.split("/", 1)[1] if "/" in model else model
+        prompt = _flatten_transcript(messages)
+
+        # No --ask-for-approval on `codex exec` in this CLI version (0.147.0)
+        # — verified against `codex exec --help`, which has no such flag at
+        # all. --approve-for-me auto-approves within its own workspace-write
+        # sandbox rather than hanging waiting for a prompt that can never be
+        # answered (no TTY in headless mode) — it's mutually exclusive with
+        # an explicit --sandbox flag (verified: the CLI rejects combining
+        # them). --dangerously-bypass-approvals-and-sandbox exists for a
+        # stronger no-sandbox-at-all mode if wanted later; not used here
+        # since codex's own docs call it "intended solely for externally
+        # sandboxed environments."
+        cmd = [
+            "codex",
+            "exec",
+            "--json",
+            "--approve-for-me",
+            "--skip-git-repo-check",
+            "-m",
+            alias,
+        ]
+
+        yielded_start = False
+        for line in _run_cli_jsonl(cmd, prompt):
+            if not yielded_start:
+                yield {"type": "message_start", "message": {"usage": {}}}
+                yielded_start = True
+
+            text = _extract_codex_text(line)
+            if text:
+                yield {"type": "content_block_delta", "delta": {"text": text}}
+
+            if line.get("type") == "error":
+                err = line.get("message") or line.get("error") or str(line)
+                yield {
+                    "type": "content_block_delta",
+                    "delta": {"text": f"\n\n[codex CLI error: {err}]\n"},
+                }
+
+        yield {"type": "message_delta", "delta": {"stop_reason": "end_turn"}}
+        yield {"type": "message_stop"}
+
+
+def _extract_codex_text(line: dict[str, Any]) -> str | None:
+    """Best-effort extraction of assistant text from a codex --json event.
+
+    UNVERIFIED shape — see CodexCLIClient docstring.
+    """
+    item = line.get("item")
+    if isinstance(item, dict) and item.get("type") in (
+        "agent_message",
+        "assistant_message",
+    ):
+        return item.get("text") or item.get("content") or item.get("message")
+    return None
+
+
 # Model IDs served by the local Anthropic-compatible endpoint at 192.168.0.125:11434.
 LOCAL_MODELS: frozenset[str] = frozenset(["qwen3.6:27b", "qwen3.6:35b"])
 
 # Module-level client instances — set in __main__ before the server starts.
 anthropic_client: "ClaudeClient | None" = None
 fireworks_client: "FireworksClient | None" = None
+claude_code_cli_client: "ClaudeCodeCLIClient | None" = None
+codex_cli_client: "CodexCLIClient | None" = None
 local_client: "ClaudeClient | None" = None
 
 
-def get_client_for_model(model_id: str) -> "ClaudeClient | FireworksClient":
+def get_client_for_model(
+    model_id: str,
+) -> "ClaudeClient | FireworksClient | ClaudeCodeCLIClient | CodexCLIClient":
     """Return the appropriate backend client for the given model ID."""
     if model_id in LOCAL_MODELS:
         if local_client is None:
@@ -1249,6 +1664,18 @@ def get_client_for_model(model_id: str) -> "ClaudeClient | FireworksClient":
                 "Fireworks model requested but FIREWORKS_API_KEY is not set.",
             )
         return fireworks_client
+    if model_id.startswith("claude-code/"):
+        if claude_code_cli_client is None:
+            raise RuntimeError(
+                "claude-code model requested but the `claude` CLI was not found on PATH.",
+            )
+        return claude_code_cli_client
+    if model_id.startswith("codex/"):
+        if codex_cli_client is None:
+            raise RuntimeError(
+                "codex model requested but the `codex` CLI was not found on PATH.",
+            )
+        return codex_cli_client
     if anthropic_client is None:
         raise RuntimeError(
             "Anthropic model requested but ANTHROPIC_API_KEY is not set.",
@@ -1273,6 +1700,8 @@ def run_server(port: int = 11434) -> None:
 
 
 if __name__ == "__main__":
+    import shutil
+
     anthropic_client = ClaudeClient()
 
     try:
@@ -1280,6 +1709,18 @@ if __name__ == "__main__":
         print("Fireworks client initialized (kimi-k2p5 available)")
     except ValueError as e:
         print(f"Warning: {e} — kimi-k2p5 will not be available")
+
+    if shutil.which("claude"):
+        claude_code_cli_client = ClaudeCodeCLIClient()
+        print("claude CLI found on PATH — claude-code/* models available")
+    else:
+        print("Warning: `claude` not found on PATH — claude-code/* models will not be available")
+
+    if shutil.which("codex"):
+        codex_cli_client = CodexCLIClient()
+        print("codex CLI found on PATH — codex/* models available (UNVERIFIED backend)")
+    else:
+        print("Warning: `codex` not found on PATH — codex/* models will not be available")
 
     local_client = ClaudeClient(
         api_key="local",
