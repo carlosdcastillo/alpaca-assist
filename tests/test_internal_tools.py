@@ -43,6 +43,23 @@ def _ok(result: dict[str, Any]) -> bool:
     return result.get("isError") is False
 
 
+def _build_minimal_mp4(video_codec: bytes) -> bytes:
+    """Build the smallest ISO-BMFF box tree that _mp4_video_codec can walk."""
+
+    def box(box_type: bytes, content: bytes) -> bytes:
+        return (len(content) + 8).to_bytes(4, "big") + box_type + content
+
+    stsd_entry = (8).to_bytes(4, "big") + video_codec
+    stsd_content = b"\x00\x00\x00\x00" + (1).to_bytes(4, "big") + stsd_entry
+    stbl = box(b"stbl", box(b"stsd", stsd_content))
+    minf = box(b"minf", stbl)
+    mdia = box(b"mdia", minf)
+    trak = box(b"trak", mdia)
+    moov = box(b"moov", trak)
+    ftyp = box(b"ftyp", b"isom\x00\x00\x00\x00isom")
+    return ftyp + moov
+
+
 def _make_file(tmp_path: Path, n_lines: int) -> Path:
     p = tmp_path / "file.txt"
     p.write_text(
@@ -295,7 +312,12 @@ class TestReadFileRange:
 # ---------------------------------------------------------------------------
 
 
-def _make_png(tmp_path: Path, name: str, size: tuple[int, int], mode: str = "RGB") -> Path:
+def _make_png(
+    tmp_path: Path,
+    name: str,
+    size: tuple[int, int],
+    mode: str = "RGB",
+) -> Path:
     from PIL import Image
 
     p = tmp_path / name
@@ -402,7 +424,13 @@ class TestViewImage:
         p = _make_png(tmp_path, "img.png", (200, 200))
         result = view_image({"file_path": str(p)})
         raw_text = _text(result)
-        gated = gate_tool_output(raw_text, "tab-1", "tool-1", "view_image", threshold=10)
+        gated = gate_tool_output(
+            raw_text,
+            "tab-1",
+            "tool-1",
+            "view_image",
+            threshold=10,
+        )
         assert gated == raw_text
 
     def test_falls_back_to_smaller_step_when_first_does_not_fit(self) -> None:
@@ -434,16 +462,24 @@ class TestViewImage:
         # nothing to actually compare.
         size = (2000, 2000)
         img = Image.new("RGB", size)
-        img.putdata([tuple(random.randint(0, 255) for _ in range(3)) for _ in range(size[0] * size[1])])
+        img.putdata(
+            [
+                tuple(random.randint(0, 255) for _ in range(3))
+                for _ in range(size[0] * size[1])
+            ],
+        )
 
         def encoded_size(max_dim: int, quality: int) -> int:
             candidate = img.copy()
-            candidate.thumbnail((max_dim, max_dim), Image.LANCZOS)
+            candidate.thumbnail((max_dim, max_dim), Image.Resampling.LANCZOS)
             buf = io.BytesIO()
             candidate.save(buf, format="JPEG", quality=quality)
             return len(buf.getvalue())
 
-        first_dim, second_dim = VIEW_IMAGE_DIMENSION_STEPS[0], VIEW_IMAGE_DIMENSION_STEPS[1]
+        first_dim, second_dim = (
+            VIEW_IMAGE_DIMENSION_STEPS[0],
+            VIEW_IMAGE_DIMENSION_STEPS[1],
+        )
         smallest_quality = VIEW_IMAGE_JPEG_QUALITY_STEPS[-1]
         size_at_first_step = encoded_size(first_dim, smallest_quality)
         size_at_second_step = encoded_size(second_dim, smallest_quality)
@@ -509,7 +545,10 @@ class TestViewImage:
 
 
 class TestViewVideo:
-    def test_returns_metadata_reference_without_video_bytes(self, tmp_path: Path) -> None:
+    def test_returns_metadata_reference_without_video_bytes(
+        self,
+        tmp_path: Path,
+    ) -> None:
         video = tmp_path / "demo.webm"
         video.write_bytes(b"\x1aE\xdf\xa3" + b"video payload")
 
@@ -536,6 +575,29 @@ class TestViewVideo:
 
         assert result["isError"] is True
         assert "Unsupported video format" in _text(result)
+
+    def test_rejects_mp4_with_browser_incompatible_codec(self, tmp_path: Path) -> None:
+        # mp4v (MPEG-4 Part 2) is what OpenCV's VideoWriter emits by default
+        # for a ".mp4" fourcc — a valid MP4 container no browser can decode.
+        video = tmp_path / "demo.mp4"
+        video.write_bytes(_build_minimal_mp4(b"mp4v"))
+
+        result = internal_tools.view_video({"file_path": str(video)})
+
+        assert result["isError"] is True
+        assert "mp4v" in _text(result)
+        assert "browsers can't play" in _text(result)
+
+    def test_accepts_mp4_with_h264_codec(self, tmp_path: Path) -> None:
+        video = tmp_path / "demo.mp4"
+        video.write_bytes(_build_minimal_mp4(b"avc1"))
+
+        result = internal_tools.view_video({"file_path": str(video)})
+
+        assert _ok(result)
+        parsed = video_tool_result.parse_video_result(_text(result))
+        assert parsed is not None
+        assert parsed[0] == "video/mp4"
 
 
 # ---------------------------------------------------------------------------

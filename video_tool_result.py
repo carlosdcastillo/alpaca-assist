@@ -68,6 +68,73 @@ def detect_video_mime(header: bytes) -> str | None:
     return None
 
 
+# fourccs browsers actually decode inside an MP4 container. Notably absent:
+# mp4v (MPEG-4 Part 2) — the ffmpeg/OpenCV default for a bare ".mp4" fourcc,
+# and the container magic-byte check alone can't tell it apart from H.264.
+_WEB_SAFE_MP4_VIDEO_CODECS = {"avc1", "avc3", "hev1", "hvc1", "av01", "vp09"}
+
+
+def _find_child_box(data: bytes, name: str) -> bytes | None:
+    """Return the content (header stripped) of the first top-level `name` box in `data`."""
+    pos = 0
+    while pos + 8 <= len(data):
+        box_size = int.from_bytes(data[pos : pos + 4], "big")
+        box_type = data[pos + 4 : pos + 8].decode("ascii", errors="replace")
+        if box_size == 0:
+            box_size = len(data) - pos
+        if box_size < 8:
+            break
+        if box_type == name:
+            return data[pos + 8 : pos + box_size]
+        pos += box_size
+    return None
+
+
+def _mp4_video_codec(filepath: str) -> str | None:
+    """Best-effort fourcc of the first video track's sample entry.
+
+    Returns None on any parse miss (including non-video tracks or files this
+    can't fully walk) rather than raising — a codec check that fails open is
+    safer than one that blocks a file it merely couldn't parse.
+    """
+    try:
+        with open(filepath, "rb") as file:
+            file.seek(0, os.SEEK_END)
+            file_size = file.tell()
+            pos = 0
+            moov_data = None
+            while pos + 8 <= file_size:
+                file.seek(pos)
+                header = file.read(8)
+                box_size = int.from_bytes(header[:4], "big")
+                box_type = header[4:8].decode("ascii", errors="replace")
+                if box_size == 0:
+                    box_size = file_size - pos
+                if box_size < 8:
+                    break
+                if box_type == "moov":
+                    file.seek(pos + 8)
+                    moov_data = file.read(box_size - 8)
+                    break
+                pos += box_size
+        if moov_data is None:
+            return None
+        cursor = moov_data
+        for child_name in ("trak", "mdia", "minf", "stbl"):
+            child = _find_child_box(cursor, child_name)
+            if child is None:
+                return None
+            cursor = child
+        stsd = _find_child_box(cursor, "stsd")
+        if stsd is None or len(stsd) < 16:
+            return None
+        # stsd body: 4-byte version/flags, 4-byte entry count, then entries
+        # of (4-byte size, 4-byte fourcc, ...).
+        return stsd[12:16].decode("ascii", errors="replace")
+    except OSError:
+        return None
+
+
 def inspect_video(filepath: str) -> tuple[str, int]:
     """Validate a video path and return its MIME type and size."""
     if not os.path.isfile(filepath):
@@ -81,6 +148,15 @@ def inspect_video(filepath: str) -> tuple[str, int]:
         mime_type = detect_video_mime(file.read(16))
     if mime_type is None:
         raise ValueError("Unsupported video format; use MP4, WebM, or Ogg")
+    if mime_type == "video/mp4":
+        codec = _mp4_video_codec(filepath)
+        if codec is not None and codec not in _WEB_SAFE_MP4_VIDEO_CODECS:
+            raise ValueError(
+                f"'{filepath}' is encoded with the '{codec}' video codec, which "
+                "browsers can't play. Re-encode as H.264, e.g. "
+                "`ffmpeg -i <input> -c:v libx264 -pix_fmt yuv420p <output>.mp4`, "
+                "and try again.",
+            )
     return mime_type, size
 
 
