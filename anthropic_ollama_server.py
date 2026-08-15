@@ -1551,8 +1551,28 @@ def _run_cli_jsonl(
     )
     try:
         assert proc.stdin is not None and proc.stdout is not None
-        proc.stdin.write(prompt)
-        proc.stdin.close()
+
+        def _write_stdin() -> None:
+            # Runs on its own thread so a large prompt (a long transcript
+            # with embedded base64 image/video tool results can reach
+            # multiple MB) can't block on a full OS pipe buffer before the
+            # heartbeat loop below even starts — mirrors the standard
+            # Popen.communicate() pattern for avoiding subprocess deadlock
+            # between writer and reader. BrokenPipeError is expected if the
+            # child exits before consuming all of stdin; the reader
+            # thread's sentinel + proc.wait() below already surface that.
+            assert proc.stdin is not None
+            try:
+                proc.stdin.write(prompt)
+            except (BrokenPipeError, OSError):
+                pass
+            finally:
+                try:
+                    proc.stdin.close()
+                except OSError:
+                    pass
+
+        threading.Thread(target=_write_stdin, daemon=True).start()
         event_offset = 0
 
         def read_media_events() -> list[dict[str, Any]]:
@@ -1611,7 +1631,15 @@ def _run_cli_jsonl(
         stderr_output = proc.stderr.read() if proc.stderr else ""
         returncode = proc.wait()
         if returncode != 0:
-            print(f"[warn] {cmd[0]} exited {returncode}: {stderr_output[:2000]}")
+            msg = f"[warn] {cmd[0]} exited {returncode}: {stderr_output[:2000]}"
+            try:
+                print(msg)
+            except UnicodeEncodeError:
+                # Windows consoles are often cp1252 — the CLI's own stderr
+                # (e.g. claude's "⚠" advisory text) can contain characters
+                # that can't encode there. Losing the warning entirely is
+                # worse than a lossy fallback when diagnosing a failure.
+                print(msg.encode("ascii", errors="replace").decode("ascii"))
 
 
 class ClaudeCodeCLIClient:
