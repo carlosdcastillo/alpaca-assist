@@ -135,7 +135,9 @@ describe("ChatDisplay", () => {
       image.click();
 
       expect(chatDisplay.imageOverlay.classList).toContain("active");
-      expect(chatDisplay.imageOverlay.getAttribute("aria-hidden")).toBe("false");
+      expect(chatDisplay.imageOverlay.getAttribute("aria-hidden")).toBe(
+        "false",
+      );
       expect(chatDisplay.imageOverlayImage.src).toBe(image.src);
     });
 
@@ -641,6 +643,32 @@ describe("ChatDisplay", () => {
       expect(marked.parse).toHaveBeenCalledWith(
         "![Preview](data:image/jpeg;base64,QUJDRA==)",
       );
+    });
+
+    it("re-renders an already-painted video reference when its result arrives", () => {
+      window.VideoResultUtils = {
+        parse: jest.fn().mockReturnValue({
+          mimeType: "video/webm",
+          locator: "demo",
+          size: 10,
+          description: "demo",
+        }),
+        load: jest.fn().mockResolvedValue("blob:demo"),
+        clear: jest.fn(),
+      };
+      chatDisplay.appendToAnswerBuffer(
+        0,
+        "[Demo](alpaca://video/late-video)",
+        true,
+      );
+      const hydrateSpy = jest.spyOn(chatDisplay, "_hydrateInlineVideoRefs");
+
+      chatDisplay.registerToolResult(0, "late-video", "video marker");
+
+      // A re-render was triggered (not just recorded silently) — this is
+      // what lets _hydrateInlineVideoRefs see the now-available result and
+      // swap the still-rendered <a href="alpaca://video/..."> for a player.
+      expect(hydrateSpy).toHaveBeenCalledWith(expect.anything(), 0);
     });
 
     it("leaves malformed or unsafe image results unresolved", () => {

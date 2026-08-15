@@ -717,10 +717,11 @@ class ChatDisplay {
 
   /**
    * Record a tool_result's raw content against its real tool-call id, so
-   * `alpaca://image/<id>` refs written in that same answer's text can be
-   * resolved later. Called from both the live streaming path (app.js's
-   * injectToolFold, deriving the id from fold_id) and the historical
-   * re-render path (the component's own `.id` field is used directly).
+   * `alpaca://image/<id>` and `alpaca://video/<id>` refs written in that
+   * same answer's text can be resolved later. Called from both the live
+   * streaming path (app.js's injectToolFold, deriving the id from fold_id)
+   * and the historical re-render path (the component's own `.id` field is
+   * used directly).
    */
   registerToolResult(answerIndex, toolCallId, content) {
     if (!toolCallId) return;
@@ -733,11 +734,19 @@ class ChatDisplay {
 
     // Pack notifications and local UI updates preserve order, but rendering
     // is deliberately tolerant of a late result. If markdown containing the
-    // reference was already painted, resolve it as soon as its image arrives.
+    // reference was already painted, resolve it as soon as its image/video
+    // arrives. CLI-backed models (Claude Code CLI, Codex CLI) register
+    // every tool result only after the whole answer — including its
+    // alpaca://video/<id> refs — has already streamed and rendered, so the
+    // video branch here isn't optional the way it might look.
     const bufferData = this.answerBuffers.get(answerIndex);
+    const isReferenced =
+      bufferData?.buffer.includes(`alpaca://image/${toolCallId}`) ||
+      bufferData?.buffer.includes(`alpaca://video/${toolCallId}`);
     if (
-      bufferData?.buffer.includes(`alpaca://image/${toolCallId}`) &&
+      isReferenced &&
       (window.ImageResultUtils?.parse(content) ||
+        window.VideoResultUtils?.parse(content) ||
         this._isGatedToolResult(content))
     ) {
       this._renderAnswerBuffer(answerIndex, bufferData, false);
