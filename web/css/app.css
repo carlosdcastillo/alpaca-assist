@@ -548,6 +548,13 @@ html, body {
     padding: 16px;
     background: var(--bg-primary);
     min-height: 100px;
+    cursor: default;
+}
+
+.chat-container::-webkit-scrollbar,
+.chat-container::-webkit-scrollbar-track,
+.chat-container::-webkit-scrollbar-thumb {
+    cursor: default;
 }
 
 /* Empty-tab hint. :empty only matches while the container has literally no
