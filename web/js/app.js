@@ -296,6 +296,50 @@ class AlpacaApp {
       button.addEventListener("click", () => this._setHistoryFilter(button));
     });
 
+    const historyList = document.getElementById("history-list");
+    const historyScrollbar = document.getElementById("history-scrollbar");
+    const historyScrollbarThumb = document.getElementById(
+      "history-scrollbar-thumb",
+    );
+    historyList.addEventListener("scroll", () =>
+      this._updateHistoryScrollbar(),
+    );
+    historyScrollbar.addEventListener("click", (event) => {
+      if (event.target === historyScrollbarThumb) return;
+      const track = historyScrollbar.getBoundingClientRect();
+      const maxScroll = historyList.scrollHeight - historyList.clientHeight;
+      const maxThumbTop = track.height - historyScrollbarThumb.offsetHeight;
+      historyList.scrollTop =
+        ((event.clientY - track.top - historyScrollbarThumb.offsetHeight / 2) /
+          maxThumbTop) *
+        maxScroll;
+    });
+    historyScrollbarThumb.addEventListener("pointerdown", (event) => {
+      event.preventDefault();
+      const startY = event.clientY;
+      const startScrollTop = historyList.scrollTop;
+      const maxScroll = historyList.scrollHeight - historyList.clientHeight;
+      const maxThumbTop =
+        historyScrollbar.clientHeight - historyScrollbarThumb.offsetHeight;
+      historyScrollbarThumb.setPointerCapture(event.pointerId);
+      const onPointerMove = (moveEvent) => {
+        historyList.scrollTop =
+          startScrollTop +
+          ((moveEvent.clientY - startY) / maxThumbTop) * maxScroll;
+      };
+      historyScrollbarThumb.addEventListener("pointermove", onPointerMove);
+      historyScrollbarThumb.addEventListener(
+        "pointerup",
+        () =>
+          historyScrollbarThumb.removeEventListener(
+            "pointermove",
+            onPointerMove,
+          ),
+        { once: true },
+      );
+    });
+    window.addEventListener("resize", () => this._updateHistoryScrollbar());
+
     // History search (debounced)
     document.getElementById("history-search").addEventListener("input", (e) => {
       clearTimeout(this._historySearchTimer);
@@ -1129,6 +1173,7 @@ class AlpacaApp {
   async _loadHistory(searchTerm = "") {
     const list = document.getElementById("history-list");
     list.innerHTML = '<div class="history-empty">Loading...</div>';
+    this._updateHistoryScrollbar();
 
     const archived = this._historyFilter === "archived";
     const result = await this.api.get_history(
@@ -1139,6 +1184,7 @@ class AlpacaApp {
     if (!result.success) {
       list.innerHTML =
         '<div class="history-empty">Failed to load history.</div>';
+      this._updateHistoryScrollbar();
       return;
     }
 
@@ -1164,6 +1210,7 @@ class AlpacaApp {
       list.innerHTML =
         '<div class="history-empty">No conversations found.</div>';
       this._updateHistorySelection();
+      this._updateHistoryScrollbar();
       return;
     }
 
@@ -1224,6 +1271,25 @@ class AlpacaApp {
       list.appendChild(row);
     }
     this._updateHistorySelection();
+    this._updateHistoryScrollbar();
+  }
+
+  _updateHistoryScrollbar() {
+    const list = document.getElementById("history-list");
+    const scrollbar = document.getElementById("history-scrollbar");
+    const thumb = document.getElementById("history-scrollbar-thumb");
+    const maxScroll = list.scrollHeight - list.clientHeight;
+    scrollbar.classList.toggle("hidden", maxScroll <= 0);
+    if (maxScroll <= 0) return;
+
+    const thumbHeight = Math.max(
+      32,
+      (scrollbar.clientHeight * list.clientHeight) / list.scrollHeight,
+    );
+    const thumbTop =
+      (list.scrollTop / maxScroll) * (scrollbar.clientHeight - thumbHeight);
+    thumb.style.height = `${thumbHeight}px`;
+    thumb.style.transform = `translateY(${thumbTop}px)`;
   }
 
   _renderHistoryFolders(folders) {

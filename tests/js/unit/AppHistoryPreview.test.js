@@ -44,4 +44,30 @@ describe("history preview", () => {
     );
     expect(document.querySelector(".history-preview-text h3")).toBeTruthy();
   });
+
+  it("positions the visible history scrollbar thumb from the list geometry", () => {
+    document.body.innerHTML = `
+      <div id="history-list"></div>
+      <div id="history-scrollbar" class="hidden">
+        <div id="history-scrollbar-thumb"></div>
+      </div>`;
+    const list = document.getElementById("history-list");
+    const scrollbar = document.getElementById("history-scrollbar");
+    Object.defineProperties(list, {
+      scrollHeight: { value: 1000 },
+      clientHeight: { value: 400 },
+      scrollTop: { value: 300 },
+    });
+    Object.defineProperty(scrollbar, "clientHeight", { value: 400 });
+
+    app._updateHistoryScrollbar();
+
+    expect(scrollbar).not.toHaveClass("hidden");
+    expect(
+      document.getElementById("history-scrollbar-thumb").style.height,
+    ).toBe("160px");
+    expect(
+      document.getElementById("history-scrollbar-thumb").style.transform,
+    ).toBe("translateY(120px)");
+  });
 });

@@ -2159,6 +2159,8 @@ mark.find-current {
 
 .history-results {
     min-width: 0;
+    min-height: 0;
+    position: relative;
     display: flex;
     flex-direction: column;
 }
@@ -2195,13 +2197,53 @@ mark.find-current {
 .history-list {
     flex: 1;
     overflow-y: auto;
+    scrollbar-width: none;
     min-height: 150px;
+}
+
+.history-list::-webkit-scrollbar {
+    width: 0;
+}
+
+.history-scrollbar {
+    position: absolute;
+    top: 46px;
+    right: 3px;
+    bottom: 3px;
+    width: 12px;
+    border-radius: 6px;
+    background: var(--bg-primary);
+    z-index: 1;
+}
+
+.history-scrollbar.hidden {
+    display: none;
+}
+
+.history-scrollbar-thumb {
+    position: absolute;
+    inset: 0 2px auto;
+    min-height: 32px;
+    border-radius: 4px;
+    background: var(--text-secondary);
+    cursor: grab;
+    transition: background 120ms ease;
+}
+
+.history-scrollbar:hover .history-scrollbar-thumb {
+    background: var(--text-primary);
+}
+
+.history-scrollbar-thumb:active {
+    cursor: grabbing;
+    background: var(--accent-primary);
 }
 
 .history-row {
     display: grid;
     grid-template-columns: 18px 18px minmax(0, 1fr) auto;
     align-items: center;
+    margin-right: 15px;
     padding: 10px 12px;
     cursor: pointer;
     gap: 8px;
