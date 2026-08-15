@@ -92,10 +92,18 @@ class ChatDisplay {
       // Send every ordinary Markdown link through Python so local files and
       // HTTP(S) URLs consistently open in the user's default application.
       event.preventDefault();
-      window.pythonAPI?.open_link(href).then((result) => {
+      const tabId = window.app?.currentTabId;
+      window.app?.setStatusMessage(`Opening ${href}…`, 30000);
+      window.pythonAPI?.open_link(tabId, href).then((result) => {
         if (!result?.success) {
           window.app?.setStatusMessage(
             `Could not open ${href}: ${result?.error || "unknown error"}`,
+          );
+        } else {
+          window.app?.setStatusMessage(
+            result.remote
+              ? `Opened Pack file: ${result.filename}`
+              : `Opened ${href}`,
           );
         }
       });

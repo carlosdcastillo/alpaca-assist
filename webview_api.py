@@ -255,7 +255,11 @@ class WebViewAPI:
         if not project_name:
             return None
         try:
-            return load_project(project_name, host=host).to_payload(session_id)
+            payload: dict[str, Any] = load_project(
+                project_name,
+                host=host,
+            ).to_payload(session_id)
+            return payload
         except (OSError, ValueError):
             if not workspace_path:
                 raise
@@ -713,8 +717,8 @@ class WebViewAPI:
             logger.error(f"Error navigating to conv {conv_id}: {e}")
             return {"success": False, "error": str(e)}
 
-    def open_link(self, href: str) -> dict[str, Any]:
-        """Open a Markdown HTTP(S) URL or local file outside the app WebView."""
+    def open_link(self, tab_id: str, href: str) -> dict[str, Any]:
+        """Open a URL or a file belonging to the tab that rendered its link."""
         try:
             parsed = urllib.parse.urlsplit(href)
             is_windows_path = (
@@ -723,10 +727,46 @@ class WebViewAPI:
                 and href[1] == ":"
                 and href[2] in ("/", "\\")
             )
-            if parsed.scheme in ("http", "https", "file"):
+            if parsed.scheme in ("http", "https"):
                 target = href
-            elif not parsed.scheme or is_windows_path:
-                path_text = href if is_windows_path else urllib.parse.unquote(parsed.path)
+            elif parsed.scheme in ("", "file") or is_windows_path:
+                path_text = (
+                    href if is_windows_path else urllib.parse.unquote(parsed.path)
+                )
+                tab = self._app.core.tabs.get(tab_id)
+                if isinstance(tab, PackTab):
+                    if parsed.scheme == "file" and parsed.netloc not in (
+                        "",
+                        "localhost",
+                    ):
+                        return {
+                            "success": False,
+                            "error": "Pack file links to another host are not supported",
+                        }
+                    local_copy = tab.materialize_file(path_text)
+                    target = local_copy.as_uri()
+                    if parsed.fragment:
+                        target += f"#{parsed.fragment}"
+                    if not webbrowser.open(target):
+                        return {
+                            "success": False,
+                            "error": "No application could open the Pack file",
+                        }
+                    return {
+                        "success": True,
+                        "remote": True,
+                        "filename": local_copy.name.split("-", 1)[-1],
+                    }
+
+                if parsed.scheme == "file":
+                    target = href
+                    if not webbrowser.open(target):
+                        return {
+                            "success": False,
+                            "error": "No application could open the link",
+                        }
+                    return {"success": True}
+
                 path = Path(path_text).expanduser()
                 if not path.is_absolute():
                     path = Path.cwd() / path

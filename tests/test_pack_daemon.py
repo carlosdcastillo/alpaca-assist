@@ -10,10 +10,10 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from pack_daemon import PackDaemonAdapter
 from pack_daemon import _absolutize_mcp_config
 from pack_daemon import _bind_socket
 from pack_daemon import make_dispatcher
+from pack_daemon import PackDaemonAdapter
 
 
 class TestAbsolutizeMcpConfig:
@@ -25,7 +25,10 @@ class TestAbsolutizeMcpConfig:
 
         assert fixed["mine"]["command"] == [sys.executable, str(tmp_path / "server.py")]
 
-    def test_bare_python_or_python3_rewritten_to_sys_executable(self, tmp_path: Path) -> None:
+    def test_bare_python_or_python3_rewritten_to_sys_executable(
+        self,
+        tmp_path: Path,
+    ) -> None:
         raw = {
             "a": {"command": ["python"], "args": []},
             "b": {"command": ["python3"], "args": []},
@@ -67,7 +70,10 @@ class TestPackDaemonAdapter:
 
         # No connection set — must not raise.
         adapter.on_streaming_start("tab-1", 0)
-        adapter.on_content_update("tab-1", MagicMock(_asdict=lambda: {"content_chunk": "hi"}))
+        adapter.on_content_update(
+            "tab-1",
+            MagicMock(_asdict=lambda: {"content_chunk": "hi"}),
+        )
         adapter.on_error("tab-1", "boom")
 
     def test_notify_forwards_to_attached_connection(self) -> None:
@@ -135,7 +141,10 @@ class TestPackDaemonAdapter:
     def test_wait_for_fold_rendered_unknown_fold_returns_false(self) -> None:
         adapter = PackDaemonAdapter()
 
-        assert adapter.wait_for_fold_rendered("tab-1", "never-injected", timeout=0.1) is False
+        assert (
+            adapter.wait_for_fold_rendered("tab-1", "never-injected", timeout=0.1)
+            is False
+        )
 
     def test_on_new_qa_turn_increments_per_tab_independently(self) -> None:
         adapter = PackDaemonAdapter()
@@ -272,7 +281,12 @@ class TestMakeDispatcher:
         lost one.
         """
         tab = self._tab()
-        dispatch = make_dispatcher(tab, PackDaemonAdapter(), resumed=False, core=self._core())
+        dispatch = make_dispatcher(
+            tab,
+            PackDaemonAdapter(),
+            resumed=False,
+            core=self._core(),
+        )
 
         first = dispatch("attach", {})
         second = dispatch("attach", {})
@@ -284,7 +298,12 @@ class TestMakeDispatcher:
 
     def test_send_message_returns_answer_index_set_before_return(self) -> None:
         tab = self._tab()
-        dispatch = make_dispatcher(tab, PackDaemonAdapter(), resumed=False, core=self._core())
+        dispatch = make_dispatcher(
+            tab,
+            PackDaemonAdapter(),
+            resumed=False,
+            core=self._core(),
+        )
 
         result = dispatch("send_message", {"message": "hi", "images": []})
 
@@ -293,7 +312,12 @@ class TestMakeDispatcher:
 
     def test_stop_streaming_dispatches(self) -> None:
         tab = self._tab()
-        dispatch = make_dispatcher(tab, PackDaemonAdapter(), resumed=False, core=self._core())
+        dispatch = make_dispatcher(
+            tab,
+            PackDaemonAdapter(),
+            resumed=False,
+            core=self._core(),
+        )
 
         result = dispatch("stop_streaming", {})
 
@@ -314,7 +338,12 @@ class TestMakeDispatcher:
 
     def test_gated_tool_output_dispatches_with_remote_tab_id(self) -> None:
         tab = self._tab()
-        dispatch = make_dispatcher(tab, PackDaemonAdapter(), resumed=False, core=self._core())
+        dispatch = make_dispatcher(
+            tab,
+            PackDaemonAdapter(),
+            resumed=False,
+            core=self._core(),
+        )
 
         with pytest.MonkeyPatch.context() as monkeypatch:
             reader = MagicMock(return_value="full media")
@@ -324,9 +353,39 @@ class TestMakeDispatcher:
         assert result == {"content": "full media"}
         reader.assert_called_once_with("placeholder", "tab-1")
 
+    def test_file_transfer_dispatches_against_pack_workspace(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        source = tmp_path / "artifact.txt"
+        source.write_text("worker artifact", encoding="utf-8")
+        tab = self._tab()
+        tab.workspace_path = str(tmp_path)
+        dispatch = make_dispatcher(
+            tab,
+            PackDaemonAdapter(),
+            resumed=False,
+            core=self._core(),
+        )
+
+        metadata = dispatch("resolve_file_reference", {"path": "artifact.txt"})
+        chunk = dispatch(
+            "read_file_chunk",
+            {"locator": metadata["locator"], "offset": 0},
+        )
+
+        assert metadata["name"] == "artifact.txt"
+        assert chunk["data"] == "d29ya2VyIGFydGlmYWN0"
+        assert chunk["done"] is True
+
     def test_mutating_methods_dispatch_to_real_tab_methods(self) -> None:
         tab = self._tab()
-        dispatch = make_dispatcher(tab, PackDaemonAdapter(), resumed=False, core=self._core())
+        dispatch = make_dispatcher(
+            tab,
+            PackDaemonAdapter(),
+            resumed=False,
+            core=self._core(),
+        )
 
         assert dispatch("compact_conversation", {}) == {"compacted": True}
         assert dispatch("truncate_conversation", {}) == {"truncated": True}
@@ -338,13 +397,21 @@ class TestMakeDispatcher:
         adapter.inject_tool_fold("tab-1", "fold-1", "result", "body", 0)
         dispatch = make_dispatcher(tab, adapter, resumed=False, core=self._core())
 
-        dispatch("fold_rendered", {"tab_id": "tab-1", "fold_id": "fold-1", "rendered": True})
+        dispatch(
+            "fold_rendered",
+            {"tab_id": "tab-1", "fold_id": "fold-1", "rendered": True},
+        )
 
         assert adapter.wait_for_fold_rendered("tab-1", "fold-1", timeout=0.1) is True
 
     def test_unknown_method_raises(self) -> None:
         tab = self._tab()
-        dispatch = make_dispatcher(tab, PackDaemonAdapter(), resumed=False, core=self._core())
+        dispatch = make_dispatcher(
+            tab,
+            PackDaemonAdapter(),
+            resumed=False,
+            core=self._core(),
+        )
 
         with pytest.raises(ValueError):
             dispatch("not_a_real_method", {})

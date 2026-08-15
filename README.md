@@ -135,6 +135,8 @@ conversation reuses the same workspace; closing it never deletes remote files.
 - **Streaming responses** with live markdown rendering and syntax-highlighted
   code blocks (copy buttons, language detection)
 - **Multi-tab chats**, including **pack tabs** that attach to remote sessions
+- **Pack-aware file links** — Markdown paths from a Pack tab are fetched from
+  that tab's worker on demand, cached temporarily, and opened by the local app
 - **MCP tool execution** shown in collapsible tool-fold widgets; image tool
   results render in their folds and can be embedded in assistant Markdown
   with `![caption](alpaca://image/<tool-call-id>)`. References are scoped to

@@ -24,15 +24,21 @@ daemon instead of creating a disconnected local ChatTab.
 """
 from __future__ import annotations
 
+import base64
 import json
 import logging
+import re
+import tempfile
 import threading
 import time
+import uuid
+from pathlib import Path
 from typing import Any
 from typing import TYPE_CHECKING
 
 from chat_state import ChatState
 from conversation_graph import ConversationGraph
+from core.pack_files import MAX_PACK_FILE_BYTES
 from core.pack_transport import PackTransport
 from core.pack_transport import PackTransportError
 from utils import ContentUpdate
@@ -47,6 +53,7 @@ PROJECT_SETUP_TIMEOUT = 620.0
 MUTATE_TIMEOUT = 15.0
 SEND_MESSAGE_TIMEOUT = 30.0
 VIDEO_CHUNK_TIMEOUT = 30.0
+FILE_CHUNK_TIMEOUT = 30.0
 GATED_OUTPUT_TIMEOUT = 30.0
 STOP_STREAMING_TIMEOUT = 10.0
 FOLD_RENDER_TIMEOUT = 2.0
@@ -86,6 +93,9 @@ class PackTab:
             self._project_ready.set()
         self._workspace_status: dict[str, Any] | None = None
         self._workspace_status_at = 0.0
+        self._file_cache: tempfile.TemporaryDirectory[str] | None = None
+        self._file_cache_dir: Path | None = None
+        self._file_cache_lock = threading.Lock()
 
         self.chat_state: ChatState | ConversationGraph = ConversationGraph()
         self.is_streaming = False
@@ -537,6 +547,82 @@ class PackTab:
         )
         return result
 
+    def materialize_file(self, remote_path: str) -> Path:
+        """Download a worker-local file to this Pack tab's temporary cache."""
+        self._ensure_connected(timeout=ATTACH_TIMEOUT)
+        metadata: dict[str, Any] = self._transport.send_request(
+            "resolve_file_reference",
+            {"path": remote_path},
+            timeout=ATTACH_TIMEOUT,
+        )
+        size = int(metadata["size"])
+        identity = str(metadata["identity"])
+        locator = metadata.get("locator")
+        if size < 0 or size > MAX_PACK_FILE_BYTES:
+            raise PackTransportError("Pack worker returned an invalid file size")
+        if re.fullmatch(r"[0-9a-f]{64}", identity) is None:
+            raise PackTransportError("Pack worker returned an invalid file identity")
+        if not isinstance(locator, str) or not locator:
+            raise PackTransportError("Pack worker returned an invalid file locator")
+        name = self._safe_cache_name(str(metadata["name"]))
+
+        with self._file_cache_lock:
+            if self._file_cache_dir is None:
+                self._file_cache = tempfile.TemporaryDirectory(
+                    prefix=f"alpaca-pack-{self.tab_id}-",
+                )
+                self._file_cache_dir = Path(self._file_cache.name)
+            target = self._file_cache_dir / f"{identity[:16]}-{name}"
+            if target.is_file() and target.stat().st_size == size:
+                return target
+
+            partial = target.with_name(f".{target.name}.{uuid.uuid4().hex}.part")
+            offset = 0
+            finished = size == 0
+            try:
+                with partial.open("wb") as output:
+                    while offset < size:
+                        chunk: dict[str, Any] = self._transport.send_request(
+                            "read_file_chunk",
+                            {"locator": locator, "offset": offset},
+                            timeout=FILE_CHUNK_TIMEOUT,
+                        )
+                        if int(chunk["size"]) != size:
+                            raise PackTransportError(
+                                "Pack file changed while downloading",
+                            )
+                        try:
+                            data = base64.b64decode(chunk["data"], validate=True)
+                        except (ValueError, TypeError) as exc:
+                            raise PackTransportError(
+                                "Pack worker returned invalid file data",
+                            ) from exc
+                        next_offset = int(chunk["next_offset"])
+                        if next_offset != offset + len(data) or next_offset <= offset:
+                            raise PackTransportError(
+                                "Pack worker returned an invalid file offset",
+                            )
+                        output.write(data)
+                        offset = next_offset
+                        finished = bool(chunk["done"])
+                        if finished:
+                            break
+                if offset != size or not finished:
+                    raise PackTransportError(
+                        f"Pack file download ended early ({offset:,} of {size:,} bytes)",
+                    )
+                partial.replace(target)
+            finally:
+                partial.unlink(missing_ok=True)
+            return target
+
+    @staticmethod
+    def _safe_cache_name(name: str) -> str:
+        """Keep a useful extension while avoiding host-specific filename hazards."""
+        leaf = Path(name).name
+        cleaned = re.sub(r'[<>:"/\\|?*\x00-\x1f]', "_", leaf).strip(" .")
+        return cleaned[:160] or "pack-file"
+
     def read_gated_tool_output(self, gated_text: str) -> str:
         """Fetch a gated result from the remote Pack daemon's temp file."""
         self._ensure_connected(timeout=ATTACH_TIMEOUT)
@@ -612,3 +698,7 @@ class PackTab:
         closing the app leaves the remote Pack session running.
         """
         self._transport.close()
+        if self._file_cache is not None:
+            self._file_cache.cleanup()
+            self._file_cache = None
+            self._file_cache_dir = None

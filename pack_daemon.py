@@ -33,8 +33,10 @@ import threading
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
+from typing import cast
 
 from core import pack_protocol
+from core.pack_files import PackFileStore
 from core.projects import prepare_workspace
 from core.projects import probe_workspace
 from core.tool_output_gate import read_gated_tool_output
@@ -254,6 +256,8 @@ def make_dispatcher(
 ) -> Callable[[str, dict[str, Any]], Any]:
     """Build the method -> handler mapping for the daemon's one ChatTab."""
 
+    pack_files = PackFileStore()
+
     def dispatch(method: str, params: dict[str, Any]) -> Any:
         nonlocal resumed
         if method == "attach":
@@ -309,6 +313,13 @@ def make_dispatcher(
             if not status_workspace:
                 return {"workspace_path": None, "exists": False, "is_git": False}
             return probe_workspace(status_workspace)
+        if method == "resolve_file_reference":
+            return pack_files.resolve(
+                params["path"],
+                getattr(tab, "workspace_path", None),
+            )
+        if method == "read_file_chunk":
+            return pack_files.read_chunk(params["locator"], params.get("offset", 0))
         if method == "read_video_chunk":
             return read_video_chunk(params["locator"], params.get("offset", 0))
         if method == "read_gated_tool_output":
@@ -428,14 +439,9 @@ def _bind_socket(sock_path: Path) -> socket.socket:
     the bridge), it still refuses to double-bind against a socket that
     something else is actually listening on.
     """
+    af_unix = getattr(socket, "AF_UNIX")
     if sock_path.exists():
-        # This module only ever runs on the remote (Unix) host — see the
-        # module docstring — so AF_UNIX is always present there. mypy just
-        # doesn't know that when type-checked from a Windows dev machine,
-        # where typeshed's socket stub omits it (matches the AF_UNIX
-        # availability check already used to skip this module's tests on
-        # Windows in tests/test_pack_daemon.py).
-        probe = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)  # type: ignore[attr-defined]
+        probe = socket.socket(af_unix, socket.SOCK_STREAM)
         probe.settimeout(1.0)
         alive = True
         try:
@@ -448,7 +454,7 @@ def _bind_socket(sock_path: Path) -> socket.socket:
             raise RuntimeError(f"a daemon is already listening on {sock_path}")
         sock_path.unlink(missing_ok=True)
 
-    sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)  # type: ignore[attr-defined]
+    sock = socket.socket(af_unix, socket.SOCK_STREAM)
     sock.bind(str(sock_path))
     sock.listen(SOCKET_BACKLOG)
     return sock
@@ -486,7 +492,7 @@ def main() -> None:
     adapter = PackDaemonAdapter()
     # Deliberately duck-typed, not a WebViewAPI subclass — see
     # PackDaemonAdapter's own docstring above.
-    core.api = adapter  # type: ignore[assignment]
+    core.api = cast(Any, adapter)
 
     tab = None
     if resumed:

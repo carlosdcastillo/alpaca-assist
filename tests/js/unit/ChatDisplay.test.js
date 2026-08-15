@@ -56,7 +56,10 @@ describe("ChatDisplay", () => {
     window.Helpers = {
       copyToClipboard: jest.fn().mockResolvedValue(true),
     };
-    window.app = undefined;
+    window.app = {
+      currentTabId: "tab-1",
+      setStatusMessage: jest.fn(),
+    };
     window.pythonAPI = {
       open_link: jest.fn().mockResolvedValue({ success: true }),
     };
@@ -94,7 +97,11 @@ describe("ChatDisplay", () => {
       expect(chatDisplay.currentAnswerIndex).toBe(-1);
     });
 
-    it.each(["../README.md", "http://example.com/docs", "https://example.com/docs"])(
+    it.each([
+      "../README.md",
+      "http://example.com/docs",
+      "https://example.com/docs",
+    ])(
       "should preview the Markdown link destination %s in the status bar",
       (href) => {
         container.innerHTML = `<a href="${href}">documentation</a>`;
@@ -127,7 +134,7 @@ describe("ChatDisplay", () => {
           .dispatchEvent(click);
 
         expect(useDefaultNavigation).toBe(false);
-        expect(window.pythonAPI.open_link).toHaveBeenCalledWith(href);
+        expect(window.pythonAPI.open_link).toHaveBeenCalledWith("tab-1", href);
       },
     );
 

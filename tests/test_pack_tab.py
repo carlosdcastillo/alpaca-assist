@@ -1,7 +1,11 @@
+# unittest.mock replaces these typed methods with MagicMock instances at runtime.
+# mypy: disable-error-code="attr-defined"
 """Tests for core/pack_tab.py — the local proxy for a remote Pack tab."""
 from __future__ import annotations
 
+import base64
 import time
+from typing import Any
 from unittest import mock
 from unittest.mock import MagicMock
 from unittest.mock import patch
@@ -31,7 +35,7 @@ def pack_tab(mock_transport_class: MagicMock, app_core: MagicMock) -> PackTab:
     return PackTab("tab-1", "Pack Tab", app_core, 42, "user@host", "session-abc")
 
 
-GRAPH_STATE = {
+GRAPH_STATE: dict[str, Any] = {
     "chat_state": {
         "graph": {
             "id": "g1",
@@ -122,7 +126,10 @@ class TestConnect:
 
 
 class TestHandleUserMessage:
-    def test_sets_current_answer_index_before_returning(self, pack_tab: PackTab) -> None:
+    def test_sets_current_answer_index_before_returning(
+        self,
+        pack_tab: PackTab,
+    ) -> None:
         transport = pack_tab._transport
         transport.connected = True
         transport.send_request.return_value = {"answer_index": 7}
@@ -324,7 +331,10 @@ class TestSessionLostRecreate:
         assert pack_tab._pending_recreate_state is None
         assert pack_tab.chat_state.to_dict()["questions"] == ["Q"]
 
-    def test_read_video_chunk_is_proxied_to_remote_daemon(self, pack_tab: PackTab) -> None:
+    def test_read_video_chunk_is_proxied_to_remote_daemon(
+        self,
+        pack_tab: PackTab,
+    ) -> None:
         pack_tab._transport.send_request.return_value = {
             "data": "YWJj",
             "done": True,
@@ -353,6 +363,78 @@ class TestSessionLostRecreate:
             {"gated_text": "placeholder"},
             timeout=mock.ANY,
         )
+
+    def test_materialize_file_downloads_chunks_and_reuses_cache(
+        self,
+        pack_tab: PackTab,
+    ) -> None:
+        transport = pack_tab._transport
+        transport.send_request.side_effect = [
+            {
+                "locator": "opaque",
+                "name": "report.txt",
+                "size": 6,
+                "identity": "a" * 64,
+            },
+            {
+                "size": 6,
+                "data": base64.b64encode(b"abc").decode("ascii"),
+                "next_offset": 3,
+                "done": False,
+            },
+            {
+                "size": 6,
+                "data": base64.b64encode(b"def").decode("ascii"),
+                "next_offset": 6,
+                "done": True,
+            },
+            {
+                "locator": "opaque-2",
+                "name": "report.txt",
+                "size": 6,
+                "identity": "a" * 64,
+            },
+        ]
+
+        first = pack_tab.materialize_file("build/report.txt")
+        second = pack_tab.materialize_file("build/report.txt")
+
+        assert first == second
+        assert first.read_bytes() == b"abcdef"
+        assert [call.args[0] for call in transport.send_request.call_args_list] == [
+            "resolve_file_reference",
+            "read_file_chunk",
+            "read_file_chunk",
+            "resolve_file_reference",
+        ]
+        pack_tab.cleanup_resources()
+        assert not first.exists()
+
+    def test_materialize_file_removes_partial_download_after_failure(
+        self,
+        pack_tab: PackTab,
+    ) -> None:
+        transport = pack_tab._transport
+        transport.send_request.side_effect = [
+            {
+                "locator": "opaque",
+                "name": "report.txt",
+                "size": 6,
+                "identity": "b" * 64,
+            },
+            {
+                "size": 6,
+                "data": base64.b64encode(b"abc").decode("ascii"),
+                "next_offset": 3,
+                "done": True,
+            },
+        ]
+
+        with pytest.raises(PackTransportError, match="ended early"):
+            pack_tab.materialize_file("report.txt")
+
+        assert pack_tab._file_cache_dir is not None
+        assert list(pack_tab._file_cache_dir.iterdir()) == []
 
     def test_resolve_session_lost_recreate_failure_marks_offline(
         self,
@@ -393,7 +475,10 @@ class TestSessionLostRecreate:
 
 
 class TestSerialization:
-    def test_get_serializable_data_includes_pack_fields(self, pack_tab: PackTab) -> None:
+    def test_get_serializable_data_includes_pack_fields(
+        self,
+        pack_tab: PackTab,
+    ) -> None:
         data = pack_tab.get_serializable_data()
 
         assert data["tab_type"] == "pack"
@@ -403,7 +488,9 @@ class TestSerialization:
         assert data["conversation_id"] == 42
 
     def test_load_from_data_round_trip(self, pack_tab: PackTab) -> None:
-        pack_tab.load_from_data(GRAPH_STATE | {"host": "other@host2", "session_id": "sess2"})
+        pack_tab.load_from_data(
+            GRAPH_STATE | {"host": "other@host2", "session_id": "sess2"},
+        )
 
         assert pack_tab.title == "Real Title"
         assert pack_tab.host == "other@host2"
@@ -415,13 +502,18 @@ class TestSerialization:
         pack_tab: PackTab,
     ) -> None:
         original_host = pack_tab.host
-        pack_tab.load_from_data({"chat_state": {"graph": GRAPH_STATE["chat_state"]["graph"]}})
+        pack_tab.load_from_data(
+            {"chat_state": {"graph": GRAPH_STATE["chat_state"]["graph"]}},
+        )
 
         assert pack_tab.host == original_host
 
 
 class TestCleanupNeverKillsRemote:
-    def test_cleanup_resources_only_closes_local_transport(self, pack_tab: PackTab) -> None:
+    def test_cleanup_resources_only_closes_local_transport(
+        self,
+        pack_tab: PackTab,
+    ) -> None:
         transport = pack_tab._transport
 
         pack_tab.cleanup_resources()
@@ -438,7 +530,9 @@ class TestNotificationHandlers:
         pack_tab: PackTab,
         app_core: MagicMock,
     ) -> None:
-        pack_tab._on_streaming_start({"tab_id": "remote-daemon-tab-99","answer_index": 2})
+        pack_tab._on_streaming_start(
+            {"tab_id": "remote-daemon-tab-99", "answer_index": 2},
+        )
 
         assert pack_tab.is_streaming is True
         app_core.api.on_streaming_start.assert_called_once_with("tab-1", 2)
@@ -451,7 +545,9 @@ class TestNotificationHandlers:
         pack_tab.is_streaming = True
         pack_tab._transport.send_request.return_value = ATTACH_RESPONSE
 
-        pack_tab._on_streaming_end({"tab_id": "remote-daemon-tab-99", "answer_index": 2})
+        pack_tab._on_streaming_end(
+            {"tab_id": "remote-daemon-tab-99", "answer_index": 2},
+        )
 
         assert pack_tab.is_streaming is False
         app_core.api.on_streaming_end.assert_called_once_with("tab-1", 2)
@@ -501,7 +597,9 @@ class TestNotificationHandlers:
         assert pack_tab.chat_state.to_dict()["graph"]["nodes"] == {}
         pack_tab._transport.send_request.return_value = ATTACH_RESPONSE
 
-        pack_tab._on_streaming_end({"tab_id": "remote-daemon-tab-99", "answer_index": 0})
+        pack_tab._on_streaming_end(
+            {"tab_id": "remote-daemon-tab-99", "answer_index": 0},
+        )
 
         deadline = time.monotonic() + 2.0
         while time.monotonic() < deadline and pack_tab.title != "Real Title":
@@ -533,7 +631,9 @@ class TestNotificationHandlers:
         pack_tab: PackTab,
         app_core: MagicMock,
     ) -> None:
-        pack_tab._on_update_tab_title({"tab_id": "remote-daemon-tab-99","title": "New Title"})
+        pack_tab._on_update_tab_title(
+            {"tab_id": "remote-daemon-tab-99", "title": "New Title"},
+        )
 
         assert pack_tab.title == "New Title"
         app_core.api.update_tab_title.assert_called_once_with("tab-1", "New Title")
@@ -546,7 +646,9 @@ class TestNotificationHandlers:
         pack_tab.is_streaming = True
         pack_tab._transport.send_request.return_value = ATTACH_RESPONSE
 
-        pack_tab._on_error({"tab_id": "remote-daemon-tab-99", "message": "boom", "details": "x"})
+        pack_tab._on_error(
+            {"tab_id": "remote-daemon-tab-99", "message": "boom", "details": "x"},
+        )
 
         assert pack_tab.is_streaming is False
         app_core.api.on_error.assert_called_once_with("tab-1", "boom", "x")

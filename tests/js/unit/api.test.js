@@ -363,9 +363,10 @@ describe("PythonAPI", () => {
 
   describe("actions", () => {
     it("open_link() should send the destination to Python", async () => {
-      await api.open_link("https://example.com/docs");
+      await api.open_link("tab-1", "https://example.com/docs");
 
       expect(mockPythonAPI.open_link).toHaveBeenCalledWith(
+        "tab-1",
         "https://example.com/docs",
       );
     });

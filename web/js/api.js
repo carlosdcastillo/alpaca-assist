@@ -258,8 +258,8 @@ class PythonAPI {
     return this.call("clone_conversation", tabId);
   }
 
-  async open_link(href) {
-    return this.call("open_link", href);
+  async open_link(tabId, href) {
+    return this.call("open_link", tabId, href);
   }
 
   async navigate_to_tab(tabId) {
