@@ -11,7 +11,8 @@
  * - Zero caret issues (textarea owns caret natively)
  * - Support for bold, italic, inline code, fenced code blocks, headers,
  *   blockquotes, lists, and links
- * - Ctrl+Enter to send, Tab inserts spaces, Ctrl+B/I/U wrap selection
+ * - Ctrl+Enter to send, Tab inserts spaces, Ctrl+A/E move within the line,
+ *   Ctrl+B/I/U wrap selection
  */
 class MarkdownInput {
   constructor(containerId, options = {}) {
@@ -70,6 +71,27 @@ class MarkdownInput {
       if (e.ctrlKey && e.key === "Enter") {
         e.preventDefault();
         if (this.options.onSend) this.options.onSend(this.getValue());
+        return;
+      }
+
+      if (
+        e.ctrlKey &&
+        !e.altKey &&
+        !e.shiftKey &&
+        (e.key === "a" || e.key === "e")
+      ) {
+        e.preventDefault();
+        const text = this.editor.value;
+        const caret =
+          this.editor.selectionDirection === "backward"
+            ? this.editor.selectionStart
+            : this.editor.selectionEnd;
+        const lineBoundary =
+          e.key === "a"
+            ? text.lastIndexOf("\n", caret - 1) + 1
+            : text.indexOf("\n", caret);
+        const position = lineBoundary === -1 ? text.length : lineBoundary;
+        this.editor.setSelectionRange(position, position);
         return;
       }
 
