@@ -438,6 +438,67 @@ class TestConversationSearch:
         assert record["folder"] == "Work"
         assert record["tags"] == ["database", "planning"]
 
+    def test_graph_history_preview_excludes_internal_ids_and_preserves_markdown(
+        self,
+        mock_db: ConversationDatabase,
+    ) -> None:
+        user_id = "ec7b4cc5-5d40-4ef1-8fdf-60364e45994d"
+        assistant_id = "2699effa-3237-405a-96ac-2542fcbf38f6"
+        _store(
+            mock_db,
+            "Markdown notes",
+            {
+                "tab_id": "tab-5f7a6918-6cd5-4053-821f-a7210995018d",
+                "chat_state": {
+                    "graph": {
+                        "id": "08664096-d317-4ccc-899a-dcfdd2667f4d",
+                        "active_node_id": assistant_id,
+                        "nodes": {
+                            user_id: {
+                                "id": user_id,
+                                "parent_id": None,
+                                "role": "user",
+                                "content": {
+                                    "components": [
+                                        {
+                                            "type": "text",
+                                            "content": "Make a **list**",
+                                        },
+                                    ],
+                                },
+                            },
+                            assistant_id: {
+                                "id": assistant_id,
+                                "parent_id": user_id,
+                                "role": "assistant",
+                                "content": {
+                                    "components": [
+                                        {"type": "text", "content": "- One\n- Two"},
+                                        {
+                                            "type": "tool_result",
+                                            "content": "secret internal output",
+                                            "id": "tool-id",
+                                        },
+                                    ],
+                                },
+                            },
+                        },
+                    },
+                },
+            },
+        )
+
+        record = mock_db.get_history_records()[0]
+
+        assert record["preview"] == "Make a **list** - One - Two"
+        assert record["preview_markdown"] == (
+            "### You\n\nMake a **list**\n\n---\n\n### Assistant\n\n- One\n- Two"
+        )
+        combined = record["preview"] + record["preview_markdown"]
+        assert user_id not in combined
+        assert assistant_id not in combined
+        assert "secret internal output" not in combined
+
     def test_history_metadata_survives_reclosing_conversation(
         self,
         mock_db: ConversationDatabase,
@@ -472,7 +533,9 @@ class TestConversationSearch:
         source = ConversationDatabase(str(temp_dir / "source.db"))
         conversation_id = _store(source, "Backup me", {"questions": ["Keep this"]})
         source.update_history_metadata(
-            conversation_id, folder="Saved", tags=["important"]
+            conversation_id,
+            folder="Saved",
+            tags=["important"],
         )
 
         target = ConversationDatabase(str(temp_dir / "target.db"))
@@ -724,9 +787,35 @@ class TestDatabaseMigration:
             conn.execute(
                 "INSERT INTO conversations "
                 "(id, title, chat_data, created_date, closed_date) "
-                "VALUES (2, 'Pre-migration Pack', "
-                '\'{"tab_type": "pack", "host": "user@host"}\', '
-                "'2026-01-01', '2026-01-01')",
+                "VALUES (2, 'Pre-migration Pack', ?, '2026-01-01', '2026-01-01')",
+                (
+                    json.dumps(
+                        {
+                            "tab_type": "pack",
+                            "chat_state": {
+                                "graph": {
+                                    "id": "internal-graph-uuid",
+                                    "active_node_id": "internal-node-uuid",
+                                    "nodes": {
+                                        "internal-node-uuid": {
+                                            "id": "internal-node-uuid",
+                                            "parent_id": None,
+                                            "role": "user",
+                                            "content": {
+                                                "components": [
+                                                    {
+                                                        "type": "text",
+                                                        "content": "Visible **Markdown**",
+                                                    },
+                                                ],
+                                            },
+                                        },
+                                    },
+                                },
+                            },
+                        },
+                    ),
+                ),
             )
             conn.commit()
 
@@ -736,6 +825,14 @@ class TestDatabaseMigration:
         assert len(by_title) == 2
         assert by_title["Pre-migration Local"] is None
         assert by_title["Pre-migration Pack"] == "pack"
+
+        migrated_record = next(
+            record
+            for record in db.get_history_records()
+            if record["title"] == "Pre-migration Pack"
+        )
+        assert migrated_record["preview"] == "Visible **Markdown**"
+        assert "internal-node-uuid" not in migrated_record["preview_markdown"]
 
         # And the migrated column is actually usable going forward.
         _store(db, "New Pack Tab", {"tab_type": "pack"})

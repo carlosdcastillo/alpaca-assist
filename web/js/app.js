@@ -1302,24 +1302,59 @@ class AlpacaApp {
   _renderHistoryPreview(conv) {
     const preview = document.getElementById("history-preview");
     preview.innerHTML = "";
+
+    const eyebrow = document.createElement("div");
+    eyebrow.className = "history-preview-eyebrow";
+    eyebrow.textContent = conv.pinned
+      ? "★ Pinned conversation"
+      : "Conversation";
+
     const title = document.createElement("h4");
     title.className = "history-preview-title";
     title.textContent = conv.title;
+
     const meta = document.createElement("div");
     meta.className = "history-preview-meta";
-    meta.textContent = [
-      `Created ${this._formatHistoryDate(conv.created_date)}`,
-      `Last closed ${this._formatHistoryDate(conv.closed_date)}`,
-      conv.folder ? `Folder: ${conv.folder}` : "",
-      conv.tags?.length ? `Tags: ${conv.tags.join(", ")}` : "",
-    ]
-      .filter(Boolean)
-      .join("\n");
+    const dates = [
+      ["Created", this._formatHistoryDate(conv.created_date)],
+      ["Last used", this._formatHistoryDate(conv.closed_date)],
+    ];
+    for (const [label, value] of dates) {
+      const item = document.createElement("div");
+      const term = document.createElement("span");
+      term.textContent = label;
+      const date = document.createElement("time");
+      date.textContent = value;
+      item.append(term, date);
+      meta.appendChild(item);
+    }
+
+    const labels = document.createElement("div");
+    labels.className = "history-preview-labels";
+    [conv.folder, ...(conv.tags || [])].filter(Boolean).forEach((label) => {
+      const badge = document.createElement("span");
+      badge.className = "history-badge";
+      badge.textContent = label;
+      labels.appendChild(badge);
+    });
+
+    const divider = document.createElement("div");
+    divider.className = "history-preview-divider";
+    divider.textContent = "Preview";
+
     const text = document.createElement("div");
     text.className = "history-preview-text";
-    text.textContent =
-      conv.preview || "No text preview is available for this conversation.";
-    preview.append(title, meta, text);
+    const markdown =
+      conv.preview_markdown ||
+      conv.preview ||
+      "No text preview is available for this conversation.";
+    text.innerHTML = DOMPurify.sanitize(marked.parse(markdown), {
+      FORBID_ATTR: ["href"],
+    });
+
+    preview.append(eyebrow, title, meta);
+    if (labels.childElementCount) preview.appendChild(labels);
+    preview.append(divider, text);
   }
 
   _selectedHistoryIds() {

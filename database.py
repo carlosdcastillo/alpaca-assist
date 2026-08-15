@@ -20,6 +20,7 @@ _HISTORY_METADATA_COLUMNS = {
     "archived": "INTEGER NOT NULL DEFAULT 0",
     "search_text": "TEXT NOT NULL DEFAULT ''",
     "preview": "TEXT NOT NULL DEFAULT ''",
+    "preview_markdown": "TEXT NOT NULL DEFAULT ''",
 }
 
 
@@ -54,6 +55,7 @@ class ConversationDatabase:
             existing_columns = {
                 row[1] for row in cursor.execute("PRAGMA table_info(conversations)")
             }
+            history_preview_needs_backfill = "preview_markdown" not in existing_columns
             if "tab_type" not in existing_columns:
                 cursor.execute("ALTER TABLE conversations ADD COLUMN tab_type TEXT")
                 # One-time backfill for rows stored before this column
@@ -76,18 +78,25 @@ class ConversationDatabase:
                     cursor.execute(
                         f"ALTER TABLE conversations ADD COLUMN {column} {definition}",
                     )
+            history_backfill_where = (
+                "" if history_preview_needs_backfill else "WHERE search_text = ''"
+            )
             for row_id, chat_data_json in cursor.execute(
-                "SELECT id, chat_data FROM conversations WHERE search_text = ''",
+                f"SELECT id, chat_data FROM conversations {history_backfill_where}",
             ).fetchall():
                 try:
-                    search_text, preview = self._history_text(
-                        json.loads(chat_data_json)
-                    )
+                    chat_data = json.loads(chat_data_json)
+                    search_text, preview = self._history_text(chat_data)
+                    preview_markdown = self._history_markdown(chat_data)
                 except json.JSONDecodeError:
                     continue
                 cursor.execute(
-                    "UPDATE conversations SET search_text = ?, preview = ? WHERE id = ?",
-                    (search_text, preview, row_id),
+                    """
+                    UPDATE conversations
+                    SET search_text = ?, preview = ?, preview_markdown = ?
+                    WHERE id = ?
+                    """,
+                    (search_text, preview, preview_markdown, row_id),
                 )
             cursor.execute(
                 """
@@ -177,33 +186,91 @@ class ConversationDatabase:
             return cursor.fetchall()
 
     @staticmethod
-    def _history_text(chat_data: dict[str, Any]) -> tuple[str, str]:
-        """Extract human-readable text for history search and previews."""
-        parts: list[str] = []
-        skipped_keys = {"images", "question_images", "image_data", "data"}
+    def _history_messages(chat_data: dict[str, Any]) -> list[tuple[str, str]]:
+        """Extract only user-visible messages from legacy or graph chat state."""
 
-        def collect(value: Any, parent_key: str = "") -> None:
-            if parent_key in skipped_keys:
-                return
+        def text_content(value: Any) -> str:
             if isinstance(value, str):
-                if len(value) < 100_000:
-                    parts.append(value)
-            elif isinstance(value, list):
-                for item in value:
-                    collect(item, parent_key)
-            elif isinstance(value, dict):
-                if value.get("type") in {"tool_call", "tool_result"}:
-                    return
-                for key, item in value.items():
-                    if key not in {"id", "tab_id", "session_id", "created_at", "type"}:
-                        collect(item, key)
+                return value
+            if not isinstance(value, dict):
+                return ""
+            components = value.get("components", [])
+            return "".join(
+                component
+                if isinstance(component, str)
+                else component.get("content", "")
+                for component in components
+                if isinstance(component, str)
+                or (
+                    isinstance(component, dict)
+                    and component.get("type") == "text"
+                    and isinstance(component.get("content"), str)
+                )
+            )
 
-        collect(chat_data.get("chat_state", chat_data))
-        normalized = " ".join(" ".join(parts).split())
+        state = chat_data.get("chat_state", chat_data)
+        if not isinstance(state, dict):
+            return []
+
+        graph = state.get("graph")
+        if isinstance(graph, dict):
+            nodes = graph.get("nodes", {})
+            if not isinstance(nodes, dict):
+                return []
+            active_path: list[dict[str, Any]] = []
+            node_id = graph.get("active_node_id")
+            seen: set[str] = set()
+            while isinstance(node_id, str) and node_id not in seen:
+                seen.add(node_id)
+                node = nodes.get(node_id)
+                if not isinstance(node, dict):
+                    break
+                active_path.append(node)
+                node_id = node.get("parent_id")
+            active_path.reverse()
+            return [
+                (node["role"], content)
+                for node in active_path
+                if node.get("role") in {"user", "assistant"}
+                and (content := text_content(node.get("content"))).strip()
+            ]
+
+        questions = state.get("questions", [])
+        answers = state.get("answers", [])
+        messages: list[tuple[str, str]] = []
+        if not isinstance(questions, list) or not isinstance(answers, list):
+            return messages
+        for index, question in enumerate(questions):
+            if isinstance(question, str) and question.strip():
+                messages.append(("user", question))
+            if index < len(answers):
+                answer = text_content(answers[index])
+                if answer.strip():
+                    messages.append(("assistant", answer))
+        return messages
+
+    @classmethod
+    def _history_text(cls, chat_data: dict[str, Any]) -> tuple[str, str]:
+        """Build searchable plain text and a compact list-row preview."""
+        messages = cls._history_messages(chat_data)
+        normalized = " ".join(" ".join(text for _, text in messages).split())
         preview = normalized[:280]
         if len(normalized) > 280:
             preview += "…"
         return normalized, preview
+
+    @classmethod
+    def _history_markdown(cls, chat_data: dict[str, Any]) -> str:
+        """Build a bounded, markdown-preserving conversation preview."""
+        messages = cls._history_messages(chat_data)[-6:]
+        sections = [
+            f"### {'You' if role == 'user' else 'Assistant'}\n\n{text.strip()}"
+            for role, text in messages
+        ]
+        markdown = "\n\n---\n\n".join(sections)
+        if len(markdown) > 12_000:
+            markdown = markdown[:12_000].rstrip() + "\n\n…"
+        return markdown
 
     def get_history_records(
         self,
@@ -226,7 +293,7 @@ class ConversationDatabase:
             rows = conn.execute(
                 f"""
                 SELECT id, title, created_date, closed_date, tab_type,
-                       pinned, folder, tags, archived, preview
+                       pinned, folder, tags, archived, preview, preview_markdown
                 FROM conversations
                 WHERE {' AND '.join(where)}
                 ORDER BY pinned DESC, closed_date DESC
@@ -294,7 +361,8 @@ class ConversationDatabase:
             return cursor.rowcount
 
     def export_history(
-        self, conversation_ids: list[int] | None = None
+        self,
+        conversation_ids: list[int] | None = None,
     ) -> dict[str, Any]:
         where = ""
         params: list[Any] = []
@@ -324,13 +392,15 @@ class ConversationDatabase:
 
     def import_history(self, backup: dict[str, Any]) -> int:
         if backup.get("format") != "alpaca-assist-history" or not isinstance(
-            backup.get("conversations"), list
+            backup.get("conversations"),
+            list,
         ):
             raise ValueError("Not an Alpaca Assist history backup")
         imported = 0
         for item in backup["conversations"]:
             if not isinstance(item, dict) or not isinstance(
-                item.get("chat_data"), dict
+                item.get("chat_data"),
+                dict,
             ):
                 raise ValueError("Backup contains an invalid conversation")
             conversation_id = self.allocate_conversation_id()
@@ -396,6 +466,7 @@ class ConversationDatabase:
             fallback_date = chat_data.get("created_date", datetime.now().isoformat())
             json_data = json.dumps(chat_data, ensure_ascii=False)
             search_text, preview = self._history_text(chat_data)
+            preview_markdown = self._history_markdown(chat_data)
             logger.debug(
                 f"Storing conversation {conversation_id} with {len(json_data)} bytes",
             )
@@ -403,7 +474,8 @@ class ConversationDatabase:
                 """
                 INSERT OR REPLACE INTO conversations
                     (id, title, chat_data, created_date, closed_date, summary_generated,
-                     tab_type, pinned, folder, tags, archived, search_text, preview)
+                     tab_type, pinned, folder, tags, archived, search_text, preview,
+                     preview_markdown)
                 VALUES (
                     ?,
                     ?,
@@ -416,6 +488,7 @@ class ConversationDatabase:
                     COALESCE((SELECT folder FROM conversations WHERE id = ?), ''),
                     COALESCE((SELECT tags FROM conversations WHERE id = ?), '[]'),
                     COALESCE((SELECT archived FROM conversations WHERE id = ?), 0),
+                    ?,
                     ?,
                     ?
                 )
@@ -435,6 +508,7 @@ class ConversationDatabase:
                     conversation_id,
                     search_text,
                     preview,
+                    preview_markdown,
                 ),
             )
             conn.commit()
