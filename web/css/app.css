@@ -637,8 +637,8 @@ html, body {
     font-family: var(--font-content);
     line-height: 1.8;
     font-size: var(--content-font-size, 16px);
-    text-align: justify;
-    text-justify: inter-word;
+    text-align: start;
+    overflow-wrap: anywhere;
     hyphens: auto;
     cursor: text;
     caret-color: var(--accent-primary);
