@@ -322,7 +322,7 @@ class WebViewAPI:
         try:
             self._app.set_active_tab(tab_id)
             tab = self._app.core.tabs.get(tab_id)
-            if tab is not None and getattr(tab, "offline", False):
+            if isinstance(tab, PackTab) and tab.offline:
                 # Clicking into an offline Pack tab is as good a signal as
                 # any to retry — reuses the tab-click path that's already
                 # wired, no new UI surface needed.
@@ -575,7 +575,7 @@ class WebViewAPI:
                 return {"success": False, "cancelled": True}
             path = result[0] if isinstance(result, (list, tuple)) else result
             backup = self._app.core.db.export_history(
-                [int(i) for i in conv_ids] or None
+                [int(i) for i in conv_ids] or None,
             )
             with open(path, "w", encoding="utf-8") as handle:
                 json.dump(backup, handle, ensure_ascii=False, indent=2)
@@ -735,7 +735,9 @@ class WebViewAPI:
         """Set the selected model."""
         try:
             active_tab_id = self._app.get_active_tab_id()
-            active_tab = self._app.core.tabs.get(active_tab_id)
+            active_tab = (
+                self._app.core.tabs.get(active_tab_id) if active_tab_id else None
+            )
             if isinstance(active_tab, PackTab):
                 return active_tab.set_model(model)
             self._app.core.preferences["model"] = model
@@ -1226,7 +1228,11 @@ class WebViewAPI:
 
             clone_conv_id = result["conversation_id"]
             new_tab = self._app.core.tabs.get(result["tab_id"])
-            if new_tab:
+            # create_tab_and_notify_js only ever creates a plain local
+            # ChatTab, never a PackTab — the isinstance check below is for
+            # mypy's benefit (tabs.get()'s return type is the wider
+            # ChatTab | PackTab union), not a runtime possibility.
+            if new_tab is not None and not isinstance(new_tab, PackTab):
                 # load_from_data restores the *original* title and conversation_id
                 # from the serialized payload — reassert our own values.
                 new_tab.load_from_data(tab.get_serializable_data())

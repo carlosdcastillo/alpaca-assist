@@ -329,7 +329,7 @@ def _encode_image_under_limit(
         # worth trying, including on an already-small source that still
         # doesn't fit under budget at a higher quality/step.
         candidate = img.copy()
-        candidate.thumbnail((max_dim, max_dim), Image.LANCZOS)
+        candidate.thumbnail((max_dim, max_dim), Image.Resampling.LANCZOS)
 
         buf = io.BytesIO()
         if has_alpha:

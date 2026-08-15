@@ -416,7 +416,7 @@ class AppCore:
         tab.cleanup_resources()
         del self.tabs[tab_id]
 
-    def store_tab_in_database(self, tab: ChatTab) -> None:
+    def store_tab_in_database(self, tab: ChatTab | PackTab) -> None:
         """Store a tab's conversation in the database before closing it."""
         tab_data = tab.get_serializable_data()
         chat_state = tab_data.get("chat_state", {})
@@ -457,7 +457,7 @@ class AppCore:
         models = [m["name"] for m in data.get("models", [])]
         return sorted(models)
 
-    def export_tab_to_html(self, tab: ChatTab) -> None:
+    def export_tab_to_html(self, tab: ChatTab | PackTab) -> None:
         """Export a tab's conversation to HTML."""
         try:
             content, title = self._get_export_content_and_title(tab)
@@ -514,7 +514,7 @@ class AppCore:
             return "image/webp"
         return "image/jpeg"
 
-    def _get_export_content_and_title(self, tab: ChatTab) -> tuple[str, str]:
+    def _get_export_content_and_title(self, tab: ChatTab | PackTab) -> tuple[str, str]:
         """Return (markdown_text, title) for the tab's conversation.
 
         export_and_open() expects markdown — it runs it through a markdown

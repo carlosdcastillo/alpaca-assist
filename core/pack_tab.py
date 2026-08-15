@@ -241,7 +241,11 @@ class PackTab:
         used for backgrounded local tabs: re-fetch wholesale rather than
         replay a live event log across any gap.
         """
-        result = self._transport.send_request("attach", {}, timeout=timeout)
+        result: dict[str, Any] = self._transport.send_request(
+            "attach",
+            {},
+            timeout=timeout,
+        )
         self._apply_resync_result(result)
         return result
 
@@ -431,6 +435,11 @@ class PackTab:
         )
 
         def confirm() -> None:
+            # mypy can't carry the `api is None` narrowing above into this
+            # closure (it could theoretically run after `api` is rebound),
+            # even though in practice it's the same object captured at
+            # definition time.
+            assert api is not None
             rendered = api.wait_for_fold_rendered(
                 self.tab_id,
                 fold_id,
@@ -495,11 +504,12 @@ class PackTab:
     def set_model(self, model: str) -> dict[str, Any]:
         """Change and persist the model used by the remote ChatTab."""
         self._ensure_connected(timeout=ATTACH_TIMEOUT)
-        return self._transport.send_request(
+        result: dict[str, Any] = self._transport.send_request(
             "set_model",
             {"model": model},
             timeout=MUTATE_TIMEOUT,
         )
+        return result
 
     def get_workspace_status(self, max_age: float = 5.0) -> dict[str, Any] | None:
         if not self.project_name or not self.workspace_path or self.offline:
@@ -520,21 +530,22 @@ class PackTab:
     def read_video_chunk(self, locator: str, offset: int) -> dict[str, Any]:
         """Fetch a bounded video chunk from the remote Pack daemon."""
         self._ensure_connected(timeout=ATTACH_TIMEOUT)
-        return self._transport.send_request(
+        result: dict[str, Any] = self._transport.send_request(
             "read_video_chunk",
             {"locator": locator, "offset": offset},
             timeout=VIDEO_CHUNK_TIMEOUT,
         )
+        return result
 
     def read_gated_tool_output(self, gated_text: str) -> str:
         """Fetch a gated result from the remote Pack daemon's temp file."""
         self._ensure_connected(timeout=ATTACH_TIMEOUT)
-        result = self._transport.send_request(
+        result: dict[str, Any] = self._transport.send_request(
             "read_gated_tool_output",
             {"gated_text": gated_text},
             timeout=GATED_OUTPUT_TIMEOUT,
         )
-        return result["content"]
+        return str(result["content"])
 
     def compact_conversation(self) -> dict[str, Any]:
         return self._mutate("compact_conversation")
@@ -547,7 +558,11 @@ class PackTab:
 
     def _mutate(self, method: str) -> dict[str, Any]:
         try:
-            result = self._transport.send_request(method, {}, timeout=MUTATE_TIMEOUT)
+            result: dict[str, Any] = self._transport.send_request(
+                method,
+                {},
+                timeout=MUTATE_TIMEOUT,
+            )
             self._resync(timeout=MUTATE_TIMEOUT)
             return result
         except PackTransportError as e:

@@ -429,7 +429,13 @@ def _bind_socket(sock_path: Path) -> socket.socket:
     something else is actually listening on.
     """
     if sock_path.exists():
-        probe = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        # This module only ever runs on the remote (Unix) host — see the
+        # module docstring — so AF_UNIX is always present there. mypy just
+        # doesn't know that when type-checked from a Windows dev machine,
+        # where typeshed's socket stub omits it (matches the AF_UNIX
+        # availability check already used to skip this module's tests on
+        # Windows in tests/test_pack_daemon.py).
+        probe = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)  # type: ignore[attr-defined]
         probe.settimeout(1.0)
         alive = True
         try:
@@ -442,7 +448,7 @@ def _bind_socket(sock_path: Path) -> socket.socket:
             raise RuntimeError(f"a daemon is already listening on {sock_path}")
         sock_path.unlink(missing_ok=True)
 
-    sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)  # type: ignore[attr-defined]
     sock.bind(str(sock_path))
     sock.listen(SOCKET_BACKLOG)
     return sock
@@ -478,7 +484,9 @@ def main() -> None:
 
     core = AppCore(api=None)
     adapter = PackDaemonAdapter()
-    core.api = adapter
+    # Deliberately duck-typed, not a WebViewAPI subclass — see
+    # PackDaemonAdapter's own docstring above.
+    core.api = adapter  # type: ignore[assignment]
 
     tab = None
     if resumed:
