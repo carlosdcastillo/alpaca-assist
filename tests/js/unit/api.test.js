@@ -89,6 +89,7 @@ describe("PythonAPI", () => {
         .fn()
         .mockResolvedValue({ success: true, skills: [] }),
       export_conversation: jest.fn().mockResolvedValue({ success: true }),
+      open_link: jest.fn().mockResolvedValue({ success: true }),
       compact_conversation: jest.fn().mockResolvedValue({ success: true }),
       truncate_conversation: jest.fn().mockResolvedValue({ success: true }),
       get_status_info: jest.fn().mockResolvedValue({
@@ -357,6 +358,16 @@ describe("PythonAPI", () => {
       await api.set_model("llama2");
 
       expect(mockPythonAPI.set_model).toHaveBeenCalledWith("llama2");
+    });
+  });
+
+  describe("actions", () => {
+    it("open_link() should send the destination to Python", async () => {
+      await api.open_link("https://example.com/docs");
+
+      expect(mockPythonAPI.open_link).toHaveBeenCalledWith(
+        "https://example.com/docs",
+      );
     });
   });
 
