@@ -31,15 +31,18 @@ if [[ ! -x .venv/bin/python ]]; then
   /usr/bin/python3 -m venv --system-site-packages .venv
 fi
 
-requirements_hash="$(sha256sum requirements.txt | cut -d' ' -f1)"
+requirements_hash="$(sha256sum requirements.txt requirements-dev.txt | sha256sum | cut -d' ' -f1)"
 requirements_stamp=".venv/.amp-requirements.sha256"
 if [[ ! -f "$requirements_stamp" ]] || [[ "$(cat "$requirements_stamp")" != "$requirements_hash" ]]; then
-  echo "Installing Python dependencies"
-  .venv/bin/python -m pip install --disable-pip-version-check -r requirements.txt
+  echo "Installing Python and development dependencies"
+  .venv/bin/python -m pip install --disable-pip-version-check -r requirements-dev.txt
   printf '%s\n' "$requirements_hash" > "$requirements_stamp"
 else
-  echo "Python dependencies are current"
+  echo "Python and development dependencies are current"
 fi
+
+echo "Installing pre-commit hook"
+.venv/bin/pre-commit install
 
 node_hash="$(sha256sum package.json package-lock.json | sha256sum | cut -d' ' -f1)"
 node_stamp="node_modules/.amp-dependencies.sha256"
