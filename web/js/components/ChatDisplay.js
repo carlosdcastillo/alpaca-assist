@@ -83,7 +83,71 @@ class ChatDisplay {
         .composedPath()
         .find((node) => node instanceof HTMLImageElement);
       if (image) this._openImageOverlay(image);
+
+      const link = event.target.closest?.("a[href]");
+      const href = link?.getAttribute("href") || "";
+      if (!link || href.startsWith("alpaca://")) return;
+
+      // Relative file links otherwise navigate the WebView away from the app.
+      // Send every ordinary Markdown link through Python so local files and
+      // HTTP(S) URLs consistently open in the user's default application.
+      event.preventDefault();
+      window.pythonAPI?.open_link(href).then((result) => {
+        if (!result?.success) {
+          window.app?.setStatusMessage(
+            `Could not open ${href}: ${result?.error || "unknown error"}`,
+          );
+        }
+      });
     });
+
+    // Desktop WebViews do not provide the browser status UI that normally
+    // previews a link's destination. Surface Markdown link targets in the
+    // app status bar instead, while preserving the conversation statistics.
+    this.container.addEventListener("mouseover", (event) => {
+      const link = event.target.closest?.("a[href]");
+      if (link && !link.contains(event.relatedTarget)) {
+        this._showLinkDestination(link);
+      }
+    });
+    this.container.addEventListener("mouseout", (event) => {
+      const link = event.target.closest?.("a[href]");
+      if (link && !link.contains(event.relatedTarget)) {
+        this._restoreStatusAfterLink();
+      }
+    });
+  }
+
+  _showLinkDestination(link) {
+    const status = document.getElementById("status-text");
+    if (!status) return;
+
+    this.linkStatusPrevious = {
+      text: status.textContent,
+      title: status.getAttribute("title"),
+    };
+    this.linkStatusPreview = `Open: ${link.getAttribute("href")}`;
+    status.textContent = this.linkStatusPreview;
+    status.title = link.getAttribute("href");
+  }
+
+  _restoreStatusAfterLink() {
+    const status = document.getElementById("status-text");
+    if (
+      !status ||
+      !this.linkStatusPrevious ||
+      status.textContent !== this.linkStatusPreview
+    )
+      return;
+
+    status.textContent = this.linkStatusPrevious.text;
+    if (this.linkStatusPrevious.title === null) {
+      status.removeAttribute("title");
+    } else {
+      status.title = this.linkStatusPrevious.title;
+    }
+    this.linkStatusPrevious = null;
+    this.linkStatusPreview = null;
   }
 
   _createImageOverlay() {
@@ -176,7 +240,7 @@ class ChatDisplay {
       gfm: true,
     });
 
-    // Allow internal alpaca:// links to survive DOMPurify sanitization.
+    // Allow app-internal and local file links to survive DOMPurify sanitization.
     // DOMPurify strips unrecognized URL schemes from href by default.
     // This global hook runs for every DOMPurify.sanitize() call in the app.
     DOMPurify.addHook("uponSanitizeAttribute", (node, data) => {
@@ -184,7 +248,8 @@ class ChatDisplay {
         data.attrName === "href" &&
         typeof data.attrValue === "string" &&
         (data.attrValue.startsWith("alpaca://conv/") ||
-          data.attrValue.startsWith("alpaca://video/"))
+          data.attrValue.startsWith("alpaca://video/") ||
+          data.attrValue.startsWith("file://"))
       ) {
         data.forceKeepAttr = true;
       }

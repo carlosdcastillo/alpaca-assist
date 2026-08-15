@@ -171,7 +171,7 @@ class AlpacaApp {
     });
 
     // Intercept internal alpaca:// navigation links (e.g. handoff back-references).
-    // Rendered markdown produces <a href="alpaca://tab/{tabId}"> elements; we
+    // Rendered markdown produces <a href="alpaca://conv/{convId}"> elements; we
     // catch them here instead of letting the WebView try to load the URL.
     document.addEventListener("click", (e) => {
       const link = e.target.closest("a");

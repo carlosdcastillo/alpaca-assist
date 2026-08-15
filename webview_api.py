@@ -3,9 +3,13 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import queue
 import threading
+import urllib.parse
 import uuid
+import webbrowser
+from pathlib import Path
 from typing import Any
 from typing import Optional
 from typing import TYPE_CHECKING
@@ -707,6 +711,42 @@ class WebViewAPI:
             return {"success": False, "error": result.get("error", "restore_failed")}
         except Exception as e:
             logger.error(f"Error navigating to conv {conv_id}: {e}")
+            return {"success": False, "error": str(e)}
+
+    def open_link(self, href: str) -> dict[str, Any]:
+        """Open a Markdown HTTP(S) URL or local file outside the app WebView."""
+        try:
+            parsed = urllib.parse.urlsplit(href)
+            is_windows_path = (
+                os.name == "nt"
+                and len(href) >= 3
+                and href[1] == ":"
+                and href[2] in ("/", "\\")
+            )
+            if parsed.scheme in ("http", "https", "file"):
+                target = href
+            elif not parsed.scheme or is_windows_path:
+                path_text = href if is_windows_path else urllib.parse.unquote(parsed.path)
+                path = Path(path_text).expanduser()
+                if not path.is_absolute():
+                    path = Path.cwd() / path
+                path = path.resolve()
+                if not path.exists():
+                    return {"success": False, "error": "Local file not found"}
+                target = path.as_uri()
+                if parsed.fragment:
+                    target += f"#{parsed.fragment}"
+            else:
+                return {
+                    "success": False,
+                    "error": f"Unsupported link scheme: {parsed.scheme}",
+                }
+
+            if not webbrowser.open(target):
+                return {"success": False, "error": "No application could open the link"}
+            return {"success": True}
+        except Exception as e:
+            logger.error(f"Error opening link {href}: {e}")
             return {"success": False, "error": str(e)}
 
     def delete_history_entry(self, conv_id: int) -> dict[str, Any]:

@@ -48,13 +48,18 @@ describe("ChatDisplay", () => {
 
   beforeEach(() => {
     // Set up DOM
-    document.body.innerHTML = '<div id="chat-container"></div>';
+    document.body.innerHTML = `
+      <div id="chat-container"></div>
+      <div id="status-text" title="/workspace">Chat statistics</div>
+    `;
     container = document.getElementById("chat-container");
     window.Helpers = {
       copyToClipboard: jest.fn().mockResolvedValue(true),
     };
     window.app = undefined;
-    window.pythonAPI = undefined;
+    window.pythonAPI = {
+      open_link: jest.fn().mockResolvedValue({ success: true }),
+    };
 
     chatDisplay = new ChatDisplay("chat-container");
   });
@@ -88,6 +93,54 @@ describe("ChatDisplay", () => {
     it("should have current answer index of -1", () => {
       expect(chatDisplay.currentAnswerIndex).toBe(-1);
     });
+
+    it.each(["../README.md", "http://example.com/docs", "https://example.com/docs"])(
+      "should preview the Markdown link destination %s in the status bar",
+      (href) => {
+        container.innerHTML = `<a href="${href}">documentation</a>`;
+        const link = container.querySelector("a");
+        const status = document.getElementById("status-text");
+
+        link.dispatchEvent(new MouseEvent("mouseover", { bubbles: true }));
+
+        expect(status.textContent).toBe(`Open: ${href}`);
+        expect(status.title).toBe(href);
+
+        link.dispatchEvent(new MouseEvent("mouseout", { bubbles: true }));
+
+        expect(status.textContent).toBe("Chat statistics");
+        expect(status.title).toBe("/workspace");
+      },
+    );
+
+    it.each(["../README.md", "http://example.com", "https://example.com"])(
+      "should open the Markdown link destination %s outside the WebView",
+      (href) => {
+        container.innerHTML = `<a href="${href}">documentation</a>`;
+        const click = new MouseEvent("click", {
+          bubbles: true,
+          cancelable: true,
+        });
+
+        const useDefaultNavigation = container
+          .querySelector("a")
+          .dispatchEvent(click);
+
+        expect(useDefaultNavigation).toBe(false);
+        expect(window.pythonAPI.open_link).toHaveBeenCalledWith(href);
+      },
+    );
+
+    it.each(["alpaca://conv/42", "alpaca://video/video-1"])(
+      "should leave the internal link %s to its existing handler",
+      (href) => {
+        container.innerHTML = `<a href="${href}">internal link</a>`;
+
+        container.querySelector("a").click();
+
+        expect(window.pythonAPI.open_link).not.toHaveBeenCalled();
+      },
+    );
   });
 
   describe("addQuestion", () => {
