@@ -7,11 +7,14 @@ import datetime
 import json
 import math
 import os
+import queue
 import random
+import re
 import shutil
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 from collections.abc import Generator
 from http.server import BaseHTTPRequestHandler
@@ -793,6 +796,12 @@ class OllamaRequestHandler(BaseHTTPRequestHandler):
                 if val.get("type") == "alpaca_tool_event":
                     self._send_cli_tool_event(val)
 
+                elif val.get("type") == "cli_heartbeat":
+                    # Keeps the local socket alive through long silent CLI
+                    # tool calls (see _run_cli_jsonl) — an empty chunk is a
+                    # no-op for every consumer of this stream.
+                    self._send_text_chunk("", count)
+
                 elif val.get("type") == "message_start":
                     usage = val.get("message", {}).get("usage", {})
                     # Anthropic splits input across three fields when prompt caching
@@ -1437,9 +1446,28 @@ def _codex_mcp_overrides(
     media_event_path: str,
     working_directory: str | None,
 ) -> list[str]:
+    """Build `-c mcp_servers.<name>...` overrides for `codex exec`.
+
+    `codex exec -c key=value` splits `key` on literal dots itself rather
+    than parsing it as TOML, so a JSON/TOML-quoted name segment (e.g.
+    `"alpaca-media"`) doesn't get its quotes stripped the way a real TOML
+    dotted-key parser would — they end up baked into the registered server
+    name (confirmed via `codex mcp list --json`: a quoted override produces
+    the literal name `"alpaca-media"`, quote characters included), which
+    silently drops it from the tools offered to the model. TOML bare keys
+    already allow `[A-Za-z0-9_-]`, which covers every server name this app
+    produces (the built-in "alpaca-media" and user keys from
+    mcp_servers.json), so names are passed unquoted; anything outside that
+    set is skipped rather than emitted broken.
+    """
     overrides: list[str] = []
     for name, spec in _cli_mcp_servers(media_event_path, working_directory).items():
-        prefix = f"mcp_servers.{json.dumps(name)}"
+        if not re.fullmatch(r"[A-Za-z0-9_-]+", name):
+            print(
+                f"[warn] Skipping MCP server {name!r} for codex: name isn't a valid TOML bare key",
+            )
+            continue
+        prefix = f"mcp_servers.{name}"
         overrides.extend(("-c", f"{prefix}.command={json.dumps(spec['command'])}"))
         overrides.extend(("-c", f"{prefix}.args={json.dumps(spec.get('args', []))}"))
         for env_name, value in spec.get("env", {}).items():
@@ -1488,13 +1516,29 @@ def _prepare_cli_images(
     return _flatten_transcript(prepared), temp_dir, paths
 
 
+# Well under StreamingHandler.STREAM_TIMEOUT's 120s read timeout
+# (core/chat_tab_streaming.py) — CLI backends can go silent for minutes
+# while a tool call (e.g. rendering several images/videos) runs with no
+# stdout in between, unlike token-streaming models where the assumption
+# "at least one byte per token" holds. A heartbeat this frequent keeps the
+# local HTTP socket alive through those gaps without the client ever
+# needing to know a CLI subprocess is involved.
+_CLI_HEARTBEAT_INTERVAL_SECS = 20
+
+
 def _run_cli_jsonl(
     cmd: list[str],
     prompt: str,
     working_directory: str | None = None,
     media_event_path: str | None = None,
 ) -> Generator[dict[str, Any], None, None]:
-    """Run a CLI subprocess, feed it `prompt` on stdin, yield parsed JSONL stdout lines."""
+    """Run a CLI subprocess, feed it `prompt` on stdin, yield parsed JSONL stdout lines.
+
+    stdout is read on a background thread so this can poll with a timeout
+    and yield {"type": "cli_heartbeat"} during long silent gaps — a plain
+    `for line in proc.stdout` blocks indefinitely and can't interleave
+    anything while waiting on the next line.
+    """
     proc = subprocess.Popen(
         cmd,
         stdin=subprocess.PIPE,
@@ -1527,9 +1571,35 @@ def _run_cli_jsonl(
             except (OSError, json.JSONDecodeError):
                 return []
 
-        for line in proc.stdout:
+        line_queue: queue.Queue[str | None] = queue.Queue()
+
+        def _read_stdout() -> None:
+            # mypy can't carry the `proc.stdout is not None` assert above
+            # into this closure (proc.stdout is typed as Optional on the
+            # Popen object itself, not narrowed per-closure).
+            assert proc.stdout is not None
+            try:
+                for raw_line in proc.stdout:
+                    line_queue.put(raw_line)
+            finally:
+                line_queue.put(None)  # sentinel: stdout closed (process exiting)
+
+        reader_thread = threading.Thread(target=_read_stdout, daemon=True)
+        reader_thread.start()
+
+        while True:
+            try:
+                raw_line = line_queue.get(timeout=_CLI_HEARTBEAT_INTERVAL_SECS)
+            except queue.Empty:
+                yield from read_media_events()
+                yield {"type": "cli_heartbeat"}
+                continue
+
+            if raw_line is None:
+                break
+
             yield from read_media_events()
-            line = line.strip()
+            line = raw_line.strip()
             if not line:
                 continue
             try:
@@ -1565,7 +1635,7 @@ class ClaudeCodeCLIClient:
 
     def stream_complete(
         self,
-        messages: list[dict[str, str]] = [],
+        messages: list[dict[str, Any]] = [],
         model: str = "sonnet",
         max_tokens: int = 8192,
         temperature: float = 0.7,
@@ -1632,6 +1702,10 @@ class ClaudeCodeCLIClient:
                 line_type = line.get("type")
 
                 if line_type == "alpaca_tool_event":
+                    yield line
+                    continue
+
+                if line_type == "cli_heartbeat":
                     yield line
                     continue
 
@@ -1713,7 +1787,7 @@ class CodexCLIClient:
 
     def stream_complete(
         self,
-        messages: list[dict[str, str]] = [],
+        messages: list[dict[str, Any]] = [],
         model: str = "gpt-5.6-sol",
         max_tokens: int = 8192,
         temperature: float = 0.7,
@@ -1772,6 +1846,10 @@ class CodexCLIClient:
                 working_directory,
                 media_event_path=media_event_path,
             ):
+                if line.get("type") == "cli_heartbeat":
+                    yield line
+                    continue
+
                 if not yielded_start:
                     yield {"type": "message_start", "message": {"usage": {}}}
                     yielded_start = True
@@ -1894,7 +1972,7 @@ if __name__ == "__main__":
         print("claude CLI found on PATH — claude-code/* models available")
     else:
         print(
-            "Warning: `claude` not found on PATH — claude-code/* models will not be available"
+            "Warning: `claude` not found on PATH — claude-code/* models will not be available",
         )
 
     if shutil.which("codex"):
@@ -1902,7 +1980,7 @@ if __name__ == "__main__":
         print("codex CLI found on PATH — codex/* models available (UNVERIFIED backend)")
     else:
         print(
-            "Warning: `codex` not found on PATH — codex/* models will not be available"
+            "Warning: `codex` not found on PATH — codex/* models will not be available",
         )
 
     local_client = ClaudeClient(

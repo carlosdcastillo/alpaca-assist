@@ -10,12 +10,12 @@ from unittest.mock import patch
 
 import pytest
 
-from anthropic_ollama_server import ClaudeCodeCLIClient
-from anthropic_ollama_server import CodexCLIClient
-from anthropic_ollama_server import OllamaRequestHandler
 from anthropic_ollama_server import _build_claude_mcp_config_file
 from anthropic_ollama_server import _codex_mcp_overrides
 from anthropic_ollama_server import _run_cli_jsonl
+from anthropic_ollama_server import ClaudeCodeCLIClient
+from anthropic_ollama_server import CodexCLIClient
+from anthropic_ollama_server import OllamaRequestHandler
 from core.chat_tab_streaming import StreamingHandler
 
 
@@ -75,11 +75,46 @@ def test_cli_clients_receive_project_instructions_and_workspace(
     assert "SPINUP: Install dependencies." in system_text
 
 
+@pytest.mark.parametrize(
+    ("client", "model"),
+    [
+        (ClaudeCodeCLIClient(), "claude-code/sonnet"),
+        (CodexCLIClient(), "codex/gpt-5.6-sol"),
+    ],
+)
+def test_cli_clients_forward_heartbeats(
+    client: ClaudeCodeCLIClient | CodexCLIClient,
+    model: str,
+) -> None:
+    # A silent CLI tool call (e.g. rendering images/videos) can outlast
+    # StreamingHandler.STREAM_TIMEOUT's 120s read timeout; _run_cli_jsonl's
+    # heartbeats keep the socket alive, but only if both CLI client classes
+    # actually forward them instead of swallowing them as an unknown event.
+    with (
+        patch(
+            "anthropic_ollama_server._build_claude_mcp_config_file",
+            return_value=None,
+        ),
+        patch(
+            "anthropic_ollama_server._run_cli_jsonl",
+            return_value=iter([{"type": "cli_heartbeat"}]),
+        ),
+    ):
+        events = list(
+            client.stream_complete(
+                messages=[{"role": "user", "content": "hi"}],
+                model=model,
+            ),
+        )
+
+    assert {"type": "cli_heartbeat"} in events
+
+
 def test_proxy_dispatches_the_project_workspace_to_the_selected_backend() -> None:
     backend = MagicMock()
     backend.stream_complete.return_value = iter(())
     handler = object.__new__(OllamaRequestHandler)
-    handler._process_stream = MagicMock()
+    handler._process_stream = MagicMock()  # type: ignore[method-assign]
 
     with patch("anthropic_ollama_server.get_client_for_model", return_value=backend):
         handler._handle_request_with_tools(
@@ -113,7 +148,7 @@ def test_initial_request_sends_only_a_project_workspace(workspace: str | None) -
         {"role": "user", "content": "Fix the bug."},
     ]
     processor = MagicMock()
-    handler = StreamingHandler(chat, tool_handler, processor)
+    handler = StreamingHandler(chat, tool_handler, processor)  # type: ignore[arg-type]
 
     with patch(
         "core.chat_tab_streaming.requests.post",
@@ -149,7 +184,7 @@ def test_continuation_keeps_project_workspace_and_system_prompt() -> None:
         {"role": "user", "content": "Fix the bug."},
     ]
     processor = MagicMock()
-    handler = StreamingHandler(chat, tool_handler, processor)
+    handler = StreamingHandler(chat, tool_handler, processor)  # type: ignore[arg-type]
 
     with patch(
         "core.chat_tab_streaming.requests.post",
@@ -219,7 +254,14 @@ def test_cli_mcp_config_always_includes_media_bridge(tmp_path: Path) -> None:
     assert media["args"][0].endswith("cli_media_mcp_server.py")
 
     overrides = _codex_mcp_overrides(event_path, "/workspace")
-    assert any('mcp_servers."alpaca-media".command=' in value for value in overrides)
+    # Unquoted: codex's `-c key=value` splits the dotted key on literal
+    # dots itself rather than parsing it as TOML, so a quoted name segment
+    # ends up with its quote characters baked into the registered server
+    # name — silently dropping it from the tools offered to the model
+    # (confirmed against a real codex-cli 0.147.0 binary via
+    # `codex mcp list --json`).
+    assert any("mcp_servers.alpaca-media.command=" in value for value in overrides)
+    assert not any('"alpaca-media"' in value for value in overrides)
     assert any("ALPACA_CLI_MEDIA_EVENTS" in value for value in overrides)
 
 
@@ -242,3 +284,23 @@ def test_cli_jsonl_forwards_media_side_channel(tmp_path: Path) -> None:
     )
 
     assert output == [event, {"type": "result"}]
+
+
+def test_cli_jsonl_emits_heartbeats_during_a_silent_gap() -> None:
+    # StreamingHandler.STREAM_TIMEOUT's 120s read timeout kills the whole
+    # stream if the local socket goes quiet that long — exactly what
+    # happens when a CLI tool call (e.g. rendering several images/videos)
+    # runs for minutes without printing a line. A low heartbeat interval
+    # here stands in for the real ~20s one so the test doesn't sleep long.
+    command = [
+        sys.executable,
+        "-c",
+        "import time, json; time.sleep(0.3); print(json.dumps({'type': 'result'}))",
+    ]
+
+    with patch("anthropic_ollama_server._CLI_HEARTBEAT_INTERVAL_SECS", 0.05):
+        output = list(_run_cli_jsonl(command, ""))
+
+    assert output[-1] == {"type": "result"}
+    assert output[:-1] == [{"type": "cli_heartbeat"}] * (len(output) - 1)
+    assert len(output) > 1
