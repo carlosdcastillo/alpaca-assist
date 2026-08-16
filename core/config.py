@@ -1,4 +1,5 @@
 """Configuration constants - no UI dependencies."""
+
 from pathlib import Path
 from typing import Any
 

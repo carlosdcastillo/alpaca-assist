@@ -21,6 +21,7 @@ Temp files are deleted when their owning tab closes (cleanup_tab_output_dir)
 and orphaned directories from a previous run that didn't exit cleanly are
 swept on app startup (sweep_orphaned_output_dirs).
 """
+
 from __future__ import annotations
 
 import json

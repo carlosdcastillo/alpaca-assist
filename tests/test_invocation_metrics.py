@@ -7,6 +7,7 @@ correct value in message_start already (and repeats it in message_delta).
 Capturing input_tokens only from message_start, as the original code did,
 showed "in:0" in the status bar for every Fireworks model.
 """
+
 from __future__ import annotations
 
 from unittest.mock import Mock

@@ -8,6 +8,7 @@ text. Covers both that new behavior and a baseline for the existing
 tool_use_call / tool_result / user-images handling so a regression in
 either doesn't slip through silently.
 """
+
 from __future__ import annotations
 
 import base64
@@ -23,7 +24,11 @@ class TestToolUseCall:
         messages = [
             {
                 "role": "tool_use_call",
-                "call": {"id": "t1", "name": "internal_read_file", "arguments": {"file_path": "x.py"}},
+                "call": {
+                    "id": "t1",
+                    "name": "internal_read_file",
+                    "arguments": {"file_path": "x.py"},
+                },
             },
         ]
         result, errors = _build_anthropic_messages(messages)
@@ -60,7 +65,9 @@ class TestToolResultPlainText:
         assert block["content"] == [{"type": "text", "text": "some output"}]
 
     def test_cache_control_applied_when_requested(self) -> None:
-        messages = [{"role": "tool_result", "id": "t1", "content": "x", "cache_control": True}]
+        messages = [
+            {"role": "tool_result", "id": "t1", "content": "x", "cache_control": True},
+        ]
         result, _errors = _build_anthropic_messages(messages)
         assert result[0]["content"][0]["cache_control"] == {"type": "ephemeral"}
 
@@ -97,7 +104,11 @@ class TestToolResultWithImage:
         """
         encoded = encode_image_result("image/jpeg", "Zm9v", "desc")
         messages = [
-            {"role": "tool_result", "id": "t1", "content": f"Tool execution result:\n{encoded}"},
+            {
+                "role": "tool_result",
+                "id": "t1",
+                "content": f"Tool execution result:\n{encoded}",
+            },
         ]
         result, _errors = _build_anthropic_messages(messages)
         inner = result[0]["content"][0]["content"]
@@ -107,7 +118,12 @@ class TestToolResultWithImage:
     def test_cache_control_still_applies_alongside_image(self) -> None:
         encoded = encode_image_result("image/png", "QUJD", "d")
         messages = [
-            {"role": "tool_result", "id": "t1", "content": encoded, "cache_control": True},
+            {
+                "role": "tool_result",
+                "id": "t1",
+                "content": encoded,
+                "cache_control": True,
+            },
         ]
         result, _errors = _build_anthropic_messages(messages)
         assert result[0]["content"][0]["cache_control"] == {"type": "ephemeral"}
@@ -115,7 +131,12 @@ class TestToolResultWithImage:
 
 class TestToolResultWithVideo:
     def test_sends_description_not_locator_or_video_bytes_to_model(self) -> None:
-        encoded = encode_video_result("video/webm", "/tmp/demo.webm", 1234, "demo ready")
+        encoded = encode_video_result(
+            "video/webm",
+            "/tmp/demo.webm",
+            1234,
+            "demo ready",
+        )
         stored = '{"content": [{"type": "text", "text": ' + json.dumps(encoded) + "}]}"
         messages = [{"role": "tool_result", "id": "v1", "content": stored}]
 

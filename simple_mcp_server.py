@@ -2,6 +2,7 @@
 A simple MCP server that provides basic text and file operations with TRAMP support.
 Supports SSH TRAMP filenames like /ssh:user@host:/path/to/file
 """
+
 import asyncio
 import os
 from collections.abc import Awaitable
@@ -45,6 +46,7 @@ except ImportError:
 
 
 server = Server("simple-tools")
+
 
 # Language mapping for syntax highlighting in code fences
 def get_filepath_argument(arguments: dict[str, Any], required: bool = True) -> str:
@@ -103,8 +105,6 @@ def read_file_content(filepath: str, tramp):
     else:
         with open(filepath, encoding="utf-8") as f:
             return f.read()
-
-
 
 
 async def handle_cyclomatic_complexity_tool(
@@ -677,6 +677,7 @@ TOOL_HANDLERS: dict[str, Callable[[dict[str, Any]], Awaitable[Any]]] = {
     "render_mermaid": handle_render_mermaid_tool,
     "fetch_url_as_markdown": handle_fetch_url_as_markdown_tool,
 }
+
 
 @server.call_tool()
 async def handle_call_tool(

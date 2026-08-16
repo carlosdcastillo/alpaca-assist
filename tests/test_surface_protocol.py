@@ -5,11 +5,12 @@ worth testing hard is the parser's willingness to say "this isn't a surface"
 — a malformed or truncated result must render as ordinary text rather than
 produce a card pointing at a session that never existed.
 """
+
 from __future__ import annotations
 
+from core.surface_protocol import SENTINEL
 from core.surface_protocol import encode_surface_result
 from core.surface_protocol import parse_surface_result
-from core.surface_protocol import SENTINEL
 
 
 class TestEncodeDecodeRoundTrip:

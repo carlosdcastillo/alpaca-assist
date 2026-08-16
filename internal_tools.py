@@ -6,6 +6,7 @@ overhead and makes them available even when no MCP server is configured.
 
 Return format mirrors mcp_manager.call_tool(): {"content": [...], "isError": bool}
 """
+
 from __future__ import annotations
 
 import base64
@@ -313,8 +314,9 @@ def _encode_image_under_limit(
     the encoded result fits under max_bytes. Returns (encoded_bytes,
     mime_type, final_pixel_size), or None if nothing tried fit.
     """
-    from PIL import Image
     import io
+
+    from PIL import Image
 
     has_alpha = img.mode in ("RGBA", "LA") or (
         img.mode == "P" and "transparency" in img.info
@@ -924,9 +926,7 @@ def search_conversations(arguments: dict[str, Any]) -> dict[str, Any]:
         match_type = (
             "Both"
             if (title_match and content_match)
-            else "Title"
-            if title_match
-            else "Content"
+            else "Title" if title_match else "Content"
         )
         results.append(
             {

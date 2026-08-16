@@ -1,4 +1,5 @@
 """Streaming tool-call detection with cross-chunk pattern support."""
+
 import json
 import re
 from dataclasses import dataclass
@@ -177,9 +178,15 @@ class ToolCallDetector:
                     depth -= 1
                     if depth == 0:
                         try:
-                            parsed_obj: dict[str, Any] | list[
-                                Any
-                            ] | str | int | float | bool | None = json.loads(
+                            parsed_obj: (
+                                dict[str, Any]
+                                | list[Any]
+                                | str
+                                | int
+                                | float
+                                | bool
+                                | None
+                            ) = json.loads(
                                 fragment[: i + 1],
                             )
                             if (

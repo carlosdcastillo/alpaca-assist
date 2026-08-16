@@ -6,6 +6,7 @@ This program analyzes a Python file and extracts information about
 classes, their methods (including async), and standalone functions (including async)
 with their parameters.
 """
+
 import ast
 import os
 import sys
@@ -134,9 +135,11 @@ def summarize_file(filename):
                                 "name": item.name,
                                 "parameters": params,
                                 "return_type": return_type,
-                                "type": "async_method"
-                                if isinstance(item, ast.AsyncFunctionDef)
-                                else "method",
+                                "type": (
+                                    "async_method"
+                                    if isinstance(item, ast.AsyncFunctionDef)
+                                    else "method"
+                                ),
                                 "is_async": isinstance(item, ast.AsyncFunctionDef),
                             },
                         )
@@ -163,9 +166,11 @@ def summarize_file(filename):
                             "name": node.name,
                             "parameters": params,
                             "return_type": return_type,
-                            "type": "async_function"
-                            if isinstance(node, ast.AsyncFunctionDef)
-                            else "function",
+                            "type": (
+                                "async_function"
+                                if isinstance(node, ast.AsyncFunctionDef)
+                                else "function"
+                            ),
                             "is_async": isinstance(node, ast.AsyncFunctionDef),
                         },
                     )

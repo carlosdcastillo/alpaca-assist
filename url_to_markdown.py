@@ -1,6 +1,7 @@
 """
 URL fetching and HTML to Markdown conversion using curl and LLM.
 """
+
 import os
 import shutil
 import subprocess
@@ -60,10 +61,10 @@ def get_llm_client() -> tuple[Any, str]:
         try:
             api_key = os.environ.get("ANTHROPIC_API_KEY")
             if api_key:
+                from anthropic_ollama_server import DEFAULT_MODEL
                 from anthropic_ollama_server import (
                     ClaudeClient as AnthropicClaudeClient,
                 )
-                from anthropic_ollama_server import DEFAULT_MODEL
 
                 client = AnthropicClaudeClient(api_key=api_key)
                 model = DEFAULT_MODEL

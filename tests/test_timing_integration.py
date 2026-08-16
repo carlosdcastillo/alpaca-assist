@@ -5,6 +5,7 @@ that timing survives a save/load round trip in both conversation models, that
 old conversations without it still load, and that history gap markers reach the
 messages sent to the model.
 """
+
 from __future__ import annotations
 
 import time
@@ -205,9 +206,9 @@ class TestHistoryGapMarkersInModelContext:
         messages = handler.prepare_continuation_messages(1)
 
         user_messages = [m for m in messages if m["role"] == "user"]
-        assert "2 hours 14 minutes after the previous reply" in user_messages[1][
-            "content"
-        ]
+        assert (
+            "2 hours 14 minutes after the previous reply" in user_messages[1]["content"]
+        )
         assert user_messages[1]["content"].endswith("still there?")
 
     def test_prompt_follow_up_gets_no_marker(self) -> None:

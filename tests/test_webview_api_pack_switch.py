@@ -1,4 +1,5 @@
 """Regression tests for refreshing remote Pack tabs on activation."""
+
 from unittest.mock import MagicMock
 
 from core.pack_tab import PackTab

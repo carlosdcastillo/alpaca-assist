@@ -2,6 +2,7 @@
 TRAMP (Transparent Remote Access, Multiple Protocol) filename handler.
 Supports SSH TRAMP filenames like /ssh:user@host:/path/to/file
 """
+
 import os
 import re
 import shutil

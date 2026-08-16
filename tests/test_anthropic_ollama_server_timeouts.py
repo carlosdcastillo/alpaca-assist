@@ -4,6 +4,7 @@ These backed convert_html_to_markdown's summarization call with no timeout
 at all, so a stalled connection to Anthropic/Fireworks could hang forever
 independent of the per-tool-call wait timeout in ToolHandler.
 """
+
 from __future__ import annotations
 
 from unittest.mock import Mock

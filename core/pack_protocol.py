@@ -15,6 +15,7 @@ Message shapes:
     Error response: {"id": <int>, "error": {"message": <str>}}
     Notification: {"method": <str>, "params": {...}}   (no "id")
 """
+
 from __future__ import annotations
 
 import json
@@ -31,7 +32,9 @@ def encode_request(
     params: dict[str, Any] | None = None,
 ) -> str:
     """Encode an outgoing request as one newline-terminated JSON line."""
-    return json.dumps({"id": request_id, "method": method, "params": params or {}}) + "\n"
+    return (
+        json.dumps({"id": request_id, "method": method, "params": params or {}}) + "\n"
+    )
 
 
 def encode_response(request_id: int, result: Any = None) -> str:

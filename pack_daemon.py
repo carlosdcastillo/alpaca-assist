@@ -21,6 +21,7 @@ preferences.json at all). A relaunch against an existing session directory
 instead resumes the previously saved tab via AppCore.load_session(),
 exactly the same restore path webview_app.py already uses for local tabs.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -587,9 +588,9 @@ def main() -> None:
             saved_conv_id = tab_data.get("conversation_id")
             _tab_id, tab = core.create_tab(
                 tab_data.get("name", tab_data.get("title", "Pack Tab")),
-                conversation_id=int(saved_conv_id)
-                if saved_conv_id is not None
-                else None,
+                conversation_id=(
+                    int(saved_conv_id) if saved_conv_id is not None else None
+                ),
             )
             tab.load_from_data(tab_data)
         else:

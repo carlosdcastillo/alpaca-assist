@@ -22,6 +22,7 @@ regular tab; webview_api.revive_conversation checks the stored
 `tab_type` and, for "pack", reconnects to the still-running remote
 daemon instead of creating a disconnected local ChatTab.
 """
+
 from __future__ import annotations
 
 import base64
@@ -33,8 +34,8 @@ import threading
 import time
 import uuid
 from pathlib import Path
-from typing import Any
 from typing import TYPE_CHECKING
+from typing import Any
 
 from chat_state import ChatState
 from conversation_graph import ConversationGraph

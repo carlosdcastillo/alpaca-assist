@@ -5,6 +5,7 @@ Markdown File Analyzer
 This program analyzes a Markdown file and extracts structural information about
 headings, sections, code blocks, lists, tables, and other markdown elements.
 """
+
 import os
 import re
 import sys

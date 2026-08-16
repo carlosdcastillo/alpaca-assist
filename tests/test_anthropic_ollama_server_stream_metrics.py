@@ -7,6 +7,7 @@ provider not sending the expected terminal usage event meant the whole
 call's tokens silently vanished from session_output_tokens/
 session_input_tokens, even though the provider still billed for them.
 """
+
 from __future__ import annotations
 
 import io

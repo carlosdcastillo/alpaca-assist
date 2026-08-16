@@ -4,6 +4,7 @@ A Python wrapper for ripgrep (rg) command-line tool.
 This module provides a clean interface to ripgrep for searching files
 with support for Windows, Linux, and macOS.
 """
+
 import json
 import subprocess
 import sys

@@ -1,4 +1,5 @@
 """Safe, bounded access to files that live on a Pack worker."""
+
 from __future__ import annotations
 
 import base64

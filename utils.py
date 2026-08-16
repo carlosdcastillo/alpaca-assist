@@ -17,10 +17,13 @@ class ContentUpdate(NamedTuple):
     content_chunk: str
     is_done: bool = False
     is_error: bool = False
-    metrics: dict[
-        str,
-        Any,
-    ] | None = None  # Optional field for invocation metrics from API
+    metrics: (
+        dict[
+            str,
+            Any,
+        ]
+        | None
+    ) = None  # Optional field for invocation metrics from API
     is_tool_result: bool = False
     tool_id: str | None = None  # Tool ID for is_tool_result / is_tool_call updates
     is_tool_call: bool = False

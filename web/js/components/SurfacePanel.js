@@ -232,7 +232,9 @@ class SurfacePanel extends HTMLElement {
     });
     this._rfb.addEventListener("securityfailure", (event) => {
       this._setStatus(
-        `VNC authentication failed: ${event.detail?.reason || "unknown reason"}`,
+        `VNC authentication failed: ${
+          event.detail?.reason || "unknown reason"
+        }`,
         true,
       );
     });
@@ -286,7 +288,10 @@ class SurfacePanel extends HTMLElement {
 
   _startHeartbeat() {
     this._stopHeartbeat();
-    this._heartbeatTimer = setInterval(() => this._heartbeat(), SURFACE_HEARTBEAT_MS);
+    this._heartbeatTimer = setInterval(
+      () => this._heartbeat(),
+      SURFACE_HEARTBEAT_MS,
+    );
     this._heartbeat();
   }
 
@@ -311,7 +316,10 @@ class SurfacePanel extends HTMLElement {
       { surface_id: this.surfaceId },
     );
     if (!result?.success) {
-      this._setStatus(`Surface unreachable: ${result?.error || "unknown"}`, true);
+      this._setStatus(
+        `Surface unreachable: ${result?.error || "unknown"}`,
+        true,
+      );
       this._stopHeartbeat();
       return;
     }

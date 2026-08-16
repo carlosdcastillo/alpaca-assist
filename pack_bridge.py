@@ -25,6 +25,7 @@ itself), so the slower one always finds the socket already live and never
 double-spawns a daemon. pack_daemon.py additionally refuses to bind a
 socket that something is already listening on, as defense in depth.
 """
+
 from __future__ import annotations
 
 import fcntl

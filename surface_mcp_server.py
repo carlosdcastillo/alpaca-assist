@@ -19,6 +19,7 @@ refusing a model-supplied argv here would not have prevented anything --
 it would only have made this path more annoying than the other two ways
 to the same result.
 """
+
 from __future__ import annotations
 
 import asyncio

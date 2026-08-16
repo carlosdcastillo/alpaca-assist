@@ -5,6 +5,7 @@ a model listed in MODELS_JSON (what populates the Preferences model
 dropdown) that map_ollama_to_model doesn't know how to route would look
 selectable but silently fall back to DEFAULT_MODEL when used.
 """
+
 from __future__ import annotations
 
 import json

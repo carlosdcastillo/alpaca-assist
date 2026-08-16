@@ -4,6 +4,7 @@ A Python wrapper for Mermaid CLI (mmdc) command-line tool.
 This module provides a clean interface to the Mermaid diagram generator
 for creating diagrams from Mermaid syntax.
 """
+
 import base64
 import json
 import os

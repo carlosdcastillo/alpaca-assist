@@ -196,9 +196,11 @@ class ConversationDatabase:
                 return ""
             components = value.get("components", [])
             return "".join(
-                component
-                if isinstance(component, str)
-                else component.get("content", "")
+                (
+                    component
+                    if isinstance(component, str)
+                    else component.get("content", "")
+                )
                 for component in components
                 if isinstance(component, str)
                 or (

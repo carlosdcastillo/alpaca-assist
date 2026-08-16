@@ -1,6 +1,7 @@
 # unittest.mock replaces these typed methods with MagicMock instances at runtime.
 # mypy: disable-error-code="attr-defined"
 """Tests for core/pack_tab.py — the local proxy for a remote Pack tab."""
+
 from __future__ import annotations
 
 import base64

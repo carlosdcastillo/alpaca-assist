@@ -5,6 +5,7 @@ glm-5p2 via Fireworks) emit a leading "thinking" content block with no
 "text" key before the actual answer block, so content[0] isn't reliably
 the text block.
 """
+
 from __future__ import annotations
 
 from unittest.mock import Mock

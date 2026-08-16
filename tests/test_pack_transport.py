@@ -5,11 +5,13 @@ for the real `ssh ... pack_bridge.py ...` child, so PackTransport's reader
 thread genuinely blocks/reads/iterates exactly as it would against a real
 process, without needing SSH or a real daemon.
 """
+
 from __future__ import annotations
 
 import os
 import threading
 import time
+from typing import Any
 from unittest.mock import patch
 
 import pytest
@@ -83,7 +85,10 @@ class TestConnect:
         fake_popen: FakePopen,
     ) -> None:
         t = PackTransport("myhost", "abc123")
-        with patch("core.pack_transport.subprocess.Popen", return_value=fake_popen) as mock_popen:
+        with patch(
+            "core.pack_transport.subprocess.Popen",
+            return_value=fake_popen,
+        ) as mock_popen:
             t.connect()
         t.close()
 
@@ -98,7 +103,10 @@ class TestConnect:
         fake_popen: FakePopen,
     ) -> None:
         t = PackTransport("myhost", "abc123")
-        with patch("core.pack_transport.subprocess.Popen", return_value=fake_popen) as mock_popen:
+        with patch(
+            "core.pack_transport.subprocess.Popen",
+            return_value=fake_popen,
+        ) as mock_popen:
             t.connect(model="kimi-k3")
         t.close()
 
@@ -110,7 +118,10 @@ class TestConnect:
         fake_popen: FakePopen,
     ) -> None:
         t = PackTransport("myhost", "abc123")
-        with patch("core.pack_transport.subprocess.Popen", return_value=fake_popen) as mock_popen:
+        with patch(
+            "core.pack_transport.subprocess.Popen",
+            return_value=fake_popen,
+        ) as mock_popen:
             t.connect()
         t.close()
 
@@ -197,7 +208,7 @@ class TestNotifications:
         fake_popen: FakePopen,
     ) -> None:
         t = PackTransport("host", "session")
-        received = []
+        received: list[dict[str, Any]] = []
         t.on_notification("on_content_update", received.append)
         with patch("core.pack_transport.subprocess.Popen", return_value=fake_popen):
             t.connect()

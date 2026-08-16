@@ -12,14 +12,15 @@ Dependencies:
 Thread Safety:
     This module reads the stop flag and populates the content queue.
 """
+
 from __future__ import annotations
 
 import json
 import logging
 import threading
 import time
-from typing import Any
 from typing import TYPE_CHECKING
+from typing import Any
 
 import requests
 
@@ -308,9 +309,11 @@ class StreamProcessor:
                         turn_timing = self._chat.current_turn_timing
                         if turn_timing is not None:
                             turn_timing.add_invocation(
-                                metrics.get("invocation_latency_ms")
-                                if metrics
-                                else None,
+                                (
+                                    metrics.get("invocation_latency_ms")
+                                    if metrics
+                                    else None
+                                ),
                             )
 
                         if metrics:
@@ -331,7 +334,7 @@ class StreamProcessor:
                         if data.get("done_reason") == "error":
                             error_message = data.get("error", "Unknown stream error")
                             logger.error(
-                                f"[STREAM] Backend stream error: {error_message}"
+                                f"[STREAM] Backend stream error: {error_message}",
                             )
                             self._queue_content_update(
                                 answer_index,

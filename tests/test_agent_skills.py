@@ -3,6 +3,7 @@ Comprehensive tests for agent_skills.py module.
 
 This module tests skill discovery, parsing, and XML generation.
 """
+
 from pathlib import Path
 from typing import Any
 from unittest.mock import Mock
@@ -10,10 +11,10 @@ from unittest.mock import patch
 
 import pytest
 
-from agent_skills import _parse_skill
-from agent_skills import _xml_escape
 from agent_skills import SkillManager
 from agent_skills import SkillMetadata
+from agent_skills import _parse_skill
+from agent_skills import _xml_escape
 
 
 class TestSkillMetadata:

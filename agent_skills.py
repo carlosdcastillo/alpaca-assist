@@ -5,6 +5,7 @@ The SkillManager scans configured directories, validates each skill,
 and generates the <available_skills> XML block injected into every
 LLM request so the model knows which skills are available.
 """
+
 from __future__ import annotations
 
 import logging

@@ -8,6 +8,7 @@ wait-for-async-result pattern already used for tool execution in
 core/chat_tab_tools.py (`callback_event`/`TOOL_EXECUTION_TIMEOUT_SECONDS`),
 generalized here to support multiple concurrent in-flight requests.
 """
+
 from __future__ import annotations
 
 import itertools
@@ -177,7 +178,9 @@ class PackTransport:
         except (BrokenPipeError, OSError) as e:
             with self._pending_lock:
                 self._pending_events.pop(request_id, None)
-            raise PackTransportError(f"connection lost while sending {method!r}: {e}") from e
+            raise PackTransportError(
+                f"connection lost while sending {method!r}: {e}",
+            ) from e
 
         if not event.wait(timeout=timeout):
             with self._pending_lock:
@@ -187,7 +190,10 @@ class PackTransport:
 
         with self._pending_lock:
             self._pending_events.pop(request_id, None)
-            is_error, value = self._pending_results.pop(request_id, (True, "no result recorded"))
+            is_error, value = self._pending_results.pop(
+                request_id,
+                (True, "no result recorded"),
+            )
 
         if is_error:
             raise PackTransportError(str(value))

@@ -23,6 +23,7 @@ JSON-RPC bridge relay, so it cannot also carry a port forward.
     key-based and non-interactive (BatchMode=yes is already the convention
     here), so this is a startup-latency cost, not a prompt.
 """
+
 from __future__ import annotations
 
 import logging
@@ -71,7 +72,12 @@ def _port_accepting(port: int) -> bool:
 class SurfaceTunnel:
     """One `ssh -N -L` subprocess forwarding a single surface's WebSocket."""
 
-    def __init__(self, host: str, remote_port: int, local_port: int | None = None) -> None:
+    def __init__(
+        self,
+        host: str,
+        remote_port: int,
+        local_port: int | None = None,
+    ) -> None:
         self.host = host
         self.remote_port = remote_port
         self.local_port = local_port or _free_local_port()

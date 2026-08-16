@@ -4,6 +4,7 @@ Regression coverage for set_model silently not surviving a restart: it
 updated AppCore.preferences in memory but never called save_preferences(),
 so picking a model and restarting the app reverted to the default.
 """
+
 from __future__ import annotations
 
 import gc

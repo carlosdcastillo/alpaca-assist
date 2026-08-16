@@ -4,6 +4,7 @@ Comprehensive tests for mcp_manager.py module.
 This module tests MCP manager operations with MINIMAL mocking where possible.
 Focus on testing actual behavior, not mock setups.
 """
+
 import asyncio
 from pathlib import Path
 from typing import Any

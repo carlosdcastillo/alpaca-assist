@@ -21,6 +21,7 @@ Threading
 first token, each tool thread adds its own duration, and the completion
 callback finalises — so every mutator takes ``_lock``.
 """
+
 from __future__ import annotations
 
 import threading

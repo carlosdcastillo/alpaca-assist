@@ -1,4 +1,5 @@
 """Tests for core.timing — turn timing, gap detection, and formatting."""
+
 import time
 from datetime import datetime
 from datetime import timedelta

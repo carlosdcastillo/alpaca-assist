@@ -1,11 +1,12 @@
 """Tests for image_tool_result.py's sentinel encode/decode."""
+
 from __future__ import annotations
 
 import json
 
+from image_tool_result import SENTINEL
 from image_tool_result import encode_image_result
 from image_tool_result import parse_image_result
-from image_tool_result import SENTINEL
 
 
 class TestEncodeDecodeRoundTrip:
@@ -62,7 +63,10 @@ class TestParseHandlesMalformedPayload:
         # split(..., 2) caps at 3 parts, so the field separator appearing
         # again inside the description itself (however unlikely) stays
         # part of the description rather than truncating it.
-        encoded = SENTINEL + "image/png@@ALPACA_FIELD@@QUJD@@ALPACA_FIELD@@desc@@ALPACA_FIELD@@more"
+        encoded = (
+            SENTINEL
+            + "image/png@@ALPACA_FIELD@@QUJD@@ALPACA_FIELD@@desc@@ALPACA_FIELD@@more"
+        )
         result = parse_image_result(encoded)
         assert result == ("image/png", "QUJD", "desc@@ALPACA_FIELD@@more")
 
@@ -86,8 +90,9 @@ class TestSurvivesJsonRoundTrip:
         wrapped = {"content": [{"type": "text", "text": encoded}], "isError": False}
         stored = json.dumps(wrapped, indent=2)
 
-        assert parse_image_result(stored) is not None
-        mime_type, base64_data, description = parse_image_result(stored)
+        parsed = parse_image_result(stored)
+        assert parsed is not None
+        mime_type, base64_data, description = parsed
         assert mime_type == "image/jpeg"
         assert base64_data == "QUJDRA=="
         assert description == "a screenshot"

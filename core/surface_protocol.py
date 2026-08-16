@@ -20,6 +20,7 @@ whole string arrives wrapped in the `{"content": [...]}` storage envelope
 (the common case — see image_tool_result's docstring) the envelope's own
 quote leaks into it and must be cut.
 """
+
 from __future__ import annotations
 
 import re

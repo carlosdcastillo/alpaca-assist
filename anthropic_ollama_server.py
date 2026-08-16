@@ -2,6 +2,7 @@
 Ollama API server emulator that routes requests to Claude via the Anthropic API.
 This server mimics the Ollama API endpoints but uses Claude for inference.
 """
+
 import base64
 import datetime
 import json
@@ -1004,7 +1005,7 @@ class OllamaRequestHandler(BaseHTTPRequestHandler):
                         usage = val.get("usage", {})
                         # output tokens — prefer Anthropic name, fall back to OpenAI name
                         _out = usage.get("output_tokens") or usage.get(
-                            "completion_tokens"
+                            "completion_tokens",
                         )
                         if _out is not None:
                             output_tokens = _out

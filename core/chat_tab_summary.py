@@ -9,14 +9,15 @@ Key Classes:
 Thread Safety:
     This module uses threading.Lock for the generated flag.
 """
+
 from __future__ import annotations
 
 import json
 import logging
 import queue
 import threading
-from typing import Any
 from typing import TYPE_CHECKING
+from typing import Any
 
 import requests
 

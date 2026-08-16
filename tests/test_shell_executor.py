@@ -7,6 +7,7 @@ command allowlist — the actual injection boundary is shell=False
 string are literal arguments, never shell operators). See
 test_command_injection_attempts for coverage of that boundary.
 """
+
 import subprocess
 from pathlib import Path
 from unittest.mock import Mock

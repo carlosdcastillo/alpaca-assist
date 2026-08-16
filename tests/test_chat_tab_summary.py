@@ -3,6 +3,7 @@
 This module tests the SummaryHandler class with minimal mocking where possible.
 Focus on testing actual behavior, not mock setups.
 """
+
 from __future__ import annotations
 
 import queue

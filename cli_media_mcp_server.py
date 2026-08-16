@@ -4,6 +4,7 @@ The CLI receives standards-compliant MCP image content while Alpaca receives a
 small JSONL side-channel event that it can persist and render as its normal
 tool folds. Video bytes remain on disk and use Alpaca's existing chunked player.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -21,7 +22,6 @@ from mcp.types import Tool
 import image_tool_result
 import internal_tools
 import video_tool_result
-
 
 server = Server(
     "alpaca-media",
@@ -94,16 +94,16 @@ async def call_tool(
         text = json.dumps(result, separators=(",", ":"))
         content = result.get("content", [])
         raw_text = content[0].get("text", "") if content else ""
-        parsed = image_tool_result.parse_image_result(raw_text)
+        parsed_image = image_tool_result.parse_image_result(raw_text)
         tool_id = _record_event(name, arguments, text)
-        if parsed is None:
+        if parsed_image is None:
             return [
                 TextContent(
                     type="text",
                     text=raw_text or "Image could not be loaded",
                 ),
             ]
-        mime_type, data, description = parsed
+        mime_type, data, description = parsed_image
         reference = f"![image](alpaca://image/{tool_id})"
         return [
             ImageContent(type="image", data=data, mimeType=mime_type),
@@ -119,15 +119,15 @@ async def call_tool(
         content = result.get("content", [])
         raw_text = content[0].get("text", "") if content else ""
         tool_id = _record_event(name, arguments, text)
-        parsed = video_tool_result.parse_video_result(raw_text)
-        if parsed is None:
+        parsed_video = video_tool_result.parse_video_result(raw_text)
+        if parsed_video is None:
             return [
                 TextContent(
                     type="text",
                     text=raw_text or "Video could not be loaded",
                 ),
             ]
-        _mime_type, _locator, _size, description = parsed
+        _mime_type, _locator, _size, description = parsed_video
         reference = f"[video](alpaca://video/{tool_id})"
         return [
             TextContent(

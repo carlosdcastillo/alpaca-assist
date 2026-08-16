@@ -11,15 +11,16 @@ Note on orphaned attributes:
     - summary_generated, _summary_lock: Moved to SummaryHandler
     - current_request_thread: Moved to StreamingHandler
 """
+
 from __future__ import annotations
 
 import logging
 import queue
 import threading
 from collections.abc import Callable
+from typing import TYPE_CHECKING
 from typing import Any
 from typing import Optional
-from typing import TYPE_CHECKING
 
 from chat_state import ChatState
 from conversation_graph import ConversationGraph

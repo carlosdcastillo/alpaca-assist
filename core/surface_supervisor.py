@@ -30,6 +30,7 @@ unit tests run on Windows), but `open_surface` refuses to do anything useful
 without the X tooling, which is checked up front and reported as a clean
 error rather than a stack of failing spawns.
 """
+
 from __future__ import annotations
 
 import base64
@@ -147,7 +148,7 @@ def _kill_group(pid: int, sig: int) -> None:
         if hasattr(os, "killpg"):
             # Guarded by the hasattr above; mypy checking against win32 stubs
             # cannot see that, and these only ever run on the Pack host.
-            os.killpg(os.getpgid(pid), sig)  # type: ignore[attr-defined]
+            os.killpg(os.getpgid(pid), sig)
         else:  # pragma: no cover - Windows has neither; tests fake the spawn
             os.kill(pid, sig)
     except (ProcessLookupError, PermissionError, OSError):

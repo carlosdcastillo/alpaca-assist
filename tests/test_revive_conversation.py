@@ -8,6 +8,7 @@ remote daemon) rather than create_tab_and_notify_js (which would create
 a disconnected local ChatTab with no ability to resume the remote
 session).
 """
+
 from __future__ import annotations
 
 from unittest.mock import Mock

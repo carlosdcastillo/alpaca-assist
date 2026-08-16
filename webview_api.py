@@ -1,4 +1,5 @@
 """PyWebView API bridge for bidirectional Python/JS communication."""
+
 from __future__ import annotations
 
 import json
@@ -10,9 +11,9 @@ import urllib.parse
 import uuid
 import webbrowser
 from pathlib import Path
+from typing import TYPE_CHECKING
 from typing import Any
 from typing import Optional
-from typing import TYPE_CHECKING
 
 from core.pack_tab import PackTab
 from core.projects import list_projects

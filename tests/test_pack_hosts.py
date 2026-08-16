@@ -2,6 +2,7 @@
 
 list surfaced by the "New Pack Tab..." UI.
 """
+
 from __future__ import annotations
 
 import json
@@ -205,4 +206,3 @@ class TestReadPackHostsCaching:
         os.utime(pack_file, (new_mtime, new_mtime))
 
         assert api_in._lookup_pack_display_name("192.168.0.58") == "Renamed"
-

@@ -1,4 +1,5 @@
 """Tests for the conversation tools in internal_tools.py."""
+
 from __future__ import annotations
 
 import json
@@ -9,6 +10,7 @@ from typing import Any
 import pytest
 
 import internal_tools as it
+from internal_tools import TOOL_SCHEMAS
 from internal_tools import _conv_all_text
 from internal_tools import _conv_extract_turns
 from internal_tools import _conv_format_transcript
@@ -20,8 +22,6 @@ from internal_tools import dump_conversations
 from internal_tools import get_conversation
 from internal_tools import get_tool_details
 from internal_tools import search_conversations
-from internal_tools import TOOL_SCHEMAS
-
 
 # ---------------------------------------------------------------------------
 # Fixtures

@@ -6,13 +6,15 @@ This program analyzes a Rust file and extracts information about
 structs, enums, traits, their methods, and standalone functions
 using tree-sitter-rust.
 """
+
 import os
 import sys
 from typing import Any
 
 try:
     import tree_sitter_rust as tsrust
-    from tree_sitter import Language, Parser
+    from tree_sitter import Language
+    from tree_sitter import Parser
 
     TREE_SITTER_AVAILABLE = True
 except ImportError:

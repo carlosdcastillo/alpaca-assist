@@ -3,6 +3,7 @@
 Focus: process_stream() error handling — the paths that must always emit
 on_streaming_end() so the JS streaming state is never stuck as True.
 """
+
 from __future__ import annotations
 
 import json
@@ -13,9 +14,8 @@ from unittest.mock import Mock
 
 import pytest
 
-from core.chat_tab_processor import StreamProcessor
 from core.chat_tab_processor import WATCHDOG_STUCK_SECS
-
+from core.chat_tab_processor import StreamProcessor
 
 # ---------------------------------------------------------------------------
 # Helpers

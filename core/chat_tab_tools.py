@@ -12,6 +12,7 @@ Dependencies:
 Thread Safety:
     This module uses threading.Lock for pending execution tracking.
 """
+
 from __future__ import annotations
 
 import json
@@ -20,8 +21,8 @@ import threading
 import time
 import uuid
 from collections.abc import Callable
-from typing import Any
 from typing import TYPE_CHECKING
+from typing import Any
 
 import image_tool_result
 import utils
@@ -571,7 +572,8 @@ class ToolHandler:
         Returns:
             List of message dictionaries for Ollama API.
         """
-        from chat_state import ToolCall, ToolResult
+        from chat_state import ToolCall
+        from chat_state import ToolResult
 
         # Get chat history
         questions = self._chat.chat_state.questions.copy()
@@ -639,7 +641,9 @@ class ToolHandler:
                 continue
             is_newest_text = not newest_text_seen
             newest_text_seen = True
-            pair_bytes = len(tc.content.encode("utf-8")) + len(tr.content.encode("utf-8"))
+            pair_bytes = len(tc.content.encode("utf-8")) + len(
+                tr.content.encode("utf-8"),
+            )
             if not is_newest_text and pair_bytes > budget:
                 break
             budget -= pair_bytes

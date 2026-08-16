@@ -1,4 +1,5 @@
 """Project definitions and managed workspaces for remote Pack tabs."""
+
 from __future__ import annotations
 
 import hashlib
@@ -12,7 +13,6 @@ import tomllib
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
-
 
 PROJECTS_DIR = Path.home() / "packs"
 _PROJECT_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")

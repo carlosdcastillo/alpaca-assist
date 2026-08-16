@@ -12,6 +12,7 @@ mcp_manager.py.
 Framing is core/pack_protocol.py, unchanged, so there is exactly one wire
 format in this codebase rather than two that can drift.
 """
+
 from __future__ import annotations
 
 import logging

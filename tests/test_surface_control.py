@@ -6,6 +6,7 @@ worth pinning down anyway: the MCP server is launched by mcp_manager with a
 filtered environment and no explicit cwd, so *how* it finds the supervisor is
 load-bearing and easy to break silently.
 """
+
 from __future__ import annotations
 
 import socket

@@ -3,6 +3,7 @@ Test configuration and shared fixtures for pywebview_demo.
 
 This module provides pytest fixtures and configuration used across all tests.
 """
+
 import asyncio
 import gc
 import json
@@ -15,8 +16,8 @@ import time
 from collections.abc import AsyncGenerator
 from collections.abc import Generator
 from pathlib import Path
-from typing import Any
 from typing import TYPE_CHECKING
+from typing import Any
 from unittest.mock import AsyncMock
 
 if TYPE_CHECKING:
@@ -25,6 +26,7 @@ if TYPE_CHECKING:
     from tool_call_detector import ToolCallDetector
     from agent_skills import SkillManager
     from shell_executor import ShellExecutor
+
 from unittest.mock import MagicMock
 from unittest.mock import Mock
 
@@ -151,7 +153,8 @@ def empty_chat_state() -> "ChatState":
 @pytest.fixture
 def populated_chat_state() -> "ChatState":
     """Create a chat state with some conversation data."""
-    from chat_state import ChatState, FullAnswer
+    from chat_state import ChatState
+    from chat_state import FullAnswer
 
     state = ChatState(
         questions=["What is Python?"],

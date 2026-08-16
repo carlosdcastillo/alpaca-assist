@@ -3,9 +3,11 @@
 optional model argument reaches pack_daemon.py's --model flag only when
 this invocation is the one that actually spawns a fresh daemon.
 """
+
 from __future__ import annotations
 
 from pathlib import Path
+from typing import cast
 from unittest.mock import MagicMock
 from unittest.mock import patch
 
@@ -35,7 +37,7 @@ class TestLaunchOrAttachModelForwarding:
             result = pack_bridge._launch_or_attach("sess-1", model)
 
         assert result is fake_socket
-        return mock_subprocess.Popen.call_args[0][0]
+        return cast(list[str], mock_subprocess.Popen.call_args[0][0])
 
     def test_model_appends_the_flag(self, tmp_path: Path) -> None:
         argv = self._run(tmp_path, "kimi-k3")

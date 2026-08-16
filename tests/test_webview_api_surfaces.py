@@ -6,6 +6,7 @@ boundary — the same duck-typing get_video_chunk already does. Second,
 surface_control is reachable from page JS with a caller-supplied method name,
 so it must not become a way to invoke arbitrary Pack daemon RPCs.
 """
+
 from __future__ import annotations
 
 from unittest.mock import Mock

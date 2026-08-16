@@ -1,4 +1,5 @@
 """Tests for opening Markdown links outside the app WebView."""
+
 from pathlib import Path
 from unittest.mock import Mock
 from unittest.mock import patch

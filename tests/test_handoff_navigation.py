@@ -13,6 +13,7 @@ in the back-link instead.  navigate_to_conv() then uses
 tab.original_conversation_id to locate the tab whether it is open or
 has been closed and restored.
 """
+
 from __future__ import annotations
 
 import gc
@@ -256,8 +257,8 @@ class TestPerformHandoffConvIdPinning:
         alpaca://tab/tab-12-5f6be44b stopped working after a restart because
         that tab_id was reallocated each session.
         """
-        from core.chat_tab import ChatTab
         from chat_state import FullAnswer
+        from core.chat_tab import ChatTab
 
         tab_id, tab = tab_with_content
 
@@ -286,8 +287,8 @@ class TestPerformHandoffConvIdPinning:
 
     def test_back_link_conv_id_matches_pinned_id(self, api, tab_with_content, core):
         """The integer in the back-link URL must equal original_conversation_id."""
-        from core.chat_tab import ChatTab
         from chat_state import FullAnswer
+        from core.chat_tab import ChatTab
 
         tab_id, tab = tab_with_content
 
@@ -326,8 +327,8 @@ class TestPerformHandoffConvIdPinning:
         This would have failed with the old alpaca://tab/{tab_id} scheme
         because the tab_id is no longer present anywhere after being closed.
         """
-        from core.chat_tab import ChatTab
         from chat_state import FullAnswer
+        from core.chat_tab import ChatTab
 
         tab_id, tab = tab_with_content
 

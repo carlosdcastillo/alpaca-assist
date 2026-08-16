@@ -1,4 +1,5 @@
 """Tests for core/pack_protocol.py — the Pack tab wire format."""
+
 from __future__ import annotations
 
 import pytest
@@ -21,7 +22,11 @@ class TestEncodeDecodeRoundTrip:
         assert line.endswith("\n")
         msg = decode_line(line)
 
-        assert msg == {"id": 1, "method": "send_message", "params": {"message": "hi", "images": []}}
+        assert msg == {
+            "id": 1,
+            "method": "send_message",
+            "params": {"message": "hi", "images": []},
+        }
 
     def test_request_default_empty_params(self) -> None:
         msg = decode_line(encode_request(2, "stop_streaming"))
@@ -39,7 +44,9 @@ class TestEncodeDecodeRoundTrip:
         assert msg == {"id": 5, "error": {"message": "boom"}}
 
     def test_notification_round_trip(self) -> None:
-        msg = decode_line(encode_notification("on_content_update", {"content_chunk": "hi"}))
+        msg = decode_line(
+            encode_notification("on_content_update", {"content_chunk": "hi"}),
+        )
 
         assert msg == {"method": "on_content_update", "params": {"content_chunk": "hi"}}
 

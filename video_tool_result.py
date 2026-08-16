@@ -5,6 +5,7 @@ result stores only a MIME type, an opaque encoded local path, byte size, and
 description.  The web UI asks Python for bounded chunks when it needs to play
 the video; Pack tabs proxy those chunk requests to their remote daemon.
 """
+
 from __future__ import annotations
 
 import base64

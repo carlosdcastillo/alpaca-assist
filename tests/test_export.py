@@ -7,6 +7,7 @@ Regressions caught:
      Result: export_and_open() double-processed it through the markdown
      converter, producing garbled repeated lines.
 """
+
 from __future__ import annotations
 
 import gc
@@ -203,7 +204,8 @@ class TestExportToolCallFiltering:
 
     def test_tool_calls_excluded_from_export(self, core):
         """get_text_only_content() strips tool calls; export must use it."""
-        from chat_state import FullAnswer, ToolCall
+        from chat_state import FullAnswer
+        from chat_state import ToolCall
 
         tab_id, tab = core.create_tab("Tool Conv")
         tab.chat_state.add_question("Run the tool")

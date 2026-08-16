@@ -6,6 +6,7 @@ directly), so ;/&&/backticks/etc. in a command string are literal
 arguments rather than operators — that is the actual injection boundary
 here, not a command allowlist.
 """
+
 import os
 import platform
 import shlex
@@ -14,7 +15,6 @@ import subprocess
 import time
 from dataclasses import dataclass
 from typing import Any
-
 
 DEFAULT_TIMEOUT = 60
 MAX_TIMEOUT = 300
@@ -231,12 +231,13 @@ class ShellExecutor:
 
         if platform.system() == "Windows":
             # Prevent console window popup and handle process groups
-            kwargs["creationflags"] = (
-                subprocess.CREATE_NO_WINDOW | subprocess.CREATE_NEW_PROCESS_GROUP
+            kwargs["creationflags"] = getattr(subprocess, "CREATE_NO_WINDOW") | getattr(
+                subprocess,
+                "CREATE_NEW_PROCESS_GROUP",
             )
-            startupinfo = subprocess.STARTUPINFO()
-            startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-            startupinfo.wShowWindow = subprocess.SW_HIDE
+            startupinfo = getattr(subprocess, "STARTUPINFO")()
+            startupinfo.dwFlags |= getattr(subprocess, "STARTF_USESHOWWINDOW")
+            startupinfo.wShowWindow = getattr(subprocess, "SW_HIDE")
             kwargs["startupinfo"] = startupinfo
 
         try:

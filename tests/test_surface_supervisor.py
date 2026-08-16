@@ -11,6 +11,7 @@ Readiness polling is stubbed out for the lifecycle tests (it wants real
 /tmp/.X11-unix entries and real listening ports) and exercised directly
 against `_wait_for` instead.
 """
+
 from __future__ import annotations
 
 import base64
@@ -26,9 +27,9 @@ import pytest
 from core.surface_supervisor import _SIGKILL
 from core.surface_supervisor import HOLDER_HUMAN
 from core.surface_supervisor import HOLDER_MODEL
-from core.surface_supervisor import LeaseRefused
 from core.surface_supervisor import MAX_INPUT_EVENTS
 from core.surface_supervisor import MAX_SNAPSHOT_BYTES
+from core.surface_supervisor import LeaseRefused
 from core.surface_supervisor import Surface
 from core.surface_supervisor import SurfaceError
 from core.surface_supervisor import SurfaceSupervisor

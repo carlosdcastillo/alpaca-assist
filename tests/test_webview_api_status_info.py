@@ -4,6 +4,7 @@ Covers the status-bar improvement: the API must report whether a tab is a
 local chat or a Pack tab, and for Pack tabs expose the host and whether the
 connection is currently up.
 """
+
 from __future__ import annotations
 
 from unittest.mock import Mock

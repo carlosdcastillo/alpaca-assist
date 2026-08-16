@@ -14,11 +14,12 @@ Architecture:
     Thin facade pattern that maintains backward compatibility while
     delegating all work to focused handler modules.
 """
+
 from __future__ import annotations
 
 import logging
-from typing import Any
 from typing import TYPE_CHECKING
+from typing import Any
 
 from core.chat_tab_base import ChatTabBase
 from core.chat_tab_streaming import StreamingHandler

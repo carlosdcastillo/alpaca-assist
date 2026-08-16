@@ -1,4 +1,5 @@
 """Tests for pack_daemon.py — the remote-side Pack tab daemon."""
+
 from __future__ import annotations
 
 import json
@@ -13,11 +14,11 @@ from unittest.mock import MagicMock
 import pytest
 
 from core.surface_supervisor import SURFACE_METHODS
+from pack_daemon import PackDaemonAdapter
 from pack_daemon import _absolutize_mcp_config
 from pack_daemon import _bind_socket
 from pack_daemon import _prepare_mcp_config
 from pack_daemon import make_dispatcher
-from pack_daemon import PackDaemonAdapter
 
 
 class TestAbsolutizeMcpConfig:

@@ -1,4 +1,5 @@
 """Tests for ConversationGraph - branching conversation data model."""
+
 from __future__ import annotations
 
 import pytest
@@ -8,9 +9,8 @@ from chat_state import ToolCall
 from chat_state import ToolResult
 from conversation_graph import ConversationGraph
 from conversation_graph import EdgeType
-from conversation_graph import is_graph_format
 from conversation_graph import MessageRole
-
+from conversation_graph import is_graph_format
 
 # ===========================================================================
 # Helpers

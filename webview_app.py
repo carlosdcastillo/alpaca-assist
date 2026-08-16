@@ -1,4 +1,5 @@
 """Main PyWebView application window."""
+
 import logging
 import os
 import sys

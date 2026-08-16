@@ -4,8 +4,8 @@ import json
 from pathlib import Path
 
 import pytest
-from PIL import Image
 from mcp.types import ImageContent
+from PIL import Image
 
 import cli_media_mcp_server
 

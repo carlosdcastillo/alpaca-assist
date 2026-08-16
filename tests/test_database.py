@@ -4,6 +4,7 @@ Comprehensive tests for database.py module.
 This module tests all database operations including conversation storage,
 retrieval, deletion, and searching.
 """
+
 import json
 import sqlite3
 from pathlib import Path

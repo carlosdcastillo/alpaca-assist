@@ -1,4 +1,5 @@
 """Core app logic, UI-agnostic."""
+
 from __future__ import annotations
 
 import asyncio
@@ -9,11 +10,11 @@ import platform
 import threading
 from datetime import datetime
 from pathlib import Path
+from typing import TYPE_CHECKING
 from typing import Any
 from typing import Dict
 from typing import List
 from typing import Optional
-from typing import TYPE_CHECKING
 
 import pyperclip
 
@@ -537,8 +538,8 @@ class AppCore:
         export_and_open() expects markdown — it runs it through a markdown
         processor to produce the final HTML.  Do NOT return HTML here.
         """
-        from conversation_graph import ConversationGraph
         from chat_state import ChatState
+        from conversation_graph import ConversationGraph
 
         chat_state = tab.chat_state
         title = tab.title

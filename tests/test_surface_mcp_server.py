@@ -9,6 +9,7 @@ back, invented its own broken markdown image instead of a real
 live-surface card. These tests exercise the recording side of that fix
 the same way tests/test_cli_media_mcp_server.py exercises its sibling.
 """
+
 from __future__ import annotations
 
 import json

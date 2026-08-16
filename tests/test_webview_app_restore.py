@@ -1,7 +1,9 @@
 """Tests for webview_app.py's ChatApp._restore_session Pack-tab branch."""
+
 from __future__ import annotations
 
 import sys
+from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
@@ -17,7 +19,7 @@ from webview_app import ChatApp  # noqa: E402
 
 
 @pytest.fixture
-def app() -> ChatApp:
+def app() -> Any:
     """A ChatApp instance with __init__ skipped — _restore_session only
 
     touches self.core / self.api (mocked) and self.set_active_tab (real —
@@ -35,7 +37,7 @@ def app() -> ChatApp:
 class TestRestoreSessionRoutesPackTabs:
     def test_pack_tab_data_routes_to_create_pack_tab_and_notify_js(
         self,
-        app: ChatApp,
+        app: Any,
     ) -> None:
         app.core.load_session.return_value = (
             [
@@ -70,7 +72,7 @@ class TestRestoreSessionRoutesPackTabs:
 
     def test_regular_tab_data_routes_to_create_tab_and_notify_js(
         self,
-        app: ChatApp,
+        app: Any,
     ) -> None:
         app.core.load_session.return_value = (
             [
@@ -98,7 +100,7 @@ class TestRestoreSessionRoutesPackTabs:
         )
         app.api.create_pack_tab_and_notify_js.assert_not_called()
 
-    def test_mixed_tabs_route_independently(self, app: ChatApp) -> None:
+    def test_mixed_tabs_route_independently(self, app: Any) -> None:
         app.core.load_session.return_value = (
             [
                 {"tab_id": "old-1", "name": "Regular", "chat_state": {}},
@@ -113,8 +115,14 @@ class TestRestoreSessionRoutesPackTabs:
             ],
             None,
         )
-        app.api.create_tab_and_notify_js.return_value = {"success": True, "tab_id": "new-1"}
-        app.api.create_pack_tab_and_notify_js.return_value = {"success": True, "tab_id": "new-2"}
+        app.api.create_tab_and_notify_js.return_value = {
+            "success": True,
+            "tab_id": "new-1",
+        }
+        app.api.create_pack_tab_and_notify_js.return_value = {
+            "success": True,
+            "tab_id": "new-2",
+        }
         app.core.tabs = {"new-1": MagicMock(), "new-2": MagicMock()}
 
         app._restore_session()
@@ -122,7 +130,7 @@ class TestRestoreSessionRoutesPackTabs:
         assert app.api.create_tab_and_notify_js.call_count == 1
         assert app.api.create_pack_tab_and_notify_js.call_count == 1
 
-    def test_no_saved_tabs_signals_js_and_creates_nothing(self, app: ChatApp) -> None:
+    def test_no_saved_tabs_signals_js_and_creates_nothing(self, app: Any) -> None:
         app.core.load_session.return_value = ([], None)
 
         app._restore_session()

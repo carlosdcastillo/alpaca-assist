@@ -3,6 +3,7 @@ Comprehensive tests for chat_state.py module.
 
 This module tests chat state management, answer components, and conversation handling.
 """
+
 import json
 from pathlib import Path
 from typing import Any

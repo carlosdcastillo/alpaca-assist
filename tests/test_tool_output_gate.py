@@ -1,20 +1,20 @@
 """Tests for core.tool_output_gate module."""
+
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
 
-import json
-
 import core.tool_output_gate as gate_module
 from core.tool_output_gate import CALL_ARG_GATE_THRESHOLD_BYTES
-from core.tool_output_gate import cleanup_tab_output_dir
 from core.tool_output_gate import GATE_THRESHOLD_BYTES
-from core.tool_output_gate import gate_tool_call_arguments
-from core.tool_output_gate import gate_tool_output
 from core.tool_output_gate import PREVIEW_MAX_BYTES
 from core.tool_output_gate import PREVIEW_MAX_LINES
+from core.tool_output_gate import cleanup_tab_output_dir
+from core.tool_output_gate import gate_tool_call_arguments
+from core.tool_output_gate import gate_tool_output
 from core.tool_output_gate import read_gated_tool_output
 from core.tool_output_gate import sweep_orphaned_output_dirs
 
@@ -170,9 +170,20 @@ class TestGateToolCallArguments:
 
     def test_small_arguments_returned_unchanged(self) -> None:
         tool_json = json.dumps(
-            {"tool_call": {"name": "internal_write_file", "id": "t1", "arguments": {"content": "hi"}}},
+            {
+                "tool_call": {
+                    "name": "internal_write_file",
+                    "id": "t1",
+                    "arguments": {"content": "hi"},
+                },
+            },
         )
-        result = gate_tool_call_arguments(tool_json, "tab-1", "t1", "internal_write_file")
+        result = gate_tool_call_arguments(
+            tool_json,
+            "tab-1",
+            "t1",
+            "internal_write_file",
+        )
         assert result == tool_json
 
     def test_oversized_argument_is_gated_nested_format(self) -> None:
@@ -186,7 +197,12 @@ class TestGateToolCallArguments:
                 },
             },
         )
-        result = gate_tool_call_arguments(tool_json, "tab-1", "t2", "internal_write_file")
+        result = gate_tool_call_arguments(
+            tool_json,
+            "tab-1",
+            "t2",
+            "internal_write_file",
+        )
         assert result != tool_json
         parsed = json.loads(result)
         gated_content = parsed["tool_call"]["arguments"]["content"]
@@ -198,27 +214,57 @@ class TestGateToolCallArguments:
     def test_oversized_argument_is_gated_flat_format(self) -> None:
         big = "y" * (CALL_ARG_GATE_THRESHOLD_BYTES + 1)
         tool_json = json.dumps(
-            {"name": "internal_run_shell_command", "id": "t3", "arguments": {"command": big}},
+            {
+                "name": "internal_run_shell_command",
+                "id": "t3",
+                "arguments": {"command": big},
+            },
         )
-        result = gate_tool_call_arguments(tool_json, "tab-1", "t3", "internal_run_shell_command")
+        result = gate_tool_call_arguments(
+            tool_json,
+            "tab-1",
+            "t3",
+            "internal_run_shell_command",
+        )
         parsed = json.loads(result)
         assert "truncated" in parsed["arguments"]["command"]
 
     def test_full_content_recoverable_from_temp_file(self, tmp_path: Path) -> None:
         big = "z" * (CALL_ARG_GATE_THRESHOLD_BYTES + 500)
         tool_json = json.dumps(
-            {"tool_call": {"name": "internal_write_file", "id": "t4", "arguments": {"content": big}}},
+            {
+                "tool_call": {
+                    "name": "internal_write_file",
+                    "id": "t4",
+                    "arguments": {"content": big},
+                },
+            },
         )
-        result = gate_tool_call_arguments(tool_json, "tab-1", "t4", "internal_write_file")
+        result = gate_tool_call_arguments(
+            tool_json,
+            "tab-1",
+            "t4",
+            "internal_write_file",
+        )
         parsed = json.loads(result)
         gated = parsed["tool_call"]["arguments"]["content"]
-        path_line = next(line for line in gated.splitlines() if line.startswith("Full output saved to:"))
+        path_line = next(
+            line
+            for line in gated.splitlines()
+            if line.startswith("Full output saved to:")
+        )
         saved_path = Path(path_line.split("Full output saved to: ", 1)[1])
         assert saved_path.read_text(encoding="utf-8") == big
 
     def test_non_string_arguments_untouched(self) -> None:
         tool_json = json.dumps(
-            {"tool_call": {"name": "internal_search", "id": "t5", "arguments": {"max_count": 500, "recursive": True}}},
+            {
+                "tool_call": {
+                    "name": "internal_search",
+                    "id": "t5",
+                    "arguments": {"max_count": 500, "recursive": True},
+                },
+            },
         )
         result = gate_tool_call_arguments(tool_json, "tab-1", "t5", "internal_search")
         assert result == tool_json
@@ -228,5 +274,10 @@ class TestGateToolCallArguments:
         assert gate_tool_call_arguments(broken, "tab-1", "t6", "x") == broken
 
     def test_no_arguments_key_returned_unchanged(self) -> None:
-        tool_json = json.dumps({"tool_call": {"name": "internal_list_files", "id": "t7"}})
-        assert gate_tool_call_arguments(tool_json, "tab-1", "t7", "internal_list_files") == tool_json
+        tool_json = json.dumps(
+            {"tool_call": {"name": "internal_list_files", "id": "t7"}},
+        )
+        assert (
+            gate_tool_call_arguments(tool_json, "tab-1", "t7", "internal_list_files")
+            == tool_json
+        )

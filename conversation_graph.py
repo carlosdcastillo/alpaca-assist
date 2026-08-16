@@ -40,6 +40,7 @@ protected by _lock (RLock).  FullAnswer content mutations delegate to
 FullAnswer._lock internally.  _active_pairs_cache is invalidated under
 _lock whenever the active path changes.
 """
+
 import threading
 import uuid
 from dataclasses import dataclass
@@ -48,7 +49,6 @@ from datetime import datetime
 from typing import Any
 
 from chat_state import FullAnswer
-
 
 # ---------------------------------------------------------------------------
 # Constants

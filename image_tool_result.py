@@ -27,6 +27,7 @@ substrings, rather than an actual image). Printable ASCII outside `"` and
 unchanged, so this survives the same round trip that broke the NUL-byte
 version.
 """
+
 from __future__ import annotations
 
 SENTINEL = "@@ALPACA_IMAGE_RESULT@@"

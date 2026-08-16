@@ -4,6 +4,7 @@ These tools are called directly (sync) from chat_tab_tools._execute_tool
 instead of going through MCP. Tests exercise each tool function and the
 call_tool dispatcher. Return format is always {"content": [...], "isError": bool}.
 """
+
 from __future__ import annotations
 
 import json
@@ -17,18 +18,17 @@ import pytest
 import image_tool_result
 import internal_tools
 import video_tool_result
+from internal_tools import READ_FILE_RANGE_MAX_LINES
+from internal_tools import TOOL_SCHEMAS
 from internal_tools import call_tool
 from internal_tools import get_time
 from internal_tools import list_files
 from internal_tools import modify_file
 from internal_tools import read_file
 from internal_tools import read_file_range
-from internal_tools import READ_FILE_RANGE_MAX_LINES
 from internal_tools import run_shell_command
 from internal_tools import search_files_for_text
-from internal_tools import TOOL_SCHEMAS
 from internal_tools import write_file
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -354,8 +354,8 @@ class TestViewImage:
         assert mime_type == "image/png"
 
     def test_downscales_oversized_image(self, tmp_path: Path) -> None:
-        from internal_tools import view_image
         from internal_tools import VIEW_IMAGE_DIMENSION_STEPS
+        from internal_tools import view_image
 
         p = _make_png(tmp_path, "huge.png", (3000, 2000))
         result = view_image({"file_path": str(p)})
@@ -449,12 +449,14 @@ class TestViewImage:
         didn't actually retry at a smaller size, this budget would be
         unreachable and the function would return None.
         """
-        from internal_tools import _encode_image_under_limit
-        from internal_tools import VIEW_IMAGE_DIMENSION_STEPS
-        from internal_tools import VIEW_IMAGE_JPEG_QUALITY_STEPS
-        from PIL import Image
         import io
         import random
+
+        from PIL import Image
+
+        from internal_tools import VIEW_IMAGE_DIMENSION_STEPS
+        from internal_tools import VIEW_IMAGE_JPEG_QUALITY_STEPS
+        from internal_tools import _encode_image_under_limit
 
         random.seed(0)
         # Must be larger than the *first two* dimension steps, or
@@ -523,8 +525,9 @@ class TestViewImage:
         assert "crop" not in text.lower()
 
     def test_encode_under_limit_returns_none_when_nothing_fits(self) -> None:
-        from internal_tools import _encode_image_under_limit
         from PIL import Image
+
+        from internal_tools import _encode_image_under_limit
 
         img = Image.new("RGB", (100, 100), (255, 0, 0))
         assert _encode_image_under_limit(img, 1) is None
@@ -534,8 +537,9 @@ class TestViewImage:
         simplification is actually safe for a source already smaller than
         every dimension step.
         """
-        from internal_tools import _encode_image_under_limit
         from PIL import Image
+
+        from internal_tools import _encode_image_under_limit
 
         img = Image.new("RGB", (50, 50), (0, 255, 0))
         fitted = _encode_image_under_limit(img, 5 * 1024 * 1024)
@@ -809,8 +813,9 @@ class TestInternalToolRouting:
     """Verify that server_name == 'internal' bypasses MCP and calls internal_tools."""
 
     def _make_handler(self):
-        from core.chat_tab_tools import ToolHandler
         import threading
+
+        from core.chat_tab_tools import ToolHandler
 
         mock_chat = Mock()
         mock_chat.chat_state = Mock()

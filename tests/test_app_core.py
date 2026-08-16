@@ -1,6 +1,7 @@
 """Tests for core/app_core.py - Session serialization and autosave.
 No Tkinter required.
 """
+
 import json
 import os
 import tempfile
@@ -12,9 +13,9 @@ from unittest.mock import patch
 
 import pytest
 
-from core.app_core import AppCore
 from core.app_core import PREFERENCES_FILE
 from core.app_core import SESSION_FILE
+from core.app_core import AppCore
 
 
 class TestAppCoreSession:

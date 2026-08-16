@@ -11,14 +11,13 @@ from unittest.mock import patch
 
 import pytest
 
-from anthropic_ollama_server import _build_claude_mcp_config_file
-from anthropic_ollama_server import _codex_mcp_overrides
-from anthropic_ollama_server import _run_cli_jsonl
 from anthropic_ollama_server import ClaudeCodeCLIClient
 from anthropic_ollama_server import CodexCLIClient
 from anthropic_ollama_server import OllamaRequestHandler
+from anthropic_ollama_server import _build_claude_mcp_config_file
+from anthropic_ollama_server import _codex_mcp_overrides
+from anthropic_ollama_server import _run_cli_jsonl
 from core.chat_tab_streaming import StreamingHandler
-
 
 PROJECT_SYSTEM_BLOCKS = [
     {"type": "text", "text": "Base instructions."},

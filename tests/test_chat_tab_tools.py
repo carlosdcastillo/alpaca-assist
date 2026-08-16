@@ -3,6 +3,7 @@
 This module tests the ToolHandler class with minimal mocking where possible.
 Focus on testing actual behavior, not mock setups.
 """
+
 from __future__ import annotations
 
 import json
@@ -807,7 +808,8 @@ class TestToolHandlerPrepareContinuationMessages:
 
     def test_prepare_with_tool_call_and_result(self) -> None:
         """Test preparing messages with tool call and result."""
-        from chat_state import ToolCall, ToolResult
+        from chat_state import ToolCall
+        from chat_state import ToolResult
 
         mock_chat = Mock()
         mock_chat.chat_state.questions = ["Question?"]
@@ -837,7 +839,8 @@ class TestToolHandlerPrepareContinuationMessages:
 
     def test_prepare_matches_tc_tr_by_id(self) -> None:
         """Test that TC and TR are matched by ID."""
-        from chat_state import ToolCall, ToolResult
+        from chat_state import ToolCall
+        from chat_state import ToolResult
 
         mock_chat = Mock()
         mock_chat.chat_state.questions = ["Question?"]
@@ -865,7 +868,8 @@ class TestToolHandlerPrepareContinuationMessages:
 
     @staticmethod
     def _make_pairs(count: int, result_size: int = 20) -> list[Any]:
-        from chat_state import ToolCall, ToolResult
+        from chat_state import ToolCall
+        from chat_state import ToolResult
 
         components: list[Any] = []
         for n in range(count):
@@ -1020,7 +1024,9 @@ class TestToolHandlerPrepareContinuationMessages:
         tool_results = [m for m in messages if m["role"] == "tool_result"]
         assert len(tool_results) == total
         cleared = [
-            m for m in tool_results if m["content"] == ToolHandler.CLEARED_TOOL_RESULT_STUB
+            m
+            for m in tool_results
+            if m["content"] == ToolHandler.CLEARED_TOOL_RESULT_STUB
         ]
         kept = [m for m in tool_results if m not in cleared]
         assert len(cleared) == total - keep_last
@@ -1036,7 +1042,8 @@ class TestToolHandlerPrepareContinuationMessages:
         """Many turns each individually tiny still get bounded once their
         combined byte size crosses the budget globally.
         """
-        from chat_state import ToolCall, ToolResult
+        from chat_state import ToolCall
+        from chat_state import ToolResult
 
         mock_chat = Mock()
         n_turns = 10
@@ -1070,7 +1077,9 @@ class TestToolHandlerPrepareContinuationMessages:
         tool_results = [m for m in messages if m["role"] == "tool_result"]
         assert len(tool_results) == n_turns
         cleared = [
-            m for m in tool_results if m["content"] == ToolHandler.CLEARED_TOOL_RESULT_STUB
+            m
+            for m in tool_results
+            if m["content"] == ToolHandler.CLEARED_TOOL_RESULT_STUB
         ]
         kept = [m for m in tool_results if m not in cleared]
         assert len(cleared) == n_turns - keep_last
@@ -1090,7 +1099,11 @@ class TestToolHandlerPrepareContinuationMessagesWithImages:
 
     @staticmethod
     def _image_result(description: str = "a screenshot") -> str:
-        return image_tool_result.encode_image_result("image/jpeg", "QUJDRA==", description)
+        return image_tool_result.encode_image_result(
+            "image/jpeg",
+            "QUJDRA==",
+            description,
+        )
 
     def test_image_survives_past_the_next_call(self) -> None:
         """The old (pre-fix) behavior: an image pair was only exempt from
@@ -1111,7 +1124,9 @@ class TestToolHandlerPrepareContinuationMessagesWithImages:
 
         handler = ToolHandler(mock_chat, Mock())
         messages = handler.prepare_continuation_messages(0)
-        tool_results = {m["id"]: m["content"] for m in messages if m["role"] == "tool_result"}
+        tool_results = {
+            m["id"]: m["content"] for m in messages if m["role"] == "tool_result"
+        }
 
         assert image_tool_result.parse_image_result(tool_results["img-1"]) is not None
         assert "small result" in tool_results["after-1"]
@@ -1136,7 +1151,9 @@ class TestToolHandlerPrepareContinuationMessagesWithImages:
 
         handler = ToolHandler(mock_chat, Mock())
         messages = handler.prepare_continuation_messages(0)
-        tool_results = {m["id"]: m["content"] for m in messages if m["role"] == "tool_result"}
+        tool_results = {
+            m["id"]: m["content"] for m in messages if m["role"] == "tool_result"
+        }
 
         assert "tiny result before the image" in tool_results["pre-0"]
         assert image_tool_result.parse_image_result(tool_results["img-1"]) is not None
@@ -1144,7 +1161,7 @@ class TestToolHandlerPrepareContinuationMessagesWithImages:
     def test_oldest_image_ages_out_past_keep_last_n(self) -> None:
         mock_chat = Mock()
         mock_chat.chat_state.questions = ["compare three screenshots"]
-        components = []
+        components: list[ToolCall | ToolResult] = []
         for i in range(ToolHandler.KEEP_LAST_N_IMAGES + 1):
             components.append(
                 ToolCall('{"tool_call": {"name": "internal_view_image"}}', f"img-{i}"),
@@ -1156,11 +1173,16 @@ class TestToolHandlerPrepareContinuationMessagesWithImages:
 
         handler = ToolHandler(mock_chat, Mock())
         messages = handler.prepare_continuation_messages(0)
-        tool_results = {m["id"]: m["content"] for m in messages if m["role"] == "tool_result"}
+        tool_results = {
+            m["id"]: m["content"] for m in messages if m["role"] == "tool_result"
+        }
 
         assert tool_results["img-0"] == ToolHandler.CLEARED_TOOL_RESULT_STUB
         for i in range(1, ToolHandler.KEEP_LAST_N_IMAGES + 1):
-            assert image_tool_result.parse_image_result(tool_results[f"img-{i}"]) is not None
+            assert (
+                image_tool_result.parse_image_result(tool_results[f"img-{i}"])
+                is not None
+            )
 
     def test_cache_breakpoint_lands_on_most_recent_cleared_pair(
         self,
@@ -1200,8 +1222,13 @@ class TestToolHandlerPrepareContinuationMessagesWithImages:
         tool_results = {m["id"]: m for m in messages if m["role"] == "tool_result"}
         # The image (oldest pair overall, but kept) must not be mistaken
         # for the breakpoint just because of its position.
-        assert image_tool_result.parse_image_result(tool_results["img-0"]["content"]) is not None
-        breakpoints = [m for m in messages if m.get("cache_control") and m["role"] == "tool_result"]
+        assert (
+            image_tool_result.parse_image_result(tool_results["img-0"]["content"])
+            is not None
+        )
+        breakpoints = [
+            m for m in messages if m.get("cache_control") and m["role"] == "tool_result"
+        ]
         assert len(breakpoints) == 1
         # It should land on the most recent *cleared* text pair, i.e. the
         # one immediately before the kept-last-`keep_last` window — tool

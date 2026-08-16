@@ -14,13 +14,14 @@ Thread Safety:
     This module manages threading.Thread instances and uses ChatTabBase.stop_streaming_flag
     as the single stop Event (does NOT create a separate Event).
 """
+
 from __future__ import annotations
 
 import logging
 import queue
 import threading
-from typing import Any
 from typing import TYPE_CHECKING
+from typing import Any
 
 import requests
 

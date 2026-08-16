@@ -6,6 +6,7 @@ surface, reuse when the target hasn't moved, rebuild when it has, and a
 teardown that leaves nothing behind — because a leaked `ssh -N` is invisible
 and immortal in a way a leaked thread is not.
 """
+
 from __future__ import annotations
 
 from typing import Any
@@ -205,7 +206,9 @@ class TestSurfaceTunnelManager:
         manager = SurfaceTunnelManager("user@host")
         manager.open("srf_aaaaaaaa", 6080)
 
-        manager._tunnels["srf_aaaaaaaa"]._process._exit_code = 255
+        process = manager._tunnels["srf_aaaaaaaa"]._process
+        assert process is not None
+        setattr(process, "_exit_code", 255)
 
         assert manager.local_port("srf_aaaaaaaa") is None
 

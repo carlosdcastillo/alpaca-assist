@@ -1,9 +1,9 @@
 """Unit tests for ToolCallDetector."""
+
 import pytest
 
 from tool_call_detector import PatternMatch
 from tool_call_detector import ToolCallDetector
-
 
 # ---------------------------------------------------------------------------
 # Fixtures
