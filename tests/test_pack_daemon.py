@@ -6,10 +6,12 @@ import sys
 import threading
 import time
 from pathlib import Path
+from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
 
+from core.surface_supervisor import SURFACE_METHODS
 from pack_daemon import _absolutize_mcp_config
 from pack_daemon import _bind_socket
 from pack_daemon import make_dispatcher
@@ -475,3 +477,57 @@ class TestBindSocket:
                 _bind_socket(sock_path)
         finally:
             live.close()
+
+
+class TestSurfaceDispatch:
+    """The surface control plane's route through the daemon. Pixels never
+    come this way — they go over a WebSocket straight from the panel to
+    x11vnc — so all this branch has to do is forward and fail cleanly.
+    """
+
+    def _dispatch(self, supervisor: Any) -> Any:
+        return make_dispatcher(
+            MagicMock(),
+            PackDaemonAdapter(),
+            resumed=False,
+            core=MagicMock(),
+            supervisor=supervisor,
+        )
+
+    @pytest.mark.parametrize("method", SURFACE_METHODS)
+    def test_every_surface_method_forwards_to_the_supervisor(
+        self,
+        method: str,
+    ) -> None:
+        supervisor = MagicMock()
+        supervisor.dispatch.return_value = {"ok": True}
+
+        result = self._dispatch(supervisor)(method, {"surface_id": "srf_1a2b3c4d"})
+
+        supervisor.dispatch.assert_called_once_with(
+            method,
+            {"surface_id": "srf_1a2b3c4d"},
+        )
+        assert result == {"ok": True}
+
+    def test_host_without_a_supervisor_reports_no_display(self) -> None:
+        """A machine with no Xvfb is still a perfectly good Pack host, so the
+        daemon starts without a supervisor and the failure lands here, at
+        call time, with something the user can act on.
+        """
+        with pytest.raises(RuntimeError, match="no display available"):
+            self._dispatch(None)("surface_open", {})
+
+    def test_supervisor_errors_propagate_unwrapped(self) -> None:
+        supervisor = MagicMock()
+        supervisor.dispatch.side_effect = RuntimeError("unknown surface 'srf_00000000'")
+
+        with pytest.raises(RuntimeError, match="unknown surface"):
+            self._dispatch(supervisor)("surface_close", {"surface_id": "srf_00000000"})
+
+    def test_surface_methods_do_not_shadow_ordinary_ones(self) -> None:
+        supervisor = MagicMock()
+
+        self._dispatch(supervisor)("stop_streaming", {})
+
+        supervisor.dispatch.assert_not_called()

@@ -39,6 +39,7 @@ from core import pack_protocol
 from core.pack_files import PackFileStore
 from core.projects import prepare_workspace
 from core.projects import probe_workspace
+from core.surface_supervisor import SURFACE_METHODS
 from core.tool_output_gate import read_gated_tool_output
 from video_tool_result import read_video_chunk
 
@@ -253,6 +254,7 @@ def make_dispatcher(
     adapter: PackDaemonAdapter,
     resumed: bool,
     core: Any,
+    supervisor: Any = None,
 ) -> Callable[[str, dict[str, Any]], Any]:
     """Build the method -> handler mapping for the daemon's one ChatTab."""
 
@@ -362,6 +364,17 @@ def make_dispatcher(
             core.save_session()
             resumed = True
             return {"success": True}
+        if method in SURFACE_METHODS:
+            # Live app surfaces (Xvfb + x11vnc + one GUI app). Only the
+            # control plane comes through here; pixels never do — they go
+            # over a WebSocket straight from the panel to x11vnc, tunnelled
+            # by the local side (see core/surface_tunnel.py).
+            if supervisor is None:
+                raise RuntimeError(
+                    "no display available on this host: the surface "
+                    "supervisor could not start (see daemon.log)",
+                )
+            return supervisor.dispatch(method, params)
         raise ValueError(f"Unknown method: {method!r}")
 
     return dispatch
@@ -431,6 +444,44 @@ def _prepare_mcp_config(session_dir: Path, repo_root: Path) -> None:
             "MCP servers may be unavailable",
             exc_info=True,
         )
+
+
+def _start_surface_supervisor(session_dir: Path) -> Any:
+    """Bring up the live-app-surface supervisor, or return None if this host
+    can't host one.
+
+    Never fatal. A machine with no Xvfb/x11vnc is a perfectly good Pack host
+    for everything else, and a surface request against it should fail with a
+    clear "no display available" at call time rather than preventing the
+    daemon from starting at all.
+
+    Reaping happens *before* anything else: surfaces recorded by a previous
+    incarnation of this daemon are killed, never adopted. Nothing could
+    attach to them anyway — the tunnel, the lease and the panel's handle all
+    died with the process that owned them.
+    """
+    try:
+        from core.surface_control import SurfaceControlServer
+        from core.surface_supervisor import SurfaceSupervisor
+
+        supervisor = SurfaceSupervisor(session_dir)
+        reaped = supervisor.reap_orphans()
+        if reaped:
+            logger.info(f"Reaped {reaped} orphaned surface process(es) at startup")
+        missing = supervisor.missing_tools()
+        if missing:
+            logger.info(
+                "Surfaces unavailable on this host (missing: "
+                + ", ".join(missing)
+                + ")",
+            )
+            return supervisor
+        supervisor.install_process_guards()
+        SurfaceControlServer(supervisor, supervisor.surfaces_dir).start()
+        return supervisor
+    except Exception:
+        logger.warning("Could not start the surface supervisor", exc_info=True)
+        return None
 
 
 def _bind_socket(sock_path: Path) -> socket.socket:
@@ -521,7 +572,9 @@ def main() -> None:
     core.start_autosave()
     adapter.set_tab(tab)
 
-    dispatch = make_dispatcher(tab, adapter, resumed, core)
+    supervisor = _start_surface_supervisor(session_dir)
+
+    dispatch = make_dispatcher(tab, adapter, resumed, core, supervisor)
 
     sock_path = session_dir / "daemon.sock"
     listener = _bind_socket(sock_path)

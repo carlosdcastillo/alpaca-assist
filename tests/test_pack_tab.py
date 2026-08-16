@@ -750,3 +750,150 @@ class TestNotificationHandlers:
 
         assert pack_tab.offline is True
         assert pack_tab.is_streaming is False
+
+
+class TestSurfaces:
+    """The control plane for live app surfaces.
+
+    PackTab's job here is small but specific: call the daemon, then build an
+    SSH tunnel to whatever port it reports, and never let those two get out
+    of step. Pixels are not in scope — they go over the tunnel directly from
+    the panel to the remote x11vnc, bypassing Python entirely.
+    """
+
+    OPEN_RESPONSE = {
+        "surface_id": "srf_1a2b3c4d",
+        "ws_port": 6080,
+        "password": "s3cr3t8",
+        "width": 1280,
+        "height": 800,
+        "description": "xeyes",
+        "seq": 0,
+    }
+
+    @pytest.fixture
+    def tunnels(self, pack_tab: PackTab) -> MagicMock:
+        manager = MagicMock()
+        manager.open.return_value = 51733
+        pack_tab._surface_tunnels = manager
+        return manager
+
+    def test_open_tunnels_to_the_reported_port(
+        self,
+        pack_tab: PackTab,
+        tunnels: MagicMock,
+    ) -> None:
+        pack_tab._transport.send_request.return_value = dict(self.OPEN_RESPONSE)
+
+        result = pack_tab.surface_open({"profile": "xeyes"})
+
+        tunnels.open.assert_called_once_with("srf_1a2b3c4d", 6080)
+        assert result["ws_url"] == "ws://127.0.0.1:51733"
+
+    def test_open_asks_as_a_user_not_as_the_model(
+        self,
+        pack_tab: PackTab,
+        tunnels: MagicMock,
+    ) -> None:
+        """source="user" is what allows a raw argv. The MCP server passes
+        "model" instead and is confined to named profiles."""
+        pack_tab._transport.send_request.return_value = dict(self.OPEN_RESPONSE)
+
+        pack_tab.surface_open({"argv": ["xterm"]}, 800, 600)
+
+        method, params = pack_tab._transport.send_request.call_args[0][:2]
+        assert method == "surface_open"
+        assert params["source"] == "user"
+        assert params["width"] == 800
+
+    def test_a_failed_tunnel_closes_the_remote_surface(
+        self,
+        pack_tab: PackTab,
+        tunnels: MagicMock,
+    ) -> None:
+        """Without a tunnel nothing local can reach the surface, so leaving
+        it running would burn a display until the idle reaper notices."""
+        pack_tab._transport.send_request.return_value = dict(self.OPEN_RESPONSE)
+        tunnels.open.side_effect = RuntimeError("ssh died")
+
+        with pytest.raises(RuntimeError, match="ssh died"):
+            pack_tab.surface_open({"profile": "xeyes"})
+
+        assert pack_tab._transport.send_request.call_args[0][0] == "surface_close"
+
+    def test_attach_rebuilds_the_tunnel_for_a_live_surface(
+        self,
+        pack_tab: PackTab,
+        tunnels: MagicMock,
+    ) -> None:
+        """The transcript stores a descriptor, never a session — reopening a
+        conversation arrives here with an id and nothing else."""
+        pack_tab._transport.send_request.return_value = dict(self.OPEN_RESPONSE)
+
+        result = pack_tab.surface_attach("srf_1a2b3c4d")
+
+        method, params = pack_tab._transport.send_request.call_args[0][:2]
+        assert (method, params) == ("surface_attach", {"surface_id": "srf_1a2b3c4d"})
+        assert result["ws_url"] == "ws://127.0.0.1:51733"
+
+    def test_attach_to_a_dead_surface_raises_rather_than_recreating_it(
+        self,
+        pack_tab: PackTab,
+        tunnels: MagicMock,
+    ) -> None:
+        """Surfaces are never revived. The card says "session ended" and stops."""
+        pack_tab._transport.send_request.side_effect = PackTransportError(
+            "surface srf_1a2b3c4d is no longer running",
+        )
+
+        with pytest.raises(PackTransportError, match="no longer running"):
+            pack_tab.surface_attach("srf_1a2b3c4d")
+
+        tunnels.open.assert_not_called()
+
+    def test_close_drops_the_tunnel_before_asking_the_daemon(
+        self,
+        pack_tab: PackTab,
+        tunnels: MagicMock,
+    ) -> None:
+        pack_tab._transport.send_request.return_value = {"ok": True}
+
+        pack_tab.surface_close("srf_1a2b3c4d")
+
+        tunnels.close.assert_called_once_with("srf_1a2b3c4d")
+
+    def test_close_still_drops_the_tunnel_when_the_daemon_is_gone(
+        self,
+        pack_tab: PackTab,
+        tunnels: MagicMock,
+    ) -> None:
+        pack_tab._transport.send_request.side_effect = PackTransportError("offline")
+
+        result = pack_tab.surface_close("srf_1a2b3c4d")
+
+        tunnels.close.assert_called_once_with("srf_1a2b3c4d")
+        assert result == {"ok": False, "reason": "offline"}
+
+    def test_disconnect_closes_every_tunnel(
+        self,
+        pack_tab: PackTab,
+        tunnels: MagicMock,
+    ) -> None:
+        """Once the control channel is dead the panel cannot learn whether
+        the surfaces behind these forwards still exist."""
+        pack_tab._on_disconnect()
+
+        tunnels.close_all.assert_called_once_with()
+
+    def test_cleanup_closes_tunnels_but_never_the_remote_surfaces(
+        self,
+        pack_tab: PackTab,
+        tunnels: MagicMock,
+    ) -> None:
+        """Same rule as the daemon itself: closing the app takes down the
+        local side only. The idle reaper collects what is left."""
+        pack_tab.cleanup_resources()
+
+        tunnels.close_all.assert_called_once_with()
+        for call in pack_tab._transport.send_request.call_args_list:
+            assert call[0][0] != "surface_close"

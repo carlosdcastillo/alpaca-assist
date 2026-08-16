@@ -1,0 +1,32 @@
+{
+  "_comment": [
+    "Apps the model is allowed to open as a live surface, by name.",
+    "Copy to surface_profiles.json on the Pack host (repo root, or the",
+    "session directory under ~/.alpaca_pack/<session>/ to scope it to one",
+    "conversation). Entries need an 'argv'; 'description' is what the panel",
+    "and the transcript card show.",
+    "",
+    "Only these names are reachable from the model. A human opening a",
+    "surface from Tools > Open App Surface can type any command, because",
+    "they already have ssh access to this host by other means.",
+    "",
+    "Xvfb runs no window manager, so apps get no decorations and no focus",
+    "management. Run one app per surface, fullscreen where the toolkit",
+    "allows it."
+  ],
+  "xeyes": {
+    "argv": ["xeyes"],
+    "description": "xeyes — smoke test that the display works at all"
+  },
+  "xterm": {
+    "argv": ["xterm", "-fa", "Monospace", "-fs", "12"],
+    "description": "xterm on the Pack host"
+  },
+  "alpaca": {
+    "argv": [
+      "/home/Carlos/pywebview_demo/.venv-sys/bin/python3",
+      "/home/Carlos/pywebview_demo/webview_app.py"
+    ],
+    "description": "Alpaca Assist itself, running headless on this host"
+  }
+}

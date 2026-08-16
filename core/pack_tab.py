@@ -41,6 +41,7 @@ from conversation_graph import ConversationGraph
 from core.pack_files import MAX_PACK_FILE_BYTES
 from core.pack_transport import PackTransport
 from core.pack_transport import PackTransportError
+from core.surface_tunnel import SurfaceTunnelManager
 from utils import ContentUpdate
 
 if TYPE_CHECKING:
@@ -57,6 +58,11 @@ FILE_CHUNK_TIMEOUT = 30.0
 GATED_OUTPUT_TIMEOUT = 30.0
 STOP_STREAMING_TIMEOUT = 10.0
 FOLD_RENDER_TIMEOUT = 2.0
+# Building a surface means spawning Xvfb, x11vnc and the app itself and
+# waiting for each to become reachable, so it is meaningfully slower than
+# the other RPCs here.
+SURFACE_OPEN_TIMEOUT = 60.0
+SURFACE_TIMEOUT = 30.0
 
 
 class PackTab:
@@ -96,6 +102,7 @@ class PackTab:
         self._file_cache: tempfile.TemporaryDirectory[str] | None = None
         self._file_cache_dir: Path | None = None
         self._file_cache_lock = threading.Lock()
+        self._surface_tunnels = SurfaceTunnelManager(host)
 
         self.chat_state: ChatState | ConversationGraph = ConversationGraph()
         self.is_streaming = False
@@ -373,6 +380,11 @@ class PackTab:
     def _on_disconnect(self) -> None:
         self.offline = True
         self.is_streaming = False
+        # The forwards are dead weight the moment the control channel is:
+        # their own ssh processes may well still be alive, but the panel has
+        # no way to learn whether the surfaces behind them still exist. A
+        # reconnect re-tunnels through surface_attach.
+        self._surface_tunnels.close_all()
 
     # -------------------------------------------------------------------
     # Notification handlers — forward to the real, unmodified webview_api.py
@@ -623,6 +635,91 @@ class PackTab:
         cleaned = re.sub(r'[<>:"/\\|?*\x00-\x1f]', "_", leaf).strip(" .")
         return cleaned[:160] or "pack-file"
 
+    # -------------------------------------------------------------------
+    # Live app surfaces
+    #
+    # The control plane only. Framebuffer traffic never touches Python: the
+    # panel opens a WebSocket to the local end of the tunnel these methods
+    # set up, and noVNC talks RFB to x11vnc through it.
+    # -------------------------------------------------------------------
+
+    def surface_open(
+        self,
+        spec: dict[str, Any] | None = None,
+        width: int = 1280,
+        height: int = 800,
+    ) -> dict[str, Any]:
+        """Start a surface on the remote host and tunnel to its WebSocket."""
+        self._ensure_connected(timeout=ATTACH_TIMEOUT)
+        result: dict[str, Any] = self._transport.send_request(
+            "surface_open",
+            {"spec": spec, "width": width, "height": height, "source": "user"},
+            timeout=SURFACE_OPEN_TIMEOUT,
+        )
+        return self._tunnel_to(result)
+
+    def surface_attach(self, surface_id: str) -> dict[str, Any]:
+        """Re-tunnel to a surface that is still running.
+
+        The transcript stores a descriptor, never a session, so reopening a
+        conversation and clicking "Show panel" arrives here with an id and
+        nothing else. If the surface is gone this raises, and the card says
+        so — there is deliberately no path that recreates it.
+        """
+        self._ensure_connected(timeout=ATTACH_TIMEOUT)
+        result: dict[str, Any] = self._transport.send_request(
+            "surface_attach",
+            {"surface_id": surface_id},
+            timeout=SURFACE_TIMEOUT,
+        )
+        return self._tunnel_to(result)
+
+    def _tunnel_to(self, result: dict[str, Any]) -> dict[str, Any]:
+        """Add a local WebSocket URL to a supervisor connection descriptor.
+
+        On failure the remote surface is closed rather than left orphaned:
+        without a tunnel nothing local can reach it, so keeping it alive
+        would only burn a display until the idle reaper notices.
+        """
+        surface_id = result["surface_id"]
+        try:
+            local_port = self._surface_tunnels.open(surface_id, int(result["ws_port"]))
+        except Exception as e:
+            logger.warning(f"Pack tab {self.tab_id} surface tunnel failed: {e}")
+            try:
+                self.surface_close(surface_id)
+            except Exception:
+                pass
+            raise
+        return {
+            **result,
+            "ws_url": f"ws://127.0.0.1:{local_port}",
+            "local_port": local_port,
+        }
+
+    def surface_close(self, surface_id: str) -> dict[str, Any]:
+        self._surface_tunnels.close(surface_id)
+        try:
+            result: dict[str, Any] = self._transport.send_request(
+                "surface_close",
+                {"surface_id": surface_id},
+                timeout=SURFACE_TIMEOUT,
+            )
+            return result
+        except PackTransportError as e:
+            logger.warning(f"Pack tab {self.tab_id} surface_close failed: {e}")
+            return {"ok": False, "reason": "offline"}
+
+    def surface_call(self, method: str, params: dict[str, Any]) -> dict[str, Any]:
+        """Proxy any other `surface_*` control call to the remote supervisor."""
+        self._ensure_connected(timeout=ATTACH_TIMEOUT)
+        result: dict[str, Any] = self._transport.send_request(
+            method,
+            params,
+            timeout=SURFACE_TIMEOUT,
+        )
+        return result
+
     def read_gated_tool_output(self, gated_text: str) -> str:
         """Fetch a gated result from the remote Pack daemon's temp file."""
         self._ensure_connected(timeout=ATTACH_TIMEOUT)
@@ -708,7 +805,13 @@ class PackTab:
 
         the remote daemon to stop — this is the entire mechanism by which
         closing the app leaves the remote Pack session running.
+
+        Surfaces follow the same rule: the tunnels go, the Xvfb/x11vnc/app
+        processes on the far side do not. The supervisor's idle reaper is
+        what collects those (30 minutes by default), which is the deliberate
+        cost of a surface surviving a network blip mid-session.
         """
+        self._surface_tunnels.close_all()
         self._transport.close()
         if self._file_cache is not None:
             self._file_cache.cleanup()
