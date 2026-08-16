@@ -87,10 +87,11 @@ def test_cli_clients_forward_heartbeats(
     client: ClaudeCodeCLIClient | CodexCLIClient,
     model: str,
 ) -> None:
-    # A silent CLI tool call (e.g. rendering images/videos) can outlast
-    # StreamingHandler.STREAM_TIMEOUT's 120s read timeout; _run_cli_jsonl's
-    # heartbeats keep the socket alive, but only if both CLI client classes
-    # actually forward them instead of swallowing them as an unknown event.
+    # A silent CLI tool call (e.g. rendering images/videos) can run long
+    # enough that the client-side watchdog would warn without a heartbeat;
+    # _run_cli_jsonl's heartbeats keep that from firing, but only if both
+    # CLI client classes actually forward them instead of swallowing them
+    # as an unknown event.
     with (
         patch(
             "anthropic_ollama_server._build_claude_mcp_config_file",
@@ -443,7 +444,11 @@ def test_cli_mcp_config_surface_server_is_absolute_regardless_of_cwd(
     actual cause of a live failure where the model had no surface_open tool
     and fell back to a raw shell command instead.
     """
-    config_path = _build_claude_mcp_config_file(str(tmp_path / "events.jsonl"), None)
+    config_path = _build_claude_mcp_config_file(
+        str(tmp_path / "events.jsonl"),
+        None,
+        str(tmp_path / "surfaces" / "control.sock"),
+    )
     try:
         config = json.loads(Path(config_path).read_text())
     finally:
@@ -491,19 +496,21 @@ def test_cli_mcp_config_surface_server_carries_the_session_socket(
     )
 
 
-def test_cli_mcp_config_surface_server_always_gets_the_media_event_channel(
+def test_cli_mcp_config_surface_server_gets_the_media_event_channel_too(
     tmp_path: Path,
 ) -> None:
     """Without ALPACA_CLI_MEDIA_EVENTS, surface_mcp_server.py's own
     _record_event has nowhere to write, and a CLI-backed model's
     surface_open result never reaches Alpaca's chat_state at all (confirmed
     live: the model improvised a broken markdown image instead of a real
-    live-surface card). Must be present even with no surface_socket -- a
-    host with no display still needs its "no display available" result to
-    reach the transcript.
+    live-surface card).
     """
     event_path = str(tmp_path / "events.jsonl")
-    config_path = _build_claude_mcp_config_file(event_path, None)
+    config_path = _build_claude_mcp_config_file(
+        event_path,
+        None,
+        str(tmp_path / "surfaces" / "control.sock"),
+    )
     try:
         config = json.loads(Path(config_path).read_text())
     finally:
@@ -511,7 +518,30 @@ def test_cli_mcp_config_surface_server_always_gets_the_media_event_channel(
 
     surface = config["mcpServers"]["alpaca-surface"]
     assert surface["env"]["ALPACA_CLI_MEDIA_EVENTS"] == event_path
-    assert "ALPACA_SURFACE_SOCKET" not in surface["env"]
+
+
+def test_cli_mcp_config_omits_surface_server_without_a_socket(
+    tmp_path: Path,
+) -> None:
+    """No surface_socket means no Pack daemon set one (see
+    pack_daemon.py's tab.surface_socket) -- this is a local tab, where
+    surfaces can never work at all (no Xvfb/x11vnc on Windows, or without
+    a remote host in the first place). Registering the server there is
+    pure risk for zero benefit: an extra MCP subprocess, spawned on every
+    single CLI turn, importing a module tree that has only ever been
+    exercised inside a Pack session -- confirmed as unrelated but
+    concerning after a real local read-timeout incident prompted auditing
+    every unconditional per-turn subprocess spawn.
+    """
+    config_path = _build_claude_mcp_config_file(str(tmp_path / "events.jsonl"), None)
+    try:
+        config = json.loads(Path(config_path).read_text())
+    finally:
+        Path(config_path).unlink()
+
+    assert "alpaca-surface" not in config["mcpServers"]
+    # alpaca-media is unrelated to surfaces and must be unaffected.
+    assert "alpaca-media" in config["mcpServers"]
 
 
 def test_cli_mcp_config_surface_server_overrides_a_raw_entry(
@@ -532,7 +562,11 @@ def test_cli_mcp_config_surface_server_overrides_a_raw_entry(
         str(mcp_file),
     )
 
-    config_path = _build_claude_mcp_config_file(str(tmp_path / "events.jsonl"), None)
+    config_path = _build_claude_mcp_config_file(
+        str(tmp_path / "events.jsonl"),
+        None,
+        str(tmp_path / "surfaces" / "control.sock"),
+    )
     try:
         config = json.loads(Path(config_path).read_text())
     finally:
@@ -563,11 +597,11 @@ def test_cli_jsonl_forwards_media_side_channel(tmp_path: Path) -> None:
 
 
 def test_cli_jsonl_emits_heartbeats_during_a_silent_gap() -> None:
-    # StreamingHandler.STREAM_TIMEOUT's 120s read timeout kills the whole
-    # stream if the local socket goes quiet that long — exactly what
-    # happens when a CLI tool call (e.g. rendering several images/videos)
-    # runs for minutes without printing a line. A low heartbeat interval
-    # here stands in for the real ~20s one so the test doesn't sleep long.
+    # A CLI tool call (e.g. rendering several images/videos) can run for
+    # minutes without printing a line; heartbeats are what keep the local
+    # watchdog from warning during that entirely-legitimate silence. A low
+    # heartbeat interval here stands in for the real ~20s one so the test
+    # doesn't sleep long.
     command = [
         sys.executable,
         "-c",

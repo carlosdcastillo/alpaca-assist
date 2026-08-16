@@ -66,6 +66,8 @@ dmypy.json
 
 # Logs
 *.log
+# *.log alone misses RotatingFileHandler's numbered backups (.log.1, .log.2, ...)
+/logs/
 
 # Backup files
 *.bak

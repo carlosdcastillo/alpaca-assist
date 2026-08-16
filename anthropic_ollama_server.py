@@ -5,6 +5,7 @@ This server mimics the Ollama API endpoints but uses Claude for inference.
 import base64
 import datetime
 import json
+import logging.handlers
 import math
 import os
 import queue
@@ -48,6 +49,74 @@ for _stream in (sys.stdout, sys.stderr):
         _stream.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[union-attr]
     except (AttributeError, ValueError):
         pass
+
+
+class _TeeStream:
+    """Duplicates every write to the real stream into a rotating log file.
+
+    Line-buffered so a multi-part print() (multiple positional args, or a
+    caller doing several partial writes) becomes one coherent log line
+    instead of scattered fragments.
+
+    Every print() call in this module already goes to stdout/stderr; this
+    makes that output durable regardless of how or where the process
+    happens to be launched. An interactive terminal's scrollback is not a
+    log -- it disappears the moment the window closes or scrolls past its
+    buffer, which is exactly what happened the one time this mattered: a
+    real "read timed out" incident on an already-running local server
+    with no surviving evidence anywhere to diagnose it from.
+    """
+
+    def __init__(self, real: Any, file_logger: logging.Logger) -> None:
+        self._real = real
+        self._logger = file_logger
+        self._buffer = ""
+        self._lock = threading.Lock()
+
+    def write(self, text: str) -> int:
+        result: int = self._real.write(text)
+        with self._lock:
+            self._buffer += text
+            while "\n" in self._buffer:
+                line, self._buffer = self._buffer.split("\n", 1)
+                if line:
+                    try:
+                        self._logger.info(line)
+                    except Exception:
+                        pass
+        return result
+
+    def flush(self) -> None:
+        self._real.flush()
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._real, name)
+
+
+_log_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "logs")
+try:
+    os.makedirs(_log_dir, exist_ok=True)
+    _console_logger = logging.getLogger("anthropic_ollama_server.console")
+    _console_logger.setLevel(logging.INFO)
+    _console_logger.propagate = False
+    if not _console_logger.handlers:
+        _file_handler = logging.handlers.RotatingFileHandler(
+            os.path.join(_log_dir, "anthropic_ollama_server.log"),
+            maxBytes=10 * 1024 * 1024,
+            backupCount=5,
+            encoding="utf-8",
+        )
+        _file_handler.setFormatter(
+            logging.Formatter("%(asctime)s %(message)s"),
+        )
+        _console_logger.addHandler(_file_handler)
+    for _name in ("stdout", "stderr"):
+        setattr(sys, _name, _TeeStream(getattr(sys, _name), _console_logger))
+except OSError:
+    # A read-only install directory or similarly locked-down environment
+    # must not prevent the server from starting at all -- console output
+    # (still fixed for encoding above) remains available either way.
+    pass
 
 SYSTEM_PROMPT = """
 You are a highly skilled software engineer with extensive knowledge in many programming languages, frameworks, design patterns, and best practices. You are also an eloquent and professional writer who communicates clearly and effectively.
@@ -804,133 +873,153 @@ class OllamaRequestHandler(BaseHTTPRequestHandler):
                 stream_error = e
                 print(f"⚠️ Stream processing error after {count} chunks: {e}")
 
-        if stream:
-            for event in _events_tolerating_mid_stream_failure():
-                print(event)
-                val: dict[str, Any] = event
+        # do_POST's own try/except is not a working safety net for anything
+        # in this loop: by the time it runs, send_response(200) and
+        # end_headers() already ran above, so do_POST's send_error(500, ...)
+        # assumes a fresh, header-less response and can itself fail
+        # silently. Confirmed by reading the code, not reproduced live, but
+        # it is the one path here where *any* exception -- from any future
+        # cause, not just the ones already known -- had no working way to
+        # reach the client at all: total silence until the client's own
+        # read-timeout fired, indistinguishable from the server still
+        # working. Catching it here and routing through stream_error reuses
+        # the exact completion-chunk mechanism _events_tolerating_mid_
+        # stream_failure already uses for a generator-level failure, so
+        # every failure mode ends in a real, parseable error the client
+        # sees immediately instead of dead air.
+        try:
+            if stream:
+                for event in _events_tolerating_mid_stream_failure():
+                    print(event)
+                    val: dict[str, Any] = event
 
-                if val.get("type") == "alpaca_tool_event":
-                    self._send_cli_tool_event(val)
+                    if val.get("type") == "alpaca_tool_event":
+                        self._send_cli_tool_event(val)
 
-                elif val.get("type") == "cli_heartbeat":
-                    # Keeps the local socket alive through long silent CLI
-                    # tool calls (see _run_cli_jsonl) — an empty chunk is a
-                    # no-op for every consumer of this stream.
-                    self._send_text_chunk("", count)
-
-                elif val.get("type") == "message_start":
-                    usage = val.get("message", {}).get("usage", {})
-                    # Anthropic splits input across three fields when prompt caching
-                    # is active; sum them for the true total.  Fireworks may send 0
-                    # for input_tokens and put the real count in the cache fields.
-                    _it = usage.get("input_tokens") or 0
-                    _cw = usage.get("cache_creation_input_tokens") or 0
-                    _cr = usage.get("cache_read_input_tokens") or 0
-                    _total = _it + _cw + _cr
-                    input_tokens = _total if _total > 0 else None
-                    # cache_read is billed at ~10% of input price, cache_creation
-                    # at ~1.25x — both are still "cached" in the sense that the
-                    # UI cares about: not fresh full-price input tokens.
-                    cached_tokens = _cw + _cr
-
-                elif (
-                    val.get("type") == "content_block_delta"
-                    and "delta" in val
-                    and ("text" in val["delta"])
-                ):
-                    text_chunk = val["delta"]["text"]
-                    response_body += text_chunk
-                    self._send_text_chunk(text_chunk, count)
-                    count += 1
-
-                elif (
-                    val.get("type") == "content_block_start"
-                    and val.get("content_block", {}).get("type") == "tool_use"
-                ):
-                    tool_block = val["content_block"]
-                    # Store tool info for later
-                    current_tool_name = tool_block.get("name", "")
-                    current_tool_id = tool_block.get("id", "")
-                    tool_arguments_buffer = ""
-                    in_tool = True
-                    print(
-                        f"🔧 Tool use started: {current_tool_name} (id: {current_tool_id})",
-                    )
-                    count += 1
-
-                elif (
-                    val.get("type") == "content_block_delta"
-                    and "delta" in val
-                    and ("partial_json" in val["delta"])
-                ):
-                    # Accumulate tool arguments
-                    args_chunk = val["delta"]["partial_json"]
-
-                    if in_tool:
-                        tool_arguments_buffer += args_chunk
-                    else:
-                        self._send_text_chunk(args_chunk, count)
-                    count += 1
-
-                elif val.get("type") == "content_block_stop":
-                    # Send tool call end as text
-                    if in_tool:
-                        # Parse accumulated arguments
-                        try:
-                            if tool_arguments_buffer.strip():
-                                arguments = json.loads(tool_arguments_buffer)
-                            else:
-                                arguments = {}
-                        except json.JSONDecodeError as e:
-                            print(f"⚠️ Failed to parse tool arguments: {e}")
-                            arguments = {}
-
-                        # Build the tool call structure
-                        custom_tool_call = {
-                            "tool_call": {
-                                "name": current_tool_name,
-                                "id": current_tool_id,
-                                "arguments": arguments,
-                            },
-                        }
-
-                        # Use _wrap_tool_call for secure tag-based detection
-                        tool_call_text = self._wrap_tool_call(
-                            custom_tool_call,
-                            tool_call_token,
-                        )
-                        print(
-                            f"🔧 Sending tool call (token: {'yes' if tool_call_token else 'no'}): {tool_call_text[:100]}...",
-                        )
-                        self._send_text_chunk(tool_call_text, count)
-                        in_tool = False
-                        current_tool_id = ""
-                        current_tool_name = ""
-                        tool_arguments_buffer = ""
-                    else:
+                    elif val.get("type") == "cli_heartbeat":
+                        # Keeps the local socket alive through long silent CLI
+                        # tool calls (see _run_cli_jsonl) — an empty chunk is a
+                        # no-op for every consumer of this stream.
                         self._send_text_chunk("", count)
-                    count += 1
 
-                elif (
-                    val.get("type") == "message_delta"
-                    and "delta" in val
-                    and ("stop_reason" in val["delta"])
-                ):
-                    stop_reason = val["delta"]["stop_reason"]
-                    usage = val.get("usage", {})
-                    # output tokens — prefer Anthropic name, fall back to OpenAI name
-                    _out = usage.get("output_tokens") or usage.get("completion_tokens")
-                    if _out is not None:
-                        output_tokens = _out
-                    # input tokens — sum all fields; Fireworks may only fill in the
-                    # real value here (sending a placeholder 0 in message_start).
-                    _it = usage.get("input_tokens") or 0
-                    _cw = usage.get("cache_creation_input_tokens") or 0
-                    _cr = usage.get("cache_read_input_tokens") or 0
-                    _total = _it + _cw + _cr
-                    if _total > 0:
-                        input_tokens = _total
+                    elif val.get("type") == "message_start":
+                        usage = val.get("message", {}).get("usage", {})
+                        # Anthropic splits input across three fields when prompt caching
+                        # is active; sum them for the true total.  Fireworks may send 0
+                        # for input_tokens and put the real count in the cache fields.
+                        _it = usage.get("input_tokens") or 0
+                        _cw = usage.get("cache_creation_input_tokens") or 0
+                        _cr = usage.get("cache_read_input_tokens") or 0
+                        _total = _it + _cw + _cr
+                        input_tokens = _total if _total > 0 else None
+                        # cache_read is billed at ~10% of input price, cache_creation
+                        # at ~1.25x — both are still "cached" in the sense that the
+                        # UI cares about: not fresh full-price input tokens.
                         cached_tokens = _cw + _cr
+
+                    elif (
+                        val.get("type") == "content_block_delta"
+                        and "delta" in val
+                        and ("text" in val["delta"])
+                    ):
+                        text_chunk = val["delta"]["text"]
+                        response_body += text_chunk
+                        self._send_text_chunk(text_chunk, count)
+                        count += 1
+
+                    elif (
+                        val.get("type") == "content_block_start"
+                        and val.get("content_block", {}).get("type") == "tool_use"
+                    ):
+                        tool_block = val["content_block"]
+                        # Store tool info for later
+                        current_tool_name = tool_block.get("name", "")
+                        current_tool_id = tool_block.get("id", "")
+                        tool_arguments_buffer = ""
+                        in_tool = True
+                        print(
+                            f"🔧 Tool use started: {current_tool_name} (id: {current_tool_id})",
+                        )
+                        count += 1
+
+                    elif (
+                        val.get("type") == "content_block_delta"
+                        and "delta" in val
+                        and ("partial_json" in val["delta"])
+                    ):
+                        # Accumulate tool arguments
+                        args_chunk = val["delta"]["partial_json"]
+
+                        if in_tool:
+                            tool_arguments_buffer += args_chunk
+                        else:
+                            self._send_text_chunk(args_chunk, count)
+                        count += 1
+
+                    elif val.get("type") == "content_block_stop":
+                        # Send tool call end as text
+                        if in_tool:
+                            # Parse accumulated arguments
+                            try:
+                                if tool_arguments_buffer.strip():
+                                    arguments = json.loads(tool_arguments_buffer)
+                                else:
+                                    arguments = {}
+                            except json.JSONDecodeError as e:
+                                print(f"⚠️ Failed to parse tool arguments: {e}")
+                                arguments = {}
+
+                            # Build the tool call structure
+                            custom_tool_call = {
+                                "tool_call": {
+                                    "name": current_tool_name,
+                                    "id": current_tool_id,
+                                    "arguments": arguments,
+                                },
+                            }
+
+                            # Use _wrap_tool_call for secure tag-based detection
+                            tool_call_text = self._wrap_tool_call(
+                                custom_tool_call,
+                                tool_call_token,
+                            )
+                            print(
+                                f"🔧 Sending tool call (token: {'yes' if tool_call_token else 'no'}): {tool_call_text[:100]}...",
+                            )
+                            self._send_text_chunk(tool_call_text, count)
+                            in_tool = False
+                            current_tool_id = ""
+                            current_tool_name = ""
+                            tool_arguments_buffer = ""
+                        else:
+                            self._send_text_chunk("", count)
+                        count += 1
+
+                    elif (
+                        val.get("type") == "message_delta"
+                        and "delta" in val
+                        and ("stop_reason" in val["delta"])
+                    ):
+                        stop_reason = val["delta"]["stop_reason"]
+                        usage = val.get("usage", {})
+                        # output tokens — prefer Anthropic name, fall back to OpenAI name
+                        _out = usage.get("output_tokens") or usage.get(
+                            "completion_tokens"
+                        )
+                        if _out is not None:
+                            output_tokens = _out
+                        # input tokens — sum all fields; Fireworks may only fill in the
+                        # real value here (sending a placeholder 0 in message_start).
+                        _it = usage.get("input_tokens") or 0
+                        _cw = usage.get("cache_creation_input_tokens") or 0
+                        _cr = usage.get("cache_read_input_tokens") or 0
+                        _total = _it + _cw + _cr
+                        if _total > 0:
+                            input_tokens = _total
+                            cached_tokens = _cw + _cr
+        except Exception as e:
+            stream_error = e
+            print(f"⚠️ Error handling stream event after {count} chunks: {e}")
 
         elapsed_ms = int((time.time() - start_time) * 1000)
 
@@ -1445,10 +1534,19 @@ def _cli_mcp_servers(
     # cwd being the *workspace*, not the repo -- a bare "python" or a
     # relative "surface_mcp_server.py" would only resolve by accident, the
     # same class of bug pack_daemon.py's _absolutize_mcp_config exists to
-    # prevent for the non-CLI path. Always registered, same as alpaca-media:
-    # a host with no display just gets "no display available" at call time.
+    # prevent for the non-CLI path.
+    #
+    # Gated on surface_socket, unlike alpaca-media which is unconditional:
+    # only pack_daemon.py ever sets it (see tab.surface_socket), so its
+    # presence *is* "this is a Pack tab" -- surfaces can never work on a
+    # local tab (no Xvfb/x11vnc on Windows, or without a remote host at
+    # all), so registering this server there is pure added risk for zero
+    # benefit: a second MCP subprocess spawned on every single CLI turn,
+    # importing a module tree (core.surface_control, core.surface_protocol)
+    # that has never been exercised outside a Pack session, for a
+    # capability that will only ever refuse with "no display available."
     surface_script = os.path.join(os.path.dirname(__file__), "surface_mcp_server.py")
-    if os.path.isfile(surface_script):
+    if surface_socket and os.path.isfile(surface_script):
         # ALPACA_CLI_MEDIA_EVENTS is the same side channel alpaca-media uses
         # (both write to the one file this turn already created; _run_cli_
         # jsonl's reader is generic per-line, not media-specific) -- without
@@ -1458,15 +1556,16 @@ def _cli_mcp_servers(
         # the CLI's own internal context. Confirmed live: the model, unable
         # to parse the raw sentinel it got back, invented its own broken
         # markdown image instead of a real live-surface card.
-        surface_env = {"ALPACA_CLI_MEDIA_EVENTS": media_event_path}
         # SurfaceControlClient.discover()'s cwd check misses this process
         # (its cwd is the workspace, not the Pack session directory), and
         # its "exactly one session on this host" fallback is ambiguous the
         # moment a second Pack tab is open -- confirmed live, 7 concurrent
         # sessions all returning no display available. Passing the exact
         # socket forward sidesteps discovery entirely.
-        if surface_socket:
-            surface_env["ALPACA_SURFACE_SOCKET"] = surface_socket
+        surface_env = {
+            "ALPACA_CLI_MEDIA_EVENTS": media_event_path,
+            "ALPACA_SURFACE_SOCKET": surface_socket,
+        }
         servers["alpaca-surface"] = {
             "command": sys.executable,
             "args": [surface_script],

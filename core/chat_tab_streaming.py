@@ -46,12 +46,30 @@ class StreamingHandler:
     """
 
     # (connect_timeout, read_timeout): read_timeout is the maximum silence
-    # between bytes on the open socket.  120s matches the watchdog's "stuck"
-    # threshold in chat_tab_processor.py; a truly dead connection is closed
-    # within 2 minutes instead of 30.  Genuinely slow models that produce
-    # at least one byte per token are unaffected — tokens arrive far more
-    # frequently than this in normal operation.
-    STREAM_TIMEOUT: tuple[int, int] = (10, 120)
+    # between bytes on the open socket.
+    #
+    # This used to be 120s -- deliberately equal to chat_tab_processor.py's
+    # watchdog STUCK_SECS, on the theory that a truly dead connection
+    # should close "within 2 minutes instead of 30." That reasoning had a
+    # real bug: equal thresholds *race*. requests' own read-timeout is a
+    # hard exception fired at the socket layer; the watchdog's "press Stop
+    # if stuck" message is a soft, cooperative warning polled every 10s
+    # from a separate thread. When both are watching the same 120s clock,
+    # the hard exception can win — confirmed live, a local CLI-backed
+    # request doing real spinup/codebase work for over 60s got killed with
+    # a raw "Read timed out" instead of ever showing the informative
+    # watchdog warning it was designed to show first.
+    #
+    # The fix is to stop coupling them at all. The watchdog's SLOW_SECS/
+    # STUCK_SECS remain the *informative* path (running work, no data loss)
+    # for exactly this workload — CLI backends have no natural upper bound
+    # on legitimate silence (a single tool call, e.g. installing
+    # dependencies, can run for many minutes) and the heartbeat mechanism
+    # in _run_cli_jsonl exists precisely to keep this socket alive through
+    # that. This read_timeout is now a last-resort backstop for a
+    # genuinely dead peer, not a UX signal — set high enough that it can
+    # never race the watchdog's warnings under any normal operation.
+    STREAM_TIMEOUT: tuple[int, int] = (10, 1800)
 
     def __init__(
         self,

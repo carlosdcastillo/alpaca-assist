@@ -31,6 +31,20 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+# Watchdog thresholds for the "connection looks stuck" inline warnings
+# (see StreamProcessor.process_stream below). Module-level, not local to
+# the watchdog closure, specifically so core/chat_tab_streaming.py's
+# STREAM_TIMEOUT can be tested against them directly: those two numbers
+# must never be equal or close. STREAM_TIMEOUT's read-timeout is a hard
+# exception raised at the socket layer; WATCHDOG_STUCK_SECS is a soft,
+# cooperative warning polled from a separate thread. Set them to the same
+# value (as STREAM_TIMEOUT used to be, deliberately, "to match") and they
+# race — confirmed live, a real request doing legitimate long-running work
+# got killed by the hard timeout before the soft warning ever had a
+# chance to show.
+WATCHDOG_SLOW_SECS = 60
+WATCHDOG_STUCK_SECS = 120
+
 
 class StreamProcessor:
     """Processes SSE stream content from Ollama.
@@ -130,23 +144,21 @@ class StreamProcessor:
         _watchdog_stop = threading.Event()
 
         def _watchdog() -> None:
-            SLOW_SECS = 60
-            STUCK_SECS = 120
             warned_slow = warned_stuck = False
             while not _watchdog_stop.wait(timeout=10.0):
                 elapsed = time.monotonic() - _last_chunk_ts[0]
-                if not warned_stuck and elapsed >= STUCK_SECS:
+                if not warned_stuck and elapsed >= WATCHDOG_STUCK_SECS:
                     warned_stuck = True
                     self._queue_content_update(
                         answer_index,
-                        f"\n\n*[No response for {STUCK_SECS}s — press Stop if the connection is stuck.]*\n",
+                        f"\n\n*[No response for {WATCHDOG_STUCK_SECS}s — press Stop if the connection is stuck.]*\n",
                         is_done=False,
                     )
-                elif not warned_slow and elapsed >= SLOW_SECS:
+                elif not warned_slow and elapsed >= WATCHDOG_SLOW_SECS:
                     warned_slow = True
                     self._queue_content_update(
                         answer_index,
-                        f"\n\n*[Connection is slow — still waiting after {SLOW_SECS}s...]*\n",
+                        f"\n\n*[Connection is slow — still waiting after {WATCHDOG_SLOW_SECS}s...]*\n",
                         is_done=False,
                     )
 
@@ -299,7 +311,9 @@ class StreamProcessor:
 
                         if data.get("done_reason") == "error":
                             error_message = data.get("error", "Unknown stream error")
-                            logger.error(f"[STREAM] Backend stream error: {error_message}")
+                            logger.error(
+                                f"[STREAM] Backend stream error: {error_message}"
+                            )
                             self._queue_content_update(
                                 answer_index,
                                 f"\n[Error]: {error_message}",

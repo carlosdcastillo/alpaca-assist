@@ -152,3 +152,72 @@ class TestEmptyStreamReportsNoMetrics:
 
         chunk = _last_chunk(handler)
         assert "invocation_metrics" not in chunk
+
+
+class TestLoopBodyFailureStillReportsAnError:
+    """_events_tolerating_mid_stream_failure only catches exceptions from
+    the *upstream generator* (network hiccups, a provider dropping the
+    connection). It never covered a failure in this handler's own
+    per-event processing -- self._send_text_chunk, self._wrap_tool_call,
+    a print() call, anything -- and do_POST's outer except Exception is
+    not a working safety net for that case either, since by the time this
+    loop runs, send_response(200) and end_headers() already fired, so
+    send_error(500, ...) assumes a fresh response and can itself fail
+    silently. Confirmed by reading the code: any bug in this loop body,
+    known or not-yet-discovered, previously had no working path to the
+    client at all -- just silence until the client's own read-timeout
+    fired, indistinguishable from the server still legitimately working.
+    """
+
+    def test_exception_in_send_text_chunk_still_completes_the_response(self) -> None:
+        handler = _make_handler()
+        handler._send_text_chunk = MagicMock(
+            side_effect=UnicodeEncodeError(
+                "charmap",
+                "\u26a0",
+                0,
+                1,
+                "character maps to <undefined>",
+            ),
+        )
+        events = [
+            _message_start(input_tokens=100),
+            _text_delta("hello"),
+        ]
+
+        handler._process_stream(iter(events))  # must not raise
+
+        chunk = _last_chunk(handler)
+        assert chunk["done"] is True
+        assert chunk["done_reason"] == "error"
+        assert chunk["error"] is not None
+
+    def test_exception_partway_through_the_loop_still_completes_the_response(
+        self,
+    ) -> None:
+        """A failure on event N must not lose accounting for events before
+        it, matching the existing generator-level-failure guarantee.
+        """
+        handler = _make_handler()
+        real_send_text_chunk = handler._send_text_chunk
+        call_count = {"n": 0}
+
+        def flaky_send_text_chunk(text, count):
+            call_count["n"] += 1
+            if call_count["n"] == 2:
+                raise RuntimeError("simulated bug in chunk delivery")
+            return real_send_text_chunk(text, count)
+
+        handler._send_text_chunk = flaky_send_text_chunk
+        events = [
+            _message_start(input_tokens=100),
+            _text_delta("first chunk landed fine"),
+            _text_delta("second chunk triggers the bug"),
+        ]
+
+        handler._process_stream(iter(events))  # must not raise
+
+        chunk = _last_chunk(handler)
+        assert chunk["done_reason"] == "error"
+        assert "simulated bug in chunk delivery" in chunk["error"]
+        assert chunk["invocation_metrics"]["input_token_count"] == 100

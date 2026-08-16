@@ -14,6 +14,7 @@ from unittest.mock import Mock
 import pytest
 
 from core.chat_tab_processor import StreamProcessor
+from core.chat_tab_processor import WATCHDOG_STUCK_SECS
 
 
 # ---------------------------------------------------------------------------
@@ -397,3 +398,20 @@ class TestProcessStreamStopFlag:
         processor.process_stream(resp, 0, flag)
         # No done received, so fallback fires
         mock_api.on_streaming_end.assert_called_once_with("tab-1", 0)
+
+
+def test_stream_timeout_never_races_the_stuck_watchdog() -> None:
+    """requests' read-timeout is a hard exception at the socket layer;
+    WATCHDOG_STUCK_SECS is a soft, cooperative warning polled from a
+    separate thread. Equal (or close) thresholds race, and the hard
+    exception can win -- confirmed live, a real request doing legitimate
+    long-running work got killed with a raw "Read timed out" instead of
+    ever showing the watchdog's "press Stop if stuck" warning it was
+    supposed to see first. The margin must stay wide, not just non-zero,
+    so a future retune of either number can't silently reintroduce the
+    same race.
+    """
+    from core.chat_tab_streaming import StreamingHandler
+
+    _connect_timeout, read_timeout = StreamingHandler.STREAM_TIMEOUT
+    assert read_timeout >= WATCHDOG_STUCK_SECS * 5
