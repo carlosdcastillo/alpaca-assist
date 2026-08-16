@@ -335,6 +335,13 @@ class WebViewAPI:
                 # any to retry — reuses the tab-click path that's already
                 # wired, no new UI surface needed.
                 tab.reconnect_async()
+            elif isinstance(tab, PackTab):
+                # Live content only updates the visible DOM; the PackTab's
+                # local chat_state mirror can lag behind the remote daemon
+                # during a turn. Refresh in the background on activation and
+                # repaint when it arrives so tab switching never has to wait
+                # for streaming to finish.
+                tab.refresh_async()
             return {"success": True}
         except Exception as e:
             logger.error(f"Error switching tab: {e}")

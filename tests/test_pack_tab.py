@@ -599,6 +599,7 @@ class TestNotificationHandlers:
     def test_on_streaming_end_resyncs_the_chat_state_mirror(
         self,
         pack_tab: PackTab,
+        app_core: MagicMock,
     ) -> None:
         """Regression test: get_conversation_state (used on tab switch)
 
@@ -609,16 +610,39 @@ class TestNotificationHandlers:
         """
         assert pack_tab.chat_state.to_dict()["graph"]["nodes"] == {}
         pack_tab._transport.send_request.return_value = ATTACH_RESPONSE
+        app_core.get_active_tab_id.return_value = "tab-1"
 
         pack_tab._on_streaming_end(
             {"tab_id": "remote-daemon-tab-99", "answer_index": 0},
         )
 
         deadline = time.monotonic() + 2.0
-        while time.monotonic() < deadline and pack_tab.title != "Real Title":
+        while time.monotonic() < deadline and not app_core.api._safe_evaluate_js.called:
             time.sleep(0.02)
 
         assert pack_tab.title == "Real Title"
+        assert pack_tab.chat_state.to_dict()["graph"]["id"] == "g1"
+        app_core.api._safe_evaluate_js.assert_called_once_with(
+            'app.onPackStateSynced("tab-1");',
+        )
+
+    def test_refresh_repaints_if_tab_is_still_active(
+        self,
+        pack_tab: PackTab,
+        app_core: MagicMock,
+    ) -> None:
+        pack_tab._transport.send_request.return_value = ATTACH_RESPONSE
+        app_core.get_active_tab_id.return_value = "tab-1"
+
+        pack_tab.refresh_async()
+
+        deadline = time.monotonic() + 2.0
+        while time.monotonic() < deadline and not app_core.api._safe_evaluate_js.called:
+            time.sleep(0.02)
+
+        app_core.api._safe_evaluate_js.assert_called_once_with(
+            'app.onPackStateSynced("tab-1");',
+        )
         assert pack_tab.chat_state.to_dict()["graph"]["id"] == "g1"
 
     def test_on_content_update_reconstructs_real_content_update(
