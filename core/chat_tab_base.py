@@ -78,6 +78,12 @@ class ChatTabBase:
         self.project_spinup = ""
         self.project_spinup_pending = False
 
+        # Set once at daemon startup for a Pack tab (pack_daemon.py's main()),
+        # never for a plain local tab -- surface_mcp_server.py's own "not
+        # running on a host with a surface supervisor" message depends on
+        # this being genuinely absent there, not an empty string.
+        self.surface_socket: str | None = None
+
         # One-shot callback fired by on_streaming_complete (e.g. handoff post-processing).
         # Cleared after firing so it only runs once.
         self._on_streaming_complete_callback: Callable[[], None] | None = None

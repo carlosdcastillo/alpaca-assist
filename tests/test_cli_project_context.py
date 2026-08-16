@@ -163,6 +163,49 @@ def test_initial_request_sends_only_a_project_workspace(workspace: str | None) -
         assert "working_directory" not in payload
 
 
+@pytest.mark.parametrize(
+    "surface_socket",
+    [None, "/home/carlos/.alpaca_pack/s1/surfaces/control.sock"],
+)
+def test_initial_request_forwards_the_surface_socket(
+    surface_socket: str | None,
+) -> None:
+    """Only a Pack tab's daemon sets tab.surface_socket (pack_daemon.py);
+    a plain local tab has no such attribute, and the payload must not
+    fabricate one -- surface_mcp_server.py's own "not a Pack tab" message
+    depends on that key being genuinely absent, not an empty string.
+    """
+    chat = SimpleNamespace(
+        stop_streaming_flag=threading.Event(),
+        preferences={"api_url": "http://example.test", "model": "codex/test"},
+        conversation_id=42,
+        workspace_path="/srv/workspaces/alpaca-session",
+        surface_socket=surface_socket,
+        _streaming=True,
+        is_streaming=True,
+        on_streaming_complete=MagicMock(),
+        on_streaming_error=MagicMock(),
+    )
+    tool_handler = MagicMock()
+    tool_handler.prepare_continuation_messages.return_value = [
+        {"role": "user", "content": "Fix the bug."},
+    ]
+    processor = MagicMock()
+    handler = StreamingHandler(chat, tool_handler, processor)  # type: ignore[arg-type]
+
+    with patch(
+        "core.chat_tab_streaming.requests.post",
+        return_value=MagicMock(),
+    ) as post:
+        handler._fetch_response(0, {"model": "codex/test"}, [], "project prompt")
+
+    payload = post.call_args.kwargs["json"]
+    if surface_socket:
+        assert payload["surface_socket"] == surface_socket
+    else:
+        assert "surface_socket" not in payload
+
+
 def test_continuation_keeps_project_workspace_and_system_prompt() -> None:
     app_core = MagicMock()
     app_core.api = None
@@ -285,6 +328,56 @@ def test_cli_mcp_config_surface_server_is_absolute_regardless_of_cwd(
     assert Path(surface["args"][0]).is_absolute()
     assert surface["args"][0].endswith("surface_mcp_server.py")
     assert Path(surface["args"][0]).is_file()
+
+
+def test_cli_mcp_config_surface_server_carries_the_session_socket(
+    tmp_path: Path,
+) -> None:
+    """The CLI subprocess's own cwd is the workspace, not the Pack session
+    directory, so SurfaceControlClient.discover() can't find the right
+    socket by itself once more than one Pack tab is open on the same host
+    (confirmed live: 7 concurrent sessions, discover() returning None for
+    every one). The exact socket path must ride along as an env var.
+    """
+    socket_path = str(tmp_path / "surfaces" / "control.sock")
+    config_path = _build_claude_mcp_config_file(
+        str(tmp_path / "events.jsonl"),
+        "/workspace",
+        socket_path,
+    )
+    try:
+        config = json.loads(Path(config_path).read_text())
+    finally:
+        Path(config_path).unlink()
+
+    surface = config["mcpServers"]["alpaca-surface"]
+    assert surface["env"]["ALPACA_SURFACE_SOCKET"] == socket_path
+
+    overrides = _codex_mcp_overrides(
+        str(tmp_path / "events.jsonl"),
+        "/workspace",
+        socket_path,
+    )
+    assert any(
+        f"mcp_servers.alpaca-surface.env.ALPACA_SURFACE_SOCKET={json.dumps(socket_path)}"
+        in value
+        for value in overrides
+    )
+
+
+def test_cli_mcp_config_surface_server_has_no_env_without_a_socket(
+    tmp_path: Path,
+) -> None:
+    """No session socket to hand over (e.g. a non-Pack local tab) must not
+    fabricate an env block the real supervisor never asked for.
+    """
+    config_path = _build_claude_mcp_config_file(str(tmp_path / "events.jsonl"), None)
+    try:
+        config = json.loads(Path(config_path).read_text())
+    finally:
+        Path(config_path).unlink()
+
+    assert "env" not in config["mcpServers"]["alpaca-surface"]
 
 
 def test_cli_mcp_config_surface_server_overrides_a_raw_entry(

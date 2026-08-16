@@ -39,6 +39,7 @@ from core import pack_protocol
 from core.pack_files import PackFileStore
 from core.projects import prepare_workspace
 from core.projects import probe_workspace
+from core.surface_control import SOCKET_NAME
 from core.surface_supervisor import SURFACE_METHODS
 from core.tool_output_gate import read_gated_tool_output
 from video_tool_result import read_video_chunk
@@ -602,6 +603,17 @@ def main() -> None:
 
     core.start_autosave()
     adapter.set_tab(tab)
+
+    # A CLI-backed model's tool subprocess (claude/codex) runs with the
+    # *workspace* as its cwd, not this session directory, so
+    # SurfaceControlClient.discover()'s cwd-relative check misses it, and its
+    # last-resort "exactly one session on this host" fallback is ambiguous
+    # the moment a second Pack tab is open (confirmed live: 7 concurrent
+    # sessions on one host, discover() returning None for all of them).
+    # Handing the exact path forward via ALPACA_SURFACE_SOCKET (see
+    # anthropic_ollama_server._cli_mcp_servers) sidesteps discovery
+    # entirely for this session, regardless of how many others exist.
+    tab.surface_socket = str(session_dir / "surfaces" / SOCKET_NAME)
 
     supervisor = _start_surface_supervisor(session_dir)
 

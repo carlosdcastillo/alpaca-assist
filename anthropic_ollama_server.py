@@ -1002,6 +1002,9 @@ class OllamaRequestHandler(BaseHTTPRequestHandler):
                 working_directory = request_data.get("working_directory")
                 if not isinstance(working_directory, str):
                     working_directory = None
+                surface_socket = request_data.get("surface_socket")
+                if not isinstance(surface_socket, str):
+                    surface_socket = None
 
                 # Extract tool call token from headers for secure tag-based detection
                 tool_call_token = self.headers.get("X-Tool-Call-Token")
@@ -1040,6 +1043,7 @@ class OllamaRequestHandler(BaseHTTPRequestHandler):
                     request_system,
                     conversation_id,
                     working_directory,
+                    surface_socket,
                 )
             except json.JSONDecodeError:
                 self.send_error(400, "Invalid JSON")
@@ -1057,6 +1061,7 @@ class OllamaRequestHandler(BaseHTTPRequestHandler):
         request_system: str | None = None,
         conversation_id: int | str | None = None,
         working_directory: str | None = None,
+        surface_socket: str | None = None,
     ):
         """Handle requests with optional tools."""
         anthropic_tools = None
@@ -1087,6 +1092,7 @@ class OllamaRequestHandler(BaseHTTPRequestHandler):
             tool_choice=tool_choice,
             conversation_id=conversation_id,
             working_directory=working_directory,
+            surface_socket=surface_socket,
         )
         self._process_stream(stream, tool_call_token)
 
@@ -1166,6 +1172,7 @@ class ClaudeClient:
         tool_choice: dict | None = None,
         conversation_id: int | str | None = None,
         working_directory: str | None = None,
+        surface_socket: str | None = None,
     ) -> Generator[dict[str, Any], None, None]:
         """
         Send a streaming completion request to Claude 3.7 Sonnet
@@ -1302,6 +1309,7 @@ class FireworksClient:
         tool_choice: dict | None = None,
         conversation_id: int | str | None = None,
         working_directory: str | None = None,
+        surface_socket: str | None = None,
     ) -> Generator[dict[str, Any], None, None]:
         url = f"{self.base_url}/messages"
 
@@ -1400,6 +1408,7 @@ def _flatten_transcript(messages: list[dict[str, Any]]) -> str:
 def _cli_mcp_servers(
     media_event_path: str,
     working_directory: str | None,
+    surface_socket: str | None = None,
 ) -> dict[str, dict[str, Any]]:
     """Return configured MCP servers plus Alpaca's CLI media bridge."""
     servers: dict[str, dict[str, Any]] = {}
@@ -1440,16 +1449,26 @@ def _cli_mcp_servers(
     # a host with no display just gets "no display available" at call time.
     surface_script = os.path.join(os.path.dirname(__file__), "surface_mcp_server.py")
     if os.path.isfile(surface_script):
-        servers["alpaca-surface"] = {
+        surface_entry: dict[str, Any] = {
             "command": sys.executable,
             "args": [surface_script],
         }
+        # SurfaceControlClient.discover()'s cwd check misses this process
+        # (its cwd is the workspace, not the Pack session directory), and
+        # its "exactly one session on this host" fallback is ambiguous the
+        # moment a second Pack tab is open -- confirmed live, 7 concurrent
+        # sessions all returning no display available. Passing the exact
+        # socket forward sidesteps discovery entirely.
+        if surface_socket:
+            surface_entry["env"] = {"ALPACA_SURFACE_SOCKET": surface_socket}
+        servers["alpaca-surface"] = surface_entry
     return servers
 
 
 def _build_claude_mcp_config_file(
     media_event_path: str,
     working_directory: str | None,
+    surface_socket: str | None = None,
 ) -> str:
     """Translate alpaca-assist's mcp_servers.json into the schema `claude
     --mcp-config` actually expects.
@@ -1466,7 +1485,13 @@ def _build_claude_mcp_config_file(
     fd, path = tempfile.mkstemp(prefix="alpaca_claude_mcp_", suffix=".json")
     with os.fdopen(fd, "w", encoding="utf-8") as f:
         json.dump(
-            {"mcpServers": _cli_mcp_servers(media_event_path, working_directory)},
+            {
+                "mcpServers": _cli_mcp_servers(
+                    media_event_path,
+                    working_directory,
+                    surface_socket,
+                ),
+            },
             f,
         )
     return path
@@ -1475,6 +1500,7 @@ def _build_claude_mcp_config_file(
 def _codex_mcp_overrides(
     media_event_path: str,
     working_directory: str | None,
+    surface_socket: str | None = None,
 ) -> list[str]:
     """Build `-c mcp_servers.<name>...` overrides for `codex exec`.
 
@@ -1491,7 +1517,11 @@ def _codex_mcp_overrides(
     set is skipped rather than emitted broken.
     """
     overrides: list[str] = []
-    for name, spec in _cli_mcp_servers(media_event_path, working_directory).items():
+    for name, spec in _cli_mcp_servers(
+        media_event_path,
+        working_directory,
+        surface_socket,
+    ).items():
         if not re.fullmatch(r"[A-Za-z0-9_-]+", name):
             print(
                 f"[warn] Skipping MCP server {name!r} for codex: name isn't a valid TOML bare key",
@@ -1715,6 +1745,7 @@ class ClaudeCodeCLIClient:
         tool_choice: dict | None = None,
         conversation_id: int | str | None = None,
         working_directory: str | None = None,
+        surface_socket: str | None = None,
     ) -> Generator[dict[str, Any], None, None]:
         alias = model.split("/", 1)[1] if "/" in model else model
 
@@ -1752,6 +1783,7 @@ class ClaudeCodeCLIClient:
         mcp_config_path = _build_claude_mcp_config_file(
             media_event_path,
             working_directory,
+            surface_socket,
         )
         cmd += ["--strict-mcp-config", "--mcp-config", mcp_config_path]
 
@@ -1867,6 +1899,7 @@ class CodexCLIClient:
         tool_choice: dict | None = None,
         conversation_id: int | str | None = None,
         working_directory: str | None = None,
+        surface_socket: str | None = None,
     ) -> Generator[dict[str, Any], None, None]:
         alias = model.split("/", 1)[1] if "/" in model else model
         prompt, image_temp_dir, image_paths = _prepare_cli_images(messages)
@@ -1907,7 +1940,9 @@ class CodexCLIClient:
         ]
         for image_path in image_paths:
             cmd.extend(("--image", image_path))
-        cmd.extend(_codex_mcp_overrides(media_event_path, working_directory))
+        cmd.extend(
+            _codex_mcp_overrides(media_event_path, working_directory, surface_socket),
+        )
 
         yielded_start = False
         try:

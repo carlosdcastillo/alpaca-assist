@@ -218,6 +218,9 @@ class StreamingHandler:
             workspace_path = getattr(self._chat, "workspace_path", None)
             if workspace_path:
                 ollama_payload["working_directory"] = workspace_path
+            surface_socket = getattr(self._chat, "surface_socket", None)
+            if surface_socket:
+                ollama_payload["surface_socket"] = surface_socket
 
             # Make the continuation request
             api_url = self._chat.preferences.get(
@@ -327,6 +330,9 @@ class StreamingHandler:
             workspace_path = getattr(self._chat, "workspace_path", None)
             if workspace_path:
                 ollama_payload["working_directory"] = workspace_path
+            surface_socket = getattr(self._chat, "surface_socket", None)
+            if surface_socket:
+                ollama_payload["surface_socket"] = surface_socket
 
             # Make the streaming request
             api_url = self._chat.preferences.get(
