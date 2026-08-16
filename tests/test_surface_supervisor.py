@@ -147,6 +147,10 @@ def supervisor(
     # Readiness polling wants real X sockets and real listeners; covered
     # separately against _wait_for.
     monkeypatch.setattr(SurfaceSupervisor, "_wait_for", lambda *a, **k: None)
+    # Likewise for the first-paint wait -- it wants a real xdotool exit code
+    # and would otherwise burn APP_PAINT_TIMEOUT real seconds per test since
+    # fake_run's default response is an empty-stdout "no window yet".
+    monkeypatch.setattr(SurfaceSupervisor, "_wait_for_paint", lambda *a, **k: None)
 
     sup = SurfaceSupervisor(tmp_path)
     yield sup
@@ -529,6 +533,96 @@ class TestReadinessWait:
             match="(?s)timed out.*nothing useful happened",
         ):
             sup._wait_for(surface, "the display", lambda: False, timeout=0.3)
+
+
+class TestPaintWait:
+    """The `supervisor` fixture stubs `_wait_for_paint` out, so these build
+    their own un-stubbed instance to exercise the real polling loop.
+    """
+
+    def test_returns_as_soon_as_a_window_appears(
+        self,
+        tmp_path: Path,
+        fake_run: FakeRun,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setattr(
+            "core.surface_supervisor.shutil.which",
+            lambda name: f"/usr/bin/{name}",
+        )
+        sup = SurfaceSupervisor(tmp_path)
+        surface = make_surface(tmp_path)
+        app_proc = FakePopen(["xeyes"])
+        calls = {"n": 0}
+
+        def _run(argv: list[str], **kwargs: Any) -> subprocess.CompletedProcess:
+            calls["n"] += 1
+            stdout = b"" if calls["n"] < 2 else b"12582912\n"
+            return subprocess.CompletedProcess(
+                args=argv,
+                returncode=0,
+                stdout=stdout,
+                stderr=b"",
+            )
+
+        monkeypatch.setattr("core.surface_supervisor.subprocess.run", _run)
+
+        sup._wait_for_paint(surface, app_proc, timeout=2.0)
+
+        assert calls["n"] == 2
+
+    def test_gives_up_without_raising_when_nothing_ever_paints(
+        self,
+        tmp_path: Path,
+        fake_run: FakeRun,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setattr(
+            "core.surface_supervisor.shutil.which",
+            lambda name: f"/usr/bin/{name}",
+        )
+        sup = SurfaceSupervisor(tmp_path)
+        surface = make_surface(tmp_path)
+        app_proc = FakePopen(["xeyes"])
+
+        sup._wait_for_paint(surface, app_proc, timeout=0.3)  # does not raise
+
+    def test_bails_early_once_the_app_exits(
+        self,
+        tmp_path: Path,
+        fake_run: FakeRun,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setattr(
+            "core.surface_supervisor.shutil.which",
+            lambda name: f"/usr/bin/{name}",
+        )
+        sup = SurfaceSupervisor(tmp_path)
+        surface = make_surface(tmp_path)
+        app_proc = FakePopen(["xeyes"])
+        app_proc.exit(1)
+
+        started = time.monotonic()
+        sup._wait_for_paint(surface, app_proc, timeout=30.0)
+
+        assert time.monotonic() - started < 5.0
+
+    def test_skips_the_poll_when_xdotool_is_unavailable(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setattr("core.surface_supervisor.shutil.which", lambda name: None)
+
+        def _boom(argv: list[str], **kwargs: Any) -> subprocess.CompletedProcess:
+            raise AssertionError("should not run xdotool when it's unavailable")
+
+        monkeypatch.setattr("core.surface_supervisor.subprocess.run", _boom)
+        sup = SurfaceSupervisor(tmp_path)
+        surface = make_surface(tmp_path)
+        app_proc = FakePopen(["xeyes"])
+
+        sup._wait_for_paint(surface, app_proc, timeout=2.0)  # does not raise/call
 
 
 class TestLease:

@@ -71,6 +71,7 @@ VNC_PASSWORD_BYTES = 8
 
 STARTUP_TIMEOUT = 15.0
 TERMINATE_GRACE = 3.0
+APP_PAINT_TIMEOUT = 5.0
 MAX_SNAPSHOT_BYTES = 8 * 1024 * 1024
 SNAPSHOT_TIMEOUT = 20.0
 INPUT_TIMEOUT = 10.0
@@ -658,7 +659,43 @@ class SurfaceSupervisor:
 
         env = dict(os.environ)
         env["DISPLAY"] = display_arg
-        self._spawn(surface, "app", argv, env=env)
+        app_proc = self._spawn(surface, "app", argv, env=env)
+        self._wait_for_paint(surface, app_proc)
+
+    def _wait_for_paint(
+        self,
+        surface: Surface,
+        app_proc: Any,
+        timeout: float = APP_PAINT_TIMEOUT,
+    ) -> None:
+        """Give the app a moment to map a window before open_surface returns.
+
+        Xvfb and x11vnc being up doesn't mean the app has drawn anything yet
+        -- a snapshot taken the instant open_surface returns can catch a
+        still-blank display. This is deliberately best-effort: it never
+        raises, since a profile can legitimately be slow, or windowless
+        until the user interacts with it. It just gives the common case
+        (an app that paints promptly) time to settle first.
+        """
+        if not shutil.which("xdotool"):
+            return
+        env = dict(os.environ)
+        env["DISPLAY"] = f":{surface.display}"
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            if app_proc.poll() is not None:
+                return  # app already exited -- no window is coming
+            result = subprocess.run(
+                ["xdotool", "search", "--onlyvisible", ""],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL,
+                env=env,
+                timeout=2,
+                check=False,
+            )
+            if result.returncode == 0 and result.stdout.strip():
+                return
+            time.sleep(0.1)
 
     def _store_password(self, surface: Surface, password_file: Path) -> None:
         """Write the obfuscated VNC password file at 0600.
