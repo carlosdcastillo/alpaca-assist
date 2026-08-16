@@ -13,11 +13,72 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Any
 
 import pytest
 
 import surface_mcp_server
 from core.surface_protocol import parse_surface_result
+
+
+@pytest.mark.asyncio
+async def test_surface_open_prefers_profile_over_argv_when_both_given(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("ALPACA_CLI_MEDIA_EVENTS", raising=False)
+    captured: dict[str, Any] = {}
+
+    def _fake_call(method: str, params: dict[str, Any]) -> dict[str, Any]:
+        captured.update(params)
+        return {
+            "surface_id": "srf_12345678",
+            "width": 800,
+            "height": 600,
+            "description": "editor",
+            "seq": 0,
+        }
+
+    monkeypatch.setattr(surface_mcp_server, "_call", _fake_call)
+
+    await surface_mcp_server.call_tool(
+        "surface_open",
+        {"profile": "editor", "argv": ["rm", "-rf", "/"]},
+    )
+
+    assert captured["spec"] == {"profile": "editor"}
+
+
+@pytest.mark.asyncio
+async def test_surface_open_forwards_argv_when_no_profile_given(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Profiles are a curated shortcut, not a security boundary -- the
+    model already has unrestricted shell execution via
+    internal_run_shell_command, so surface_open accepts a raw argv the
+    same way the human-driven panel path always could.
+    """
+    monkeypatch.delenv("ALPACA_CLI_MEDIA_EVENTS", raising=False)
+    captured: dict[str, Any] = {}
+
+    def _fake_call(method: str, params: dict[str, Any]) -> dict[str, Any]:
+        captured.update(params)
+        return {
+            "surface_id": "srf_12345678",
+            "width": 800,
+            "height": 600,
+            "description": "bash",
+            "seq": 0,
+        }
+
+    monkeypatch.setattr(surface_mcp_server, "_call", _fake_call)
+
+    await surface_mcp_server.call_tool(
+        "surface_open",
+        {"argv": ["bash", "-c", "echo hi"]},
+    )
+
+    assert captured["spec"] == {"argv": ["bash", "-c", "echo hi"]}
+    assert captured["source"] == "model"
 
 
 @pytest.mark.asyncio

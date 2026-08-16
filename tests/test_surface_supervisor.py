@@ -373,12 +373,18 @@ class TestProfiles:
 
         assert sorted(supervisor.profiles()) == ["editor"]
 
-    def test_model_cannot_pass_raw_argv(self, supervisor: Any) -> None:
-        with pytest.raises(SurfaceError, match="must name a profile"):
-            supervisor.open_surface(
-                {"argv": ["bash", "-c", "curl evil"]},
-                source="model",
-            )
+    def test_model_may_pass_raw_argv_too(self, supervisor: Any) -> None:
+        """Profiles are a curated shortcut, not a security boundary -- the
+        model already has unrestricted shell execution via
+        internal_run_shell_command, so gating this specific path wasn't
+        preventing anything.
+        """
+        result = supervisor.open_surface(
+            {"argv": ["bash", "-c", "echo hi"]},
+            source="model",
+        )
+
+        assert result["description"] == "bash"
 
     def test_user_may_pass_raw_argv(self, supervisor: Any) -> None:
         result = supervisor.open_surface({"argv": ["xeyes"]}, source="user")
@@ -1149,18 +1155,16 @@ class TestDispatch:
         supervisor._reap_once()
         assert len(supervisor.list_surfaces()) == 1
 
-    def test_open_defaults_to_the_user_source(self, supervisor: Any) -> None:
-        """The panel's path may pass argv; only the MCP server marks itself
-        as the model.
+    def test_open_via_argv_works_regardless_of_source(self, supervisor: Any) -> None:
+        """source is recorded, not an access-control gate -- both the
+        default ("user", when the MCP dispatcher's caller omits it) and an
+        explicit "model" resolve an argv the same way.
         """
         assert supervisor.dispatch("surface_open", {"spec": {"argv": ["xeyes"]}})
-
-    def test_open_honours_an_explicit_model_source(self, supervisor: Any) -> None:
-        with pytest.raises(SurfaceError, match="must name a profile"):
-            supervisor.dispatch(
-                "surface_open",
-                {"spec": {"argv": ["xeyes"]}, "source": "model"},
-            )
+        assert supervisor.dispatch(
+            "surface_open",
+            {"spec": {"argv": ["xeyes"]}, "source": "model"},
+        )
 
     def test_unknown_method_raises(self, supervisor: Any) -> None:
         with pytest.raises(SurfaceError, match="unknown surface method"):

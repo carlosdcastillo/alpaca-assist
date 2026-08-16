@@ -11,10 +11,13 @@ socket in that same directory (core/surface_control.py).
 On a local (Windows) tab there is no supervisor and no display, so every tool
 here reports that plainly instead of failing to start.
 
-The model may only open surfaces by *profile name*. Passing an argv would
-turn "open an app for me" into general-purpose remote execution spelled
-differently; the human-driven path from the panel is separately allowed to
-pass a command, because that human already has ssh access to the host.
+surface_open takes a named profile or a raw argv, same as the human-driven
+panel path. Profiles are a curated shortcut, not a security boundary: the
+model already has unrestricted shell execution on this host via
+internal_run_shell_command, and xterm is itself a permitted profile, so
+refusing a model-supplied argv here would not have prevented anything --
+it would only have made this path more annoying than the other two ways
+to the same result.
 """
 from __future__ import annotations
 
@@ -96,9 +99,10 @@ async def list_tools() -> list[Tool]:
         Tool(
             name="surface_open",
             description=(
-                "Start a named application on a fresh headless display and show "
-                "it to the user as a live, interactive panel. Returns a surface "
-                "id. Call surface_list first to see which profiles exist."
+                "Start an application on a fresh headless display and show it "
+                "to the user as a live, interactive panel. Returns a surface "
+                "id. Prefer a named profile when one fits (call surface_list "
+                "to see which exist); pass argv directly for anything else."
             ),
             inputSchema={
                 "type": "object",
@@ -107,10 +111,17 @@ async def list_tools() -> list[Tool]:
                         "type": "string",
                         "description": "Name of a configured app profile",
                     },
+                    "argv": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": (
+                            "Command and arguments to launch directly, when no "
+                            "profile fits. Give either profile or argv, not both."
+                        ),
+                    },
                     "width": {"type": "integer", "default": 1280},
                     "height": {"type": "integer", "default": 800},
                 },
-                "required": ["profile"],
             },
         ),
         Tool(
@@ -261,14 +272,17 @@ async def _dispatch(
 ) -> list[TextContent | ImageContent]:
     try:
         if name == "surface_open":
+            spec: dict[str, Any] = (
+                {"profile": arguments["profile"]}
+                if arguments.get("profile")
+                else {"argv": arguments.get("argv")}
+            )
             result = _call(
                 "surface_open",
                 {
-                    "spec": {"profile": arguments["profile"]},
+                    "spec": spec,
                     "width": arguments.get("width", 1280),
                     "height": arguments.get("height", 800),
-                    # Never "user": this is what confines the model to
-                    # profiles. See the module docstring.
                     "source": "model",
                 },
             )
