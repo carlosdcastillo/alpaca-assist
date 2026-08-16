@@ -101,8 +101,13 @@ async def list_tools() -> list[Tool]:
             description=(
                 "Start an application on a fresh headless display and show it "
                 "to the user as a live, interactive panel. Returns a surface "
-                "id. Give either a named profile or argv directly; an unknown "
-                "profile name is refused with the list of what's configured."
+                "id. Prefer a named profile when one exists for the app you "
+                "want: profiles often carry fixes this host specifically "
+                "needs (e.g. forcing software rendering, or avoiding an app's "
+                "own single-instance behavior stealing the window onto the "
+                "real desktop instead of this surface) that a plain argv "
+                "won't have. An unknown profile name is refused with the "
+                "list of what's actually configured."
             ),
             inputSchema={
                 "type": "object",

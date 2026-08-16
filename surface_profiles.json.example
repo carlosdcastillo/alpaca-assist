@@ -39,6 +39,16 @@
     ],
     "description": "Ghostty, software-rendered and isolated — without --gtk-single-instance=false, ghostty's GApplication single-instance behavior (D-Bus/session-scoped, not DISPLAY-scoped) silently hands the window to an already-running ghostty on the real desktop instead of opening one here"
   },
+  "chromium": {
+    "argv": [
+      "chromium",
+      "--no-sandbox",
+      "--disable-gpu",
+      "--disable-dev-shm-usage",
+      "--ozone-platform=x11"
+    ],
+    "description": "Chromium — needs --ozone-platform=x11 on a Wayland host (Chromium's Ozone backend otherwise tries to connect to a Wayland compositor that doesn't exist inside this Xvfb) and --disable-gpu since there's no GPU/DRI here; --no-sandbox is needed to run as this unprivileged user"
+  },
   "alpaca": {
     "argv": [
       "/home/Carlos/pywebview_demo/.venv-sys/bin/python3",
