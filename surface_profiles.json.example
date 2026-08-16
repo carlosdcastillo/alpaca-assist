@@ -19,7 +19,13 @@
     "description": "xeyes — smoke test that the display works at all"
   },
   "xterm": {
-    "argv": ["xterm", "-fa", "Monospace", "-fs", "12"],
+    "argv": [
+      "xterm",
+      "-fa", "Monospace",
+      "-fs", "12",
+      "-bg", "black",
+      "-fg", "white"
+    ],
     "description": "xterm on the Pack host"
   },
   "alpaca": {
