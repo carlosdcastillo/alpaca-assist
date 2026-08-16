@@ -22,6 +22,19 @@ from core.surface_protocol import parse_surface_result
 
 
 @pytest.mark.asyncio
+async def test_surface_list_is_not_offered_to_the_model() -> None:
+    """Dropped once surface_open could take argv directly: the tool
+    description no longer needs to send the model to check the profile
+    catalog first, and an unknown profile name already comes back with the
+    available list from surface_open's own error, so nothing else needed
+    a standalone lookup call.
+    """
+    tools = await surface_mcp_server.list_tools()
+
+    assert "surface_list" not in {tool.name for tool in tools}
+
+
+@pytest.mark.asyncio
 async def test_surface_open_prefers_profile_over_argv_when_both_given(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

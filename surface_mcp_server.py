@@ -101,8 +101,8 @@ async def list_tools() -> list[Tool]:
             description=(
                 "Start an application on a fresh headless display and show it "
                 "to the user as a live, interactive panel. Returns a surface "
-                "id. Prefer a named profile when one fits (call surface_list "
-                "to see which exist); pass argv directly for anything else."
+                "id. Give either a named profile or argv directly; an unknown "
+                "profile name is refused with the list of what's configured."
             ),
             inputSchema={
                 "type": "object",
@@ -123,14 +123,6 @@ async def list_tools() -> list[Tool]:
                     "height": {"type": "integer", "default": 800},
                 },
             },
-        ),
-        Tool(
-            name="surface_list",
-            description=(
-                "List the surfaces currently running and the app profiles "
-                "available to open."
-            ),
-            inputSchema={"type": "object", "properties": {}},
         ),
         Tool(
             name="surface_snapshot",
@@ -300,10 +292,6 @@ async def _dispatch(
                 + f"\nSurface {result['surface_id']} is live at seq {result['seq']}. "
                 "The user can see and drive it now.",
             )
-
-        if name == "surface_list":
-            result = _call("surface_list", {})
-            return _text(json.dumps(result, indent=2))
 
         if name == "surface_snapshot":
             result = _call("surface_snapshot", {"surface_id": arguments["surface_id"]})
