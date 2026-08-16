@@ -33,6 +33,22 @@ import image_tool_result
 import video_tool_result
 from core.config import MCP_SERVERS_FILE
 
+# This file prints emoji/non-ASCII text throughout (status markers like
+# "🔧"/"⚠️"). On Windows, a console attached with a non-UTF-8 codepage
+# (cp1252 is the common default) makes those prints raise
+# UnicodeEncodeError -- confirmed to crash request handling entirely: a
+# bare `print()` inside do_POST's request path raises there, propagates
+# up as a 500, and depending on exactly where it happens can leave a
+# streaming response's connection open with no further bytes ever sent,
+# which then surfaces client-side as a read timeout rather than a clean
+# error. Reconfiguring here fixes every print call in this module at
+# once rather than hardening each call site individually.
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(encoding="utf-8", errors="replace")
+    except (AttributeError, ValueError):
+        pass
+
 SYSTEM_PROMPT = """
 You are a highly skilled software engineer with extensive knowledge in many programming languages, frameworks, design patterns, and best practices. You are also an eloquent and professional writer who communicates clearly and effectively.
 
