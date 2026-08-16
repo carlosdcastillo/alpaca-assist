@@ -28,6 +28,17 @@
     ],
     "description": "xterm on the Pack host"
   },
+  "alacritty": {
+    "argv": ["env", "LIBGL_ALWAYS_SOFTWARE=1", "alacritty"],
+    "description": "Alacritty, software-rendered — this Xvfb has no GPU/DRI, and alacritty's OpenGL renderer has no fallback of its own without this"
+  },
+  "ghostty": {
+    "argv": [
+      "env", "LIBGL_ALWAYS_SOFTWARE=1",
+      "ghostty", "--gtk-single-instance=false"
+    ],
+    "description": "Ghostty, software-rendered and isolated — without --gtk-single-instance=false, ghostty's GApplication single-instance behavior (D-Bus/session-scoped, not DISPLAY-scoped) silently hands the window to an already-running ghostty on the real desktop instead of opening one here"
+  },
   "alpaca": {
     "argv": [
       "/home/Carlos/pywebview_demo/.venv-sys/bin/python3",
