@@ -23,6 +23,7 @@ from typing import TYPE_CHECKING
 
 from chat_state import ChatState
 from conversation_graph import ConversationGraph
+from core.timing import TurnTiming
 from core.tool_output_gate import cleanup_tab_output_dir
 from tool_call_detector import ToolCallDetector
 
@@ -63,6 +64,12 @@ class ChatTabBase:
         # Initialize tool detector (used by StreamProcessor)
         self.tool_detector: ToolCallDetector = ToolCallDetector()
 
+        # Wall/LLM/tool timing for the turn currently in flight.  Created by
+        # StreamingHandler.start, fed by StreamProcessor and ToolHandler from
+        # their own threads, and finalised onto the assistant node when the
+        # whole tool loop completes.  None between turns.
+        self.current_turn_timing: TurnTiming | None = None
+
         # Token usage metrics (populated by StreamProcessor from done chunks)
         self.last_invocation_metrics: dict[str, Any] | None = None
         self.session_output_tokens: int = 0
@@ -87,6 +94,29 @@ class ChatTabBase:
         # One-shot callback fired by on_streaming_complete (e.g. handoff post-processing).
         # Cleared after firing so it only runs once.
         self._on_streaming_complete_callback: Callable[[], None] | None = None
+
+    def finalize_turn_timing(self, answer_index: int) -> None:
+        """Close the in-flight turn's timing and persist it onto the answer.
+
+        Called from every path that ends a turn — clean completion, user stop,
+        and stream error — so a turn that ended badly still records how long it
+        ran.  TurnTiming.finish is idempotent, so the first caller sets the
+        duration and any later one is a no-op.
+        """
+        timing = self.current_turn_timing
+        if timing is None:
+            return
+        timing.finish()
+        record = timing.to_dict()
+        try:
+            self.chat_state.set_turn_timing(answer_index, record)
+        except Exception as e:  # pragma: no cover - never break a turn over stats
+            logger.warning(f"[TIMING] Could not persist turn timing: {e}")
+        self.current_turn_timing = None
+
+        api = self._app_core.api
+        if api is not None:
+            api.on_turn_timing(self.tab_id, answer_index, record)
 
     def cleanup_resources(self) -> None:
         """Clean up resources when tab is closed."""

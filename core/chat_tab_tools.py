@@ -17,6 +17,7 @@ from __future__ import annotations
 import json
 import logging
 import threading
+import time
 import uuid
 from collections.abc import Callable
 from typing import Any
@@ -24,6 +25,7 @@ from typing import TYPE_CHECKING
 
 import image_tool_result
 import utils
+from core import timing
 from core.tool_output_gate import gate_tool_call_arguments
 from core.tool_output_gate import gate_tool_output
 
@@ -143,6 +145,13 @@ class ToolHandler:
         that re-sends the now-complete answer — whose own stream then
         finishes and fires another, looping forever until the user hits
         stop.
+
+        Draining to zero *without* firing is also the one moment that means
+        "the whole turn is over", so the turn's timing is closed here. The
+        obvious-looking hook, on_streaming_complete, is per-invocation — it
+        runs once for the initial call and once more for every continuation —
+        so closing there would stop the clock at the end of the first LLM
+        call and drop every tool and continuation that followed.
         """
         with self._pending_lock:
             self._pending_count -= 1
@@ -154,8 +163,15 @@ class ToolHandler:
             )
             if fire:
                 self._has_tool_calls = False
-        if fire and not self._chat.stop_streaming_flag.is_set():
+        continuing = fire and not self._chat.stop_streaming_flag.is_set()
+        if continuing:
             self._continue(answer_index)
+        elif remaining == 0:
+            # Nothing outstanding and nothing to continue into: the turn is
+            # over, whether it ended cleanly or was stopped. StreamingHandler
+            # .stop also finalises, and whichever gets there first wins —
+            # finalize_turn_timing drops the timing object once it has run.
+            self._chat.finalize_turn_timing(answer_index)
 
     def handle_tool_call(
         self,
@@ -223,6 +239,7 @@ class ToolHandler:
                 answer_index,
                 gated_tool_json,
                 tc_store_id,
+                started_at=time.time(),
             )
             logger.debug(f"[TOOL] Tool call persisted with id={tc_store_id}")
 
@@ -278,6 +295,14 @@ class ToolHandler:
         result: Any = None
         callback_event = threading.Event()
 
+        # Tool duration is measured around dispatch only.  It deliberately
+        # stops before _inject_result_fold and its wait_for_fold_rendered
+        # block below — that wait is UI sync (and up to 2s of pure timeout
+        # when the user has switched tabs), not work the tool did.
+        exec_started_at = time.time()
+        exec_mono = time.monotonic()
+        duration_ms = 0
+
         def callback(res: Any) -> None:
             nonlocal result
             result = res
@@ -307,8 +332,10 @@ class ToolHandler:
                 logger.warning(f"[TOOL] Tool execution timed out: {tool_id}")
                 result = None
 
+            duration_ms = int((time.monotonic() - exec_mono) * 1000)
             logger.debug(
-                f"[TOOL] Execution completed, result is None: {result is None}",
+                f"[TOOL] Execution completed in {duration_ms}ms, "
+                f"result is None: {result is None}",
             )
 
             if result:
@@ -336,6 +363,8 @@ class ToolHandler:
                     answer_index,
                     result_str,
                     tool_id,
+                    started_at=exec_started_at,
+                    duration_ms=duration_ms,
                 )
                 logger.debug(f"[TOOL] Result persisted with id={tool_id}")
 
@@ -354,7 +383,12 @@ class ToolHandler:
 
                 # Inject result fold
                 fold_id = f"fold-result-{answer_index}-{tool_id}"
-                self._inject_result_fold(answer_index, display_text, fold_id)
+                self._inject_result_fold(
+                    answer_index,
+                    display_text,
+                    fold_id,
+                    duration_ms,
+                )
 
                 # Wait for JavaScript to confirm fold rendering
                 logger.debug(f"[TOOL] Waiting for fold {fold_id}...")
@@ -380,12 +414,20 @@ class ToolHandler:
                     answer_index,
                     error_msg,
                     tool_id,
+                    started_at=exec_started_at,
+                    duration_ms=duration_ms,
                 )
                 fold_id = f"fold-result-{answer_index}-{tool_id}"
-                self._inject_result_fold(answer_index, error_msg, fold_id)
+                self._inject_result_fold(
+                    answer_index,
+                    error_msg,
+                    fold_id,
+                    duration_ms,
+                )
 
         except Exception as e:
             logger.error(f"[TOOL] Error executing tool: {e}")
+            duration_ms = int((time.monotonic() - exec_mono) * 1000)
             error_msg = (
                 f"Tool **{tool_name}** (server: {server_name}) " f"raised an error: {e}"
             )
@@ -393,11 +435,19 @@ class ToolHandler:
                 answer_index,
                 error_msg,
                 tool_id,
+                started_at=exec_started_at,
+                duration_ms=duration_ms,
             )
             fold_id = f"fold-result-{answer_index}-{tool_id}"
-            self._inject_result_fold(answer_index, error_msg, fold_id)
+            self._inject_result_fold(answer_index, error_msg, fold_id, duration_ms)
         finally:
-            logger.debug(f"[TOOL] Execution finished for {tool_id}")
+            logger.debug(f"[TOOL] Execution finished for {tool_id} in {duration_ms}ms")
+            # Attribute the execution to the turn from the finally block so a
+            # timeout or a raised tool still counts toward the turn's tool_ms —
+            # time spent waiting on a tool that failed is time the user waited.
+            turn_timing = self._chat.current_turn_timing
+            if turn_timing is not None:
+                turn_timing.add_tool(duration_ms)
             self._release_pending_unit(answer_index)
 
     def _format_result(self, result: Any) -> str:
@@ -448,6 +498,7 @@ class ToolHandler:
         answer_index: int,
         body_text: str,
         fold_id: str | None = None,
+        duration_ms: int | None = None,
     ) -> None:
         """Inject a tool result fold widget.
 
@@ -455,6 +506,7 @@ class ToolHandler:
             answer_index: Index of the answer.
             body_text: Formatted result text for the fold body.
             fold_id: Optional fold ID (auto-generated if not provided).
+            duration_ms: How long the tool ran, shown in the fold header.
         """
         if fold_id is None:
             fold_id = f"fold-result-{answer_index}-{threading.current_thread().ident}"
@@ -467,6 +519,7 @@ class ToolHandler:
                 "result",
                 body_text,
                 answer_index,
+                duration_ms=duration_ms,
             )
 
     def inject_call_fold(
@@ -624,6 +677,15 @@ class ToolHandler:
                 last_cleared_id = tc.id
                 break
 
+        # Per-turn wall-clock, used to prefix user messages that follow a real
+        # pause.  Both live on the conversation model; a conversation saved
+        # before timing existed yields empty lists and simply gets no markers.
+        _qt = getattr(self._chat.chat_state, "question_times", None)
+        question_times: list[Any] = list(_qt) if isinstance(_qt, list) else []
+        _tt = getattr(self._chat.chat_state, "turn_timings", None)
+        turn_timings: list[Any] = list(_tt) if isinstance(_tt, list) else []
+        previous_turn_end: float | None = None
+
         # Second pass: build the actual message list in chronological order,
         # using the global full/stub membership computed above instead of a
         # per-turn boundary.
@@ -635,7 +697,12 @@ class ToolHandler:
             if not q.strip():
                 continue
 
-            user_msg: dict[str, Any] = {"role": "user", "content": q}
+            marker = timing.history_time_marker(
+                question_times[i] if i < len(question_times) else None,
+                previous_turn_end,
+                is_first=not messages,
+            )
+            user_msg: dict[str, Any] = {"role": "user", "content": marker + q}
             imgs = all_images[i] if i < len(all_images) else []
             if imgs:
                 user_msg["images"] = imgs
@@ -699,6 +766,16 @@ class ToolHandler:
             # Mark end of last complete historical turn as cache breakpoint
             if i == answer_index - 1 and messages:
                 messages[-1] = {**messages[-1], "cache_control": True}
+
+            # The gap the next question is measured against is when this turn
+            # stopped producing output — not when it was asked. Using the
+            # question time would fold the model's own working time into what
+            # reads as the user's thinking time.
+            turn = turn_timings[i] if i < len(turn_timings) else None
+            completed = turn.get("completed_at") if isinstance(turn, dict) else None
+            previous_turn_end = completed or timing.iso_to_epoch(
+                question_times[i] if i < len(question_times) else None,
+            )
 
         return messages
 

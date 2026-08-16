@@ -1603,6 +1603,24 @@ class WebViewAPI:
             f"app.onStreamingEnd({json.dumps(tab_id)}, {answer_index});",
         )
 
+    def on_turn_timing(
+        self,
+        tab_id: str,
+        answer_index: int,
+        timing: dict[str, Any],
+    ) -> None:
+        """Push a finished turn's timing to the web UI.
+
+        This is a separate signal from on_streaming_end on purpose: that one
+        fires once per LLM invocation, so a turn with four tool calls emits it
+        five times. This fires exactly once, when the whole tool loop is done,
+        and is what stops the live turn stopwatch.
+        """
+        self._safe_evaluate_js(
+            f"app.onTurnTiming({json.dumps(tab_id)}, {answer_index}, "
+            f"{json.dumps(timing)});",
+        )
+
     def on_error(self, tab_id: str, message: str, details: str = "") -> None:
         """Push error notification to web UI."""
         payload = {
@@ -1629,6 +1647,7 @@ class WebViewAPI:
         fold_type: str,
         body_text: str,
         answer_index: int,
+        duration_ms: int | None = None,
     ) -> None:
         """Inject a tool fold widget into the web UI and wait for confirmation."""
         # Create an event to track when the fold is rendered
@@ -1641,6 +1660,7 @@ class WebViewAPI:
             "type": fold_type,  # 'call' or 'result'
             "body": body_text,
             "answer_index": answer_index,
+            "duration_ms": duration_ms,
         }
         self._safe_evaluate_js(
             f"app.injectToolFold({json.dumps(tab_id)}, {json.dumps(payload)});",

@@ -87,9 +87,13 @@ class MessageNode:
     edge_type: str = EdgeType.CONTINUATION
     model_id: str | None = None
     images: list[str] = field(default_factory=list)
+    # Set on assistant nodes only, once the turn's whole tool loop finishes.
+    # See core.timing.TurnTiming for the shape.  User nodes carry their own
+    # moment in created_at and need nothing further.
+    timing: dict[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        data: dict[str, Any] = {
             "id": self.id,
             "parent_id": self.parent_id,
             "role": self.role,
@@ -99,6 +103,11 @@ class MessageNode:
             "model_id": self.model_id,
             "images": list(self.images),
         }
+        # Omitted rather than null so nodes from before timing existed, and
+        # user nodes which never carry it, serialise unchanged.
+        if self.timing is not None:
+            data["timing"] = dict(self.timing)
+        return data
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "MessageNode":
@@ -118,6 +127,7 @@ class MessageNode:
             edge_type=data.get("edge_type", EdgeType.CONTINUATION),
             model_id=data.get("model_id"),
             images=list(data.get("images", [])),
+            timing=data.get("timing"),
         )
 
 
@@ -321,12 +331,13 @@ class ConversationGraph:
         answer_index: int,
         content: str,
         tool_id: str,
+        started_at: float | None = None,
     ) -> bool:
         pairs = self._get_active_pairs()
         if 0 <= answer_index < len(pairs):
             _, asst = pairs[answer_index]
             if asst is not None:
-                asst.content.add_tool_call(content, tool_id)
+                asst.content.add_tool_call(content, tool_id, started_at)
                 return True
         return False
 
@@ -335,14 +346,58 @@ class ConversationGraph:
         answer_index: int,
         content: str,
         tool_id: str,
+        started_at: float | None = None,
+        duration_ms: int | None = None,
     ) -> bool:
         pairs = self._get_active_pairs()
         if 0 <= answer_index < len(pairs):
             _, asst = pairs[answer_index]
             if asst is not None:
-                asst.content.add_tool_result(content, tool_id)
+                asst.content.add_tool_result(
+                    content,
+                    tool_id,
+                    started_at,
+                    duration_ms,
+                )
                 return True
         return False
+
+    # ------------------------------------------------------------------
+    # Turn timing
+    # ------------------------------------------------------------------
+
+    def set_turn_timing(self, answer_index: int, timing: dict[str, Any]) -> bool:
+        """Attach a finished turn's timing record to its assistant node."""
+        with self._lock:
+            pairs = self._get_active_pairs()
+            if 0 <= answer_index < len(pairs):
+                _, asst = pairs[answer_index]
+                if asst is not None:
+                    asst.timing = dict(timing)
+                    return True
+        return False
+
+    def get_turn_timing(self, answer_index: int) -> dict[str, Any] | None:
+        """Return the stored timing record for an answer, if any."""
+        pairs = self._get_active_pairs()
+        if 0 <= answer_index < len(pairs):
+            _, asst = pairs[answer_index]
+            if asst is not None:
+                return asst.timing
+        return None
+
+    @property
+    def question_times(self) -> list[str | None]:
+        """Active-path user message timestamps, ISO local time."""
+        return [pair[0].created_at for pair in self._get_active_pairs()]
+
+    @property
+    def turn_timings(self) -> list[dict[str, Any] | None]:
+        """Active-path turn timing records, parallel to answers."""
+        return [
+            pair[1].timing if pair[1] is not None else None
+            for pair in self._get_active_pairs()
+        ]
 
     def finish_streaming(self) -> None:
         self.current_streaming_node_id = None

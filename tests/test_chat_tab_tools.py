@@ -706,7 +706,7 @@ class TestToolHandlerInjectResultFold:
         callback = Mock()
         handler = ToolHandler(mock_chat, callback)
 
-        handler._inject_result_fold(0, "result text", "fold-123")
+        handler._inject_result_fold(0, "result text", "fold-123", 1234)
 
         mock_api.inject_tool_fold.assert_called_once_with(
             "test-tab",
@@ -714,6 +714,7 @@ class TestToolHandlerInjectResultFold:
             "result",
             "result text",
             0,
+            duration_ms=1234,
         )
 
     def test_inject_result_fold_no_api_does_not_raise(self) -> None:

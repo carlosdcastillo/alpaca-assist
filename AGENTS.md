@@ -163,6 +163,45 @@ JS calls `on_fold_rendered` from inside `_appendFold` — but only if `tabId ===
 
 ---
 
+## Turn Timing Closes on Tool-Loop Drain, Not on `on_streaming_complete`
+
+A "turn" is the user's message through the last token of the answer, across
+however many LLM invocations the tool loop needed. `TurnTiming` (see
+`core/timing.py`) is created once in `StreamingHandler.start` and must be
+closed once, at the real end of the turn.
+
+`on_streaming_complete` looks like that signal and is not. It fires once per
+**invocation** — `_fetch_response` calls it for the initial request and
+`continue_streaming` calls it again for every continuation. Closing there
+stops the clock at the end of the first LLM call, which for a tool-loop turn
+silently records a fraction of the truth:
+
+```
+# a 28s turn, timing closed from on_streaming_complete
+wall_ms: 13529, llm_ms: 13520, tool_ms: 0, invocations: 1, tool_count: 0
+# the same turn, closed on tool-loop drain
+wall_ms: 28156, llm_ms: 19051, tool_ms: 9008, invocations: 3, tool_count: 2
+```
+
+The tool time is lost entirely, because the tool threads call `add_tool`
+*after* the first stream ended and `current_turn_timing` is already None.
+
+The correct signal is `ToolHandler._release_pending_unit` reaching
+`remaining == 0` without firing a continuation. `mark_stream_active` /
+`mark_stream_finished` bracket every stream and each tool execution holds its
+own slot, so that condition means "nothing outstanding and nothing to continue
+into" — the one moment the turn is genuinely over. `StreamingHandler.stop` and
+`on_streaming_error` also finalise; `finalize_turn_timing` drops the timing
+object once it has run, so whichever path arrives first wins.
+
+The same trap exists on the JS side: `onStreamingEnd` is per-invocation, so
+the live stopwatch is stopped by `onTurnTiming` instead. `startAnswerTimer`
+refuses to restart for an answer that already has a final timing — the
+stopwatch has no stop signal of its own, so one restarted after the turn ended
+counts up until the tab is switched away.
+
+---
+
 ## Live App Surfaces (Pack tabs only)
 
 A `<surface-panel>` shows a live, interactive remote GUI app (Xvfb + x11vnc, tunnelled over SSH, rendered with noVNC). This section is the load-bearing rules a change here can silently violate.

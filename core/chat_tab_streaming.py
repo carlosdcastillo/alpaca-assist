@@ -25,6 +25,7 @@ from typing import TYPE_CHECKING
 import requests
 
 import utils
+from core.timing import TurnTiming
 
 if TYPE_CHECKING:
     from core.chat_tab_base import ChatTabBase
@@ -107,6 +108,11 @@ class StreamingHandler:
         self._chat._streaming = True
         self._chat.is_streaming = True
 
+        # Begin timing the turn here rather than at the HTTP request, so the
+        # measured wall time includes payload assembly and thread start — the
+        # user's wait begins at send, not at socket open.
+        self._chat.current_turn_timing = TurnTiming.start()
+
         # Clear stop flag
         self._chat.stop_streaming_flag.clear()
 
@@ -180,6 +186,11 @@ class StreamingHandler:
 
         # Finish streaming in chat state
         self._chat.chat_state.finish_streaming()
+
+        # A stopped turn still took the time it took — record it before the
+        # timing object is discarded, so the transcript shows the real cost of
+        # a run the user cut short.
+        self._chat.finalize_turn_timing(self._chat._current_answer_index)
 
         # Notify UI
         api = self._chat._app_core.api

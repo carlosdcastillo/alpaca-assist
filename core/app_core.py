@@ -19,6 +19,7 @@ import pyperclip
 
 from agent_skills import SkillManager
 from conversation_graph import ConversationGraph
+from core import timing
 from core.config import _DEFAULT_SKILLS_DIR
 from core.config import DEFAULT_PREFERENCES
 from core.config import MCP_SERVERS_FILE
@@ -140,7 +141,15 @@ class AppCore:
         return self.skill_manager.to_prompt_xml()
 
     def get_system_prompt(self, tab: Any) -> str:
-        """Compose global skills with an optional Pack project runbook."""
+        """Compose global skills with an optional Pack project runbook.
+
+        The current time goes in here rather than into the proxy's own
+        SYSTEM_PROMPT because that block carries the cache_control breakpoint
+        (see anthropic_ollama_server._handle_with_tools) — a clock inside it
+        would change the cached prefix on every single request and throw away
+        the prompt cache. This block is already re-sent uncached each call, so
+        a live timestamp costs nothing extra here.
+        """
         sections = [self.get_skills_xml()]
         project_name = getattr(tab, "project_name", None)
         workspace_path = getattr(tab, "workspace_path", None)
@@ -165,6 +174,14 @@ class AppCore:
                     f"{spinup}\n"
                     "</project_spinup>",
                 )
+        sections.append(
+            "<current_time>\n"
+            f"Now: {timing.local_now_description()}\n"
+            "Treat this as the present moment. Bracketed [Sent ...] notes on "
+            "earlier user messages give when those were written and how long a "
+            "pause preceded them; messages without a note followed on promptly.\n"
+            "</current_time>",
+        )
         return "\n\n".join(section for section in sections if section)
 
     def reload_mcp_servers(self) -> None:

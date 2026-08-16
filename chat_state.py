@@ -2,6 +2,7 @@ import json
 import threading
 from dataclasses import dataclass
 from dataclasses import field
+from datetime import datetime
 from typing import Any
 from typing import List
 from typing import Optional
@@ -14,14 +15,22 @@ class ToolCall:
 
     content: str
     id: str
+    started_at: float | None = None
 
 
 @dataclass
 class ToolResult:
-    """Represents a tool result with content and ID."""
+    """Represents a tool result with content and ID.
+
+    ``duration_ms`` is the tool's own execution wall time, measured around the
+    MCP/internal dispatch only — it excludes the fold-render wait that follows,
+    so it reflects what the tool cost rather than what the UI cost.
+    """
 
     content: str
     id: str
+    started_at: float | None = None
+    duration_ms: int | None = None
 
 
 AnswerComponent = Union[str, ToolCall, ToolResult]
@@ -47,10 +56,17 @@ class FullAnswer:
             else:
                 self.components.append(text)
 
-    def add_tool_call(self, content: str, tool_id: str) -> None:
+    def add_tool_call(
+        self,
+        content: str,
+        tool_id: str,
+        started_at: float | None = None,
+    ) -> None:
         """Add a tool call to the answer."""
         with self._lock:
-            self.components.append(ToolCall(content=content, id=tool_id))
+            self.components.append(
+                ToolCall(content=content, id=tool_id, started_at=started_at),
+            )
 
     def add_tool_call_if_absent(self, content: str, tool_id: str) -> bool:
         """Add ToolCall only if no ToolCall with this tool_id already exists.
@@ -67,11 +83,24 @@ class FullAnswer:
             self.components.append(ToolCall(content=content, id=tool_id))
             return True
 
-    def add_tool_result(self, content: str, tool_id: str) -> None:
+    def add_tool_result(
+        self,
+        content: str,
+        tool_id: str,
+        started_at: float | None = None,
+        duration_ms: int | None = None,
+    ) -> None:
         """Add a tool result to the answer."""
         formatted_content = self._format_json_if_parseable(content)
         with self._lock:
-            self.components.append(ToolResult(content=formatted_content, id=tool_id))
+            self.components.append(
+                ToolResult(
+                    content=formatted_content,
+                    id=tool_id,
+                    started_at=started_at,
+                    duration_ms=duration_ms,
+                ),
+            )
 
     def get_text_content(self) -> str:
         """Get all text content as a single string (for backward compatibility)."""
@@ -246,21 +275,28 @@ class FullAnswer:
             if isinstance(component, str):
                 serialized_components.append({"type": "text", "content": component})
             elif isinstance(component, ToolCall):
-                serialized_components.append(
-                    {
-                        "type": "tool_call",
-                        "content": component.content,
-                        "id": component.id,
-                    },
-                )
+                call_dict: dict[str, Any] = {
+                    "type": "tool_call",
+                    "content": component.content,
+                    "id": component.id,
+                }
+                # Timing keys are omitted when unknown rather than written as
+                # null, so conversations saved before timing existed and ones
+                # saved by a run that had no metrics stay byte-identical.
+                if component.started_at is not None:
+                    call_dict["started_at"] = component.started_at
+                serialized_components.append(call_dict)
             elif isinstance(component, ToolResult):
-                serialized_components.append(
-                    {
-                        "type": "tool_result",
-                        "content": component.content,
-                        "id": component.id,
-                    },
-                )
+                result_dict: dict[str, Any] = {
+                    "type": "tool_result",
+                    "content": component.content,
+                    "id": component.id,
+                }
+                if component.started_at is not None:
+                    result_dict["started_at"] = component.started_at
+                if component.duration_ms is not None:
+                    result_dict["duration_ms"] = component.duration_ms
+                serialized_components.append(result_dict)
         return {"components": serialized_components}
 
     @classmethod
@@ -273,11 +309,20 @@ class FullAnswer:
                 components.append(comp_data["content"])
             elif comp_type == "tool_call":
                 components.append(
-                    ToolCall(content=comp_data["content"], id=comp_data["id"]),
+                    ToolCall(
+                        content=comp_data["content"],
+                        id=comp_data["id"],
+                        started_at=comp_data.get("started_at"),
+                    ),
                 )
             elif comp_type == "tool_result":
                 components.append(
-                    ToolResult(content=comp_data["content"], id=comp_data["id"]),
+                    ToolResult(
+                        content=comp_data["content"],
+                        id=comp_data["id"],
+                        started_at=comp_data.get("started_at"),
+                        duration_ms=comp_data.get("duration_ms"),
+                    ),
                 )
         return cls(components)
 
@@ -323,12 +368,19 @@ class ChatState:
     answers: list[FullAnswer]
     question_images: list[list[str]] = field(default_factory=list)
     current_streaming_index: int | None = None
+    # Parallel to answers.  ConversationGraph keeps the equivalent on the
+    # assistant MessageNode; this legacy model has no node to hang it on, so
+    # it rides alongside and is padded lazily.
+    question_times: list[str | None] = field(default_factory=list)
+    turn_timings: list[dict[str, Any] | None] = field(default_factory=list)
 
     def add_question(self, question: str) -> int:
         """Add question and return answer index."""
         self.questions.append(question)
         self.answers.append(FullAnswer())
         self.question_images.append([])
+        self.question_times.append(datetime.now().isoformat())
+        self.turn_timings.append(None)
         answer_index = len(self.answers) - 1
         self.current_streaming_index = answer_index
         return answer_index
@@ -345,10 +397,11 @@ class ChatState:
         answer_index: int,
         content: str,
         tool_id: str,
+        started_at: float | None = None,
     ) -> bool:
         """Add a tool call to the specified answer."""
         if 0 <= answer_index < len(self.answers):
-            self.answers[answer_index].add_tool_call(content, tool_id)
+            self.answers[answer_index].add_tool_call(content, tool_id, started_at)
             return True
         return False
 
@@ -357,12 +410,34 @@ class ChatState:
         answer_index: int,
         content: str,
         tool_id: str,
+        started_at: float | None = None,
+        duration_ms: int | None = None,
     ) -> bool:
         """Add a tool result to the specified answer."""
         if 0 <= answer_index < len(self.answers):
-            self.answers[answer_index].add_tool_result(content, tool_id)
+            self.answers[answer_index].add_tool_result(
+                content,
+                tool_id,
+                started_at,
+                duration_ms,
+            )
             return True
         return False
+
+    def set_turn_timing(self, answer_index: int, timing: dict[str, Any]) -> bool:
+        """Attach a finished turn's timing record to an answer."""
+        if not 0 <= answer_index < len(self.answers):
+            return False
+        while len(self.turn_timings) <= answer_index:
+            self.turn_timings.append(None)
+        self.turn_timings[answer_index] = timing
+        return True
+
+    def get_turn_timing(self, answer_index: int) -> dict[str, Any] | None:
+        """Return the stored timing record for an answer, if any."""
+        if 0 <= answer_index < len(self.turn_timings):
+            return self.turn_timings[answer_index]
+        return None
 
     def finish_streaming(self) -> None:
         """Mark streaming as complete."""
@@ -413,6 +488,8 @@ class ChatState:
             "answers": [answer.to_dict() for answer in self.answers],
             "current_streaming_index": self.current_streaming_index,
             "question_images": [list(imgs) for imgs in self.question_images],
+            "question_times": list(self.question_times),
+            "turn_timings": list(self.turn_timings),
         }
 
     @classmethod
@@ -434,6 +511,16 @@ class ChatState:
             state.question_images = [list(imgs) for imgs in raw_images]
         else:
             state.question_images = [[] for _ in questions]
+        # Conversations saved before timing existed have neither key; pad both
+        # to the question count so index-parallel access stays safe.
+        raw_times = list(data.get("question_times", []))
+        raw_timings = list(data.get("turn_timings", []))
+        while len(raw_times) < len(questions):
+            raw_times.append(None)
+        while len(raw_timings) < len(questions):
+            raw_timings.append(None)
+        state.question_times = raw_times
+        state.turn_timings = raw_timings
         return state
 
     def compact_answers(
@@ -471,6 +558,10 @@ class ChatState:
         self.questions.pop()
         self.answers.pop()
         images = self.question_images.pop() if self.question_images else []
+        if self.question_times:
+            self.question_times.pop()
+        if self.turn_timings:
+            self.turn_timings.pop()
         self.current_streaming_index = None
         return (True, images)
 
@@ -489,6 +580,10 @@ class ChatState:
         self.answers = [self.answers[-1]]
         if self.question_images:
             self.question_images = [self.question_images[-1]]
+        if self.question_times:
+            self.question_times = [self.question_times[-1]]
+        if self.turn_timings:
+            self.turn_timings = [self.turn_timings[-1]]
 
         # Reset streaming index since list structure changed
         self.current_streaming_index = None

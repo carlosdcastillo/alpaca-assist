@@ -269,6 +269,13 @@ class StreamProcessor:
 
                             # Persist content if there's any left after stripping
                             if content_chunk:
+                                # First *visible* token, not first chunk — a
+                                # response that opens with a tool call emits
+                                # chunks that get stripped to nothing, and the
+                                # user has still seen no output at that point.
+                                timing = self._chat.current_turn_timing
+                                if timing is not None:
+                                    timing.mark_first_token()
                                 self._chat.chat_state.append_to_answer(
                                     answer_index,
                                     content_chunk,
@@ -294,6 +301,18 @@ class StreamProcessor:
                         # calls) — last_invocation_metrics is the only place
                         # that reflects a single call in isolation.
                         metrics = data.get("invocation_metrics")
+
+                        # Count this invocation against the turn regardless of
+                        # whether metrics came back — a tool loop's Nth call
+                        # happened even if its stream died before reporting.
+                        turn_timing = self._chat.current_turn_timing
+                        if turn_timing is not None:
+                            turn_timing.add_invocation(
+                                metrics.get("invocation_latency_ms")
+                                if metrics
+                                else None,
+                            )
+
                         if metrics:
                             self._chat.last_invocation_metrics = metrics
                             self._chat.session_output_tokens += metrics.get(

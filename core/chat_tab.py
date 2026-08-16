@@ -145,6 +145,11 @@ class ChatTab(ChatTabBase):
 
             Streaming flags are reset by StreamingHandler before calling this method.
         """
+        # Turn timing is deliberately NOT closed here. This method runs once
+        # per LLM invocation, so a turn with a tool loop reaches it several
+        # times, the first of which is nowhere near the end of the turn.
+        # ToolHandler._release_pending_unit owns that signal instead.
+
         # A successful first turn completes the one-shot project spinup contract.
         self.project_spinup_pending = False
 
@@ -171,6 +176,7 @@ class ChatTab(ChatTabBase):
             error: Error message describing what went wrong.
         """
         # Note: streaming flags are reset by StreamingHandler before calling this method
+        self.finalize_turn_timing(self._current_answer_index)
 
         # Notify UI (if available - don't raise if API is None)
         api = self._app_core.api
