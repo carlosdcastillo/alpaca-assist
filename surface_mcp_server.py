@@ -20,6 +20,8 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
+import uuid
 from typing import Any
 
 from mcp.server import Server
@@ -199,8 +201,56 @@ def _input_result(surface_id: str, events: list[dict[str, Any]], seq: Any) -> st
     return f"Done. The surface is now at seq {result['seq']}; snapshot again before the next click."
 
 
+def _record_event(
+    name: str,
+    arguments: dict[str, Any],
+    content: list[TextContent | ImageContent],
+) -> None:
+    """Mirror cli_media_mcp_server.py's side channel for CLI-backed models.
+
+    A CLI-backed model's tool_use/tool_result blocks are suppressed before
+    they reach Alpaca's own chat_state (see anthropic_ollama_server.py,
+    "avoid double execution") -- without this, surface_open's sentinel-
+    encoded card would only ever exist inside the CLI's own internal
+    context, and the model, unable to parse it, would invent its own text
+    instead (confirmed live: a broken markdown image). ALPACA_CLI_MEDIA_
+    EVENTS is unset for a non-CLI model (the ordinary MCP tool-call path
+    already produces a real fold there) and for a plain local tab.
+    """
+    path = os.environ.get("ALPACA_CLI_MEDIA_EVENTS")
+    if not path:
+        return
+    content_dicts: list[dict[str, Any]] = []
+    for item in content:
+        if isinstance(item, TextContent):
+            content_dicts.append({"type": "text", "text": item.text})
+        elif isinstance(item, ImageContent):
+            content_dicts.append(
+                {"type": "image", "data": item.data, "mimeType": item.mimeType},
+            )
+    event = {
+        "type": "alpaca_tool_event",
+        "id": f"alpaca_surface_{name}_{uuid.uuid4().hex}",
+        "name": f"alpaca_surface_{name}",
+        "arguments": arguments,
+        "result": json.dumps({"content": content_dicts}),
+    }
+    with open(path, "a", encoding="utf-8") as file:
+        file.write(json.dumps(event, separators=(",", ":")) + "\n")
+        file.flush()
+
+
 @server.call_tool()
 async def call_tool(
+    name: str,
+    arguments: dict[str, Any],
+) -> list[TextContent | ImageContent]:
+    content = await _dispatch(name, arguments)
+    _record_event(name, arguments, content)
+    return content
+
+
+async def _dispatch(
     name: str,
     arguments: dict[str, Any],
 ) -> list[TextContent | ImageContent]:

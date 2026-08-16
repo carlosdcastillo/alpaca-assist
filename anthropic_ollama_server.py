@@ -1449,10 +1449,16 @@ def _cli_mcp_servers(
     # a host with no display just gets "no display available" at call time.
     surface_script = os.path.join(os.path.dirname(__file__), "surface_mcp_server.py")
     if os.path.isfile(surface_script):
-        surface_entry: dict[str, Any] = {
-            "command": sys.executable,
-            "args": [surface_script],
-        }
+        # ALPACA_CLI_MEDIA_EVENTS is the same side channel alpaca-media uses
+        # (both write to the one file this turn already created; _run_cli_
+        # jsonl's reader is generic per-line, not media-specific) -- without
+        # it, a CLI-backed model's tool_use/tool_result blocks never reach
+        # Alpaca's own chat_state at all (they're suppressed to avoid double
+        # execution), so surface_open's card would only ever exist inside
+        # the CLI's own internal context. Confirmed live: the model, unable
+        # to parse the raw sentinel it got back, invented its own broken
+        # markdown image instead of a real live-surface card.
+        surface_env = {"ALPACA_CLI_MEDIA_EVENTS": media_event_path}
         # SurfaceControlClient.discover()'s cwd check misses this process
         # (its cwd is the workspace, not the Pack session directory), and
         # its "exactly one session on this host" fallback is ambiguous the
@@ -1460,8 +1466,12 @@ def _cli_mcp_servers(
         # sessions all returning no display available. Passing the exact
         # socket forward sidesteps discovery entirely.
         if surface_socket:
-            surface_entry["env"] = {"ALPACA_SURFACE_SOCKET": surface_socket}
-        servers["alpaca-surface"] = surface_entry
+            surface_env["ALPACA_SURFACE_SOCKET"] = surface_socket
+        servers["alpaca-surface"] = {
+            "command": sys.executable,
+            "args": [surface_script],
+            "env": surface_env,
+        }
     return servers
 
 

@@ -365,19 +365,27 @@ def test_cli_mcp_config_surface_server_carries_the_session_socket(
     )
 
 
-def test_cli_mcp_config_surface_server_has_no_env_without_a_socket(
+def test_cli_mcp_config_surface_server_always_gets_the_media_event_channel(
     tmp_path: Path,
 ) -> None:
-    """No session socket to hand over (e.g. a non-Pack local tab) must not
-    fabricate an env block the real supervisor never asked for.
+    """Without ALPACA_CLI_MEDIA_EVENTS, surface_mcp_server.py's own
+    _record_event has nowhere to write, and a CLI-backed model's
+    surface_open result never reaches Alpaca's chat_state at all (confirmed
+    live: the model improvised a broken markdown image instead of a real
+    live-surface card). Must be present even with no surface_socket -- a
+    host with no display still needs its "no display available" result to
+    reach the transcript.
     """
-    config_path = _build_claude_mcp_config_file(str(tmp_path / "events.jsonl"), None)
+    event_path = str(tmp_path / "events.jsonl")
+    config_path = _build_claude_mcp_config_file(event_path, None)
     try:
         config = json.loads(Path(config_path).read_text())
     finally:
         Path(config_path).unlink()
 
-    assert "env" not in config["mcpServers"]["alpaca-surface"]
+    surface = config["mcpServers"]["alpaca-surface"]
+    assert surface["env"]["ALPACA_CLI_MEDIA_EVENTS"] == event_path
+    assert "ALPACA_SURFACE_SOCKET" not in surface["env"]
 
 
 def test_cli_mcp_config_surface_server_overrides_a_raw_entry(
