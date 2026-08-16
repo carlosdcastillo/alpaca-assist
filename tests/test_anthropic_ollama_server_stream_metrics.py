@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import io
 import json
+from typing import Any
 from unittest.mock import MagicMock
 
 from anthropic_ollama_server import OllamaRequestHandler
@@ -20,18 +21,25 @@ def _make_handler() -> OllamaRequestHandler:
     """A handler instance with just enough stubbed to exercise
 
     _process_stream without a real socket/HTTP request.
+
+    send_response/send_header/end_headers/_send_text_chunk are real
+    BaseHTTPRequestHandler methods, so setattr (not plain attribute
+    assignment) is what mypy accepts for stubbing them per-instance --
+    plain assignment is flagged as reassigning a method, not an attribute.
     """
     handler = object.__new__(OllamaRequestHandler)
     handler.wfile = io.BytesIO()
-    handler.send_response = MagicMock()
-    handler.send_header = MagicMock()
-    handler.end_headers = MagicMock()
+    for name in ("send_response", "send_header", "end_headers"):
+        setattr(handler, name, MagicMock())
     return handler
 
 
-def _last_chunk(handler: OllamaRequestHandler) -> dict:
-    lines = [l for l in handler.wfile.getvalue().decode().splitlines() if l]
-    return json.loads(lines[-1])
+def _last_chunk(handler: OllamaRequestHandler) -> dict[str, Any]:
+    wfile = handler.wfile
+    assert isinstance(wfile, io.BytesIO)
+    lines = [l for l in wfile.getvalue().decode().splitlines() if l]
+    result: dict[str, Any] = json.loads(lines[-1])
+    return result
 
 
 def _message_start(input_tokens=100, cache_write=0, cache_read=0) -> dict:
@@ -171,13 +179,17 @@ class TestLoopBodyFailureStillReportsAnError:
 
     def test_exception_in_send_text_chunk_still_completes_the_response(self) -> None:
         handler = _make_handler()
-        handler._send_text_chunk = MagicMock(
-            side_effect=UnicodeEncodeError(
-                "charmap",
-                "\u26a0",
-                0,
-                1,
-                "character maps to <undefined>",
+        setattr(
+            handler,
+            "_send_text_chunk",
+            MagicMock(
+                side_effect=UnicodeEncodeError(
+                    "charmap",
+                    "\u26a0",
+                    0,
+                    1,
+                    "character maps to <undefined>",
+                ),
             ),
         )
         events = [
@@ -202,13 +214,13 @@ class TestLoopBodyFailureStillReportsAnError:
         real_send_text_chunk = handler._send_text_chunk
         call_count = {"n": 0}
 
-        def flaky_send_text_chunk(text, count):
+        def flaky_send_text_chunk(text: str, count: int) -> None:
             call_count["n"] += 1
             if call_count["n"] == 2:
                 raise RuntimeError("simulated bug in chunk delivery")
-            return real_send_text_chunk(text, count)
+            real_send_text_chunk(text, count)
 
-        handler._send_text_chunk = flaky_send_text_chunk
+        setattr(handler, "_send_text_chunk", flaky_send_text_chunk)
         events = [
             _message_start(input_tokens=100),
             _text_delta("first chunk landed fine"),
