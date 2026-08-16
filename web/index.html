@@ -99,7 +99,16 @@
         <div class="app-body">
             <!-- Conversation tabs -->
             <aside class="tab-bar" id="tab-bar" aria-label="Conversations">
-                <div class="tab-bar-label">Conversations</div>
+                <div class="tab-bar-header">
+                    <div class="tab-bar-label">Conversations</div>
+                    <button class="sidebar-hide-toggle" id="sidebar-hide-toggle" type="button"
+                            title="Hide conversations sidebar" aria-label="Hide conversations sidebar"
+                            aria-controls="tab-bar" aria-expanded="true">
+                        <svg class="sidebar-chevron" viewBox="0 0 24 24" aria-hidden="true">
+                            <path d="M15 18l-6-6 6-6"></path>
+                        </svg>
+                    </button>
+                </div>
                 <button class="tab-scroll-btn tab-scroll-left hidden" id="tab-scroll-left" title="Scroll tabs up" aria-label="Scroll tabs up">↑</button>
                 <div class="tabs-container" id="tabs-container"></div>
                 <button class="tab-scroll-btn tab-scroll-right hidden" id="tab-scroll-right" title="Scroll tabs down" aria-label="Scroll tabs down">↓</button>
@@ -108,6 +117,13 @@
             <div class="content-column">
                 <!-- Toolbar -->
                 <div class="toolbar" id="toolbar">
+                    <button class="toolbar-btn sidebar-show-toggle" id="sidebar-show-toggle" type="button"
+                            title="Show conversations sidebar" aria-label="Show conversations sidebar"
+                            aria-controls="tab-bar" aria-expanded="false" hidden>
+                        <svg class="sidebar-chevron" viewBox="0 0 24 24" aria-hidden="true">
+                            <path d="M9 18l6-6-6-6"></path>
+                        </svg>
+                    </button>
                     <div class="toolbar-new-tab-dropdown" id="toolbar-new-tab-dropdown">
                         <button class="toolbar-btn" id="toolbar-new-tab" title="New Tab (Ctrl+N)" aria-haspopup="true" aria-expanded="false">
                             <span class="toolbar-icon">+</span>

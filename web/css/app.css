@@ -178,6 +178,51 @@ html, body {
     transform: translateY(1px);
 }
 
+.sidebar-hide-toggle {
+    display: grid;
+    place-items: center;
+    width: 24px;
+    height: 24px;
+    margin-left: auto;
+    padding: 0;
+    color: var(--text-muted);
+    background: transparent;
+    border: 0;
+    border-radius: 4px;
+    cursor: pointer;
+}
+
+.sidebar-hide-toggle:hover {
+    color: var(--text-primary);
+    background: var(--bg-hover);
+}
+
+.sidebar-hide-toggle:focus-visible {
+    outline: 1px solid var(--accent-primary);
+    outline-offset: 1px;
+}
+
+.sidebar-show-toggle {
+    width: 32px;
+    height: 32px;
+    justify-content: center;
+    padding: 0;
+}
+
+.sidebar-show-toggle[hidden] {
+    display: none;
+}
+
+.sidebar-chevron {
+    width: 14px;
+    height: 14px;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.8;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+}
+
 .toolbar-icon {
     font-size: 14px;
     line-height: 1;
@@ -295,8 +340,18 @@ html, body {
     min-height: 0;
 }
 
+.app-body.sidebar-collapsed .tab-bar {
+    display: none;
+}
+
+.tab-bar-header {
+    display: flex;
+    align-items: center;
+    min-height: 24px;
+    padding-left: 8px;
+}
+
 .tab-bar-label {
-    padding: 0 8px;
     color: var(--text-muted);
     font-size: 11px;
     font-weight: 700;

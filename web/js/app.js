@@ -110,6 +110,9 @@ class AlpacaApp {
     // Toolbar button events
     this._bindToolbarEvents();
 
+    // Conversation sidebar visibility
+    this._setupSidebarToggle();
+
     // Menu category hover/click handling
     this._setupMenuBar();
 
@@ -439,6 +442,50 @@ class AlpacaApp {
 
     // Initialize find bar
     this._initFindBar();
+  }
+
+  /**
+   * Keep the sidebar optional without hiding the control that restores it.
+   * This is a local layout preference rather than conversation data.
+   */
+  _setupSidebarToggle() {
+    const hideToggle = document.getElementById("sidebar-hide-toggle");
+    const showToggle = document.getElementById("sidebar-show-toggle");
+    if (!hideToggle || !showToggle) return;
+
+    let collapsed = false;
+    try {
+      collapsed = localStorage.getItem("sidebar-collapsed") === "true";
+    } catch (_error) {
+      // Storage can be unavailable for restricted WebView origins.
+    }
+    this._setSidebarCollapsed(collapsed);
+
+    hideToggle.addEventListener("click", () => this._setSidebarCollapsed(true));
+    showToggle.addEventListener("click", () =>
+      this._setSidebarCollapsed(false),
+    );
+  }
+
+  _setSidebarCollapsed(collapsed) {
+    const appBody = document.querySelector(".app-body");
+    const sidebar = document.getElementById("tab-bar");
+    const hideToggle = document.getElementById("sidebar-hide-toggle");
+    const showToggle = document.getElementById("sidebar-show-toggle");
+    if (!appBody || !sidebar || !hideToggle || !showToggle) return;
+
+    appBody.classList.toggle("sidebar-collapsed", collapsed);
+    sidebar.setAttribute("aria-hidden", String(collapsed));
+    sidebar.inert = collapsed;
+    hideToggle.setAttribute("aria-expanded", String(!collapsed));
+    showToggle.setAttribute("aria-expanded", String(!collapsed));
+    showToggle.hidden = !collapsed;
+
+    try {
+      localStorage.setItem("sidebar-collapsed", String(collapsed));
+    } catch (_error) {
+      // The toggle still works for this session when storage is unavailable.
+    }
   }
 
   /**
