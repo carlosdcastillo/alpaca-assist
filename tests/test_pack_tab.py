@@ -203,6 +203,19 @@ class TestMutatingMethods:
 
         assert result == {"success": False, "reason": "offline"}
 
+    def test_recompute_title_starts_on_remote_daemon(self, pack_tab: PackTab) -> None:
+        transport = pack_tab._transport
+        transport.send_request.return_value = {"started": True}
+
+        result = pack_tab.recompute_title()
+
+        assert result == {"started": True}
+        transport.send_request.assert_called_once_with(
+            "recompute_title",
+            {},
+            timeout=mock.ANY,
+        )
+
     def test_pop_conversation_mutates_then_resyncs(self, pack_tab: PackTab) -> None:
         transport = pack_tab._transport
         transport.send_request.side_effect = [

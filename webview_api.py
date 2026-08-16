@@ -1280,6 +1280,20 @@ class WebViewAPI:
             logger.error(f"Error truncating conversation: {e}")
             return {"success": False, "error": str(e)}
 
+    def recompute_title(self, tab_id: str) -> dict[str, Any]:
+        """Generate a fresh title for an existing conversation."""
+        try:
+            tab = self._app.core.tabs.get(tab_id)
+            if not tab:
+                return {"success": False, "error": "Tab not found"}
+            if tab.is_streaming:
+                return {"success": False, "error": "Cannot recompute while streaming"}
+            result = tab.recompute_title()
+            return {"success": True, **result}
+        except Exception as e:
+            logger.error(f"Error recomputing conversation title: {e}")
+            return {"success": False, "error": str(e)}
+
     def pop_conversation(self, tab_id: str) -> dict[str, Any]:
         """Remove the last Q/A pair and return the popped question."""
         try:

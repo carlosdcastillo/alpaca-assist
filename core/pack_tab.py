@@ -9,7 +9,7 @@ against the real code rather than assumed:
 
     handle_user_message, stop_streaming, set_model, is_streaming, chat_state,
     title, conversation_id, get_serializable_data, load_from_data,
-    cleanup_resources, compact_conversation, truncate_conversation,
+    cleanup_resources, compact_conversation, truncate_conversation, recompute_title,
     pop_conversation, _current_answer_index (raw attribute, read
     immediately after handle_user_message returns — see
     webview_api.py:169).
@@ -638,6 +638,18 @@ class PackTab:
 
     def truncate_conversation(self) -> dict[str, Any]:
         return self._mutate("truncate_conversation")
+
+    def recompute_title(self) -> dict[str, Any]:
+        try:
+            result: dict[str, Any] = self._transport.send_request(
+                "recompute_title",
+                {},
+                timeout=MUTATE_TIMEOUT,
+            )
+            return result
+        except PackTransportError as e:
+            logger.warning(f"Pack tab {self.tab_id} recompute_title failed: {e}")
+            return {"success": False, "reason": "offline"}
 
     def pop_conversation(self) -> dict[str, Any]:
         return self._mutate("pop_conversation")

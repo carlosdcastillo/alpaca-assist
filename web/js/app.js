@@ -757,6 +757,37 @@ class AlpacaApp {
       case "clone-conversation":
         await this._cloneConversation();
         break;
+      case "recompute-title":
+        if (this.currentTabId) {
+          if (this.tabManager.isTabStreaming(this.currentTabId)) {
+            await this._showAlert(
+              "Cannot recompute the title while streaming.",
+            );
+            break;
+          }
+          try {
+            const result = await this.api.recompute_title(this.currentTabId);
+            if (result.success && result.started) {
+              this._showToast("Recomputing title…", {
+                type: "success",
+                duration: 2000,
+              });
+            } else if (result.success && result.reason === "empty") {
+              await this._showAlert(
+                "Add a question and answer before recomputing the title.",
+              );
+            } else {
+              await this._showAlert(
+                `Recompute title failed: ${
+                  result.error || result.reason || "unknown error"
+                }`,
+              );
+            }
+          } catch (e) {
+            await this._showAlert(`Recompute title error: ${e.message || e}`);
+          }
+        }
+        break;
 
       // Tools menu
       case "refresh-models":

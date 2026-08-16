@@ -236,6 +236,7 @@ class TestMakeDispatcher:
         tab.get_serializable_data.return_value = {"chat_state": {}, "name": "Pack Tab"}
         tab.compact_conversation.return_value = {"compacted": True}
         tab.truncate_conversation.return_value = {"truncated": True}
+        tab.recompute_title.return_value = {"started": True}
         tab.pop_conversation.return_value = {"popped": False, "reason": "empty"}
         return tab
 
@@ -389,6 +390,7 @@ class TestMakeDispatcher:
 
         assert dispatch("compact_conversation", {}) == {"compacted": True}
         assert dispatch("truncate_conversation", {}) == {"truncated": True}
+        assert dispatch("recompute_title", {}) == {"started": True}
         assert dispatch("pop_conversation", {}) == {"popped": False, "reason": "empty"}
 
     def test_fold_rendered_sets_the_adapter_event(self) -> None:

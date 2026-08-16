@@ -127,6 +127,10 @@ class ChatTab(ChatTabBase):
         """Stop the current streaming operation."""
         self._streaming_handler.stop()
 
+    def recompute_title(self) -> dict[str, Any]:
+        """Generate a fresh title from the conversation's first Q/A pair."""
+        return self._summary_handler.recompute_title()
+
     def on_streaming_complete(self) -> None:
         """Called when streaming completes successfully.
 

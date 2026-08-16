@@ -340,6 +340,8 @@ def make_dispatcher(
             return tab.compact_conversation()
         if method == "truncate_conversation":
             return tab.truncate_conversation()
+        if method == "recompute_title":
+            return tab.recompute_title()
         if method == "pop_conversation":
             return tab.pop_conversation()
         if method == "fold_rendered":

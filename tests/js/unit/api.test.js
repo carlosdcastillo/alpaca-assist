@@ -92,6 +92,9 @@ describe("PythonAPI", () => {
       open_link: jest.fn().mockResolvedValue({ success: true }),
       compact_conversation: jest.fn().mockResolvedValue({ success: true }),
       truncate_conversation: jest.fn().mockResolvedValue({ success: true }),
+      recompute_title: jest
+        .fn()
+        .mockResolvedValue({ success: true, started: true }),
       get_status_info: jest.fn().mockResolvedValue({
         success: true,
         char_count: 100,
@@ -362,6 +365,15 @@ describe("PythonAPI", () => {
   });
 
   describe("actions", () => {
+    it("recompute_title() should call Python with the tab ID", async () => {
+      const result = await api.recompute_title("tab-1-abc123");
+
+      expect(mockPythonAPI.recompute_title).toHaveBeenCalledWith(
+        "tab-1-abc123",
+      );
+      expect(result).toEqual({ success: true, started: true });
+    });
+
     it("open_link() should send the destination to Python", async () => {
       await api.open_link("tab-1", "https://example.com/docs");
 

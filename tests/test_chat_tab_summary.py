@@ -352,6 +352,48 @@ class TestSummaryHandlerUpdateTitle:
         handler._update_title("Title")
 
 
+class TestSummaryHandlerRecomputeTitle:
+    """Tests for explicitly regenerating a conversation title."""
+
+    def test_recompute_starts_generation_immediately(self) -> None:
+        mock_chat = Mock()
+        mock_chat.chat_state.get_safe_copy_full.return_value = (
+            ["What is Python?"],
+            [FullAnswer(["A programming language."])],
+            None,
+        )
+        handler = SummaryHandler(mock_chat)
+
+        with patch.object(handler, "_start_generation") as start:
+            result = handler.recompute_title()
+
+        assert result == {"started": True}
+        assert handler._generated is True
+        start.assert_called_once_with(1)
+
+    def test_recompute_rejects_empty_conversation(self) -> None:
+        mock_chat = Mock()
+        mock_chat.chat_state.get_safe_copy_full.return_value = ([], [], None)
+        handler = SummaryHandler(mock_chat)
+
+        result = handler.recompute_title()
+
+        assert result == {"started": False, "reason": "empty"}
+
+    def test_stale_generation_does_not_replace_newer_title(self) -> None:
+        mock_chat = Mock()
+        mock_chat._app_core.api = Mock()
+        mock_chat.tab_id = "test-tab"
+        handler = SummaryHandler(mock_chat)
+        handler._generation = 2
+        summary_queue: queue.Queue[str] = queue.Queue()
+        summary_queue.put("Stale Title")
+
+        handler._handle_response(summary_queue, generation=1)
+
+        mock_chat._app_core.api.update_tab_title.assert_not_called()
+
+
 class TestSummaryHandlerGetTitleFromQuestion:
     """Tests for get_title_from_first_question method."""
 

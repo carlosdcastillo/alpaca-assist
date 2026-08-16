@@ -246,6 +246,10 @@ class PythonAPI {
     return this.call("truncate_conversation", tabId);
   }
 
+  async recompute_title(tabId) {
+    return this.call("recompute_title", tabId);
+  }
+
   async pop_conversation(tabId) {
     return this.call("pop_conversation", tabId);
   }

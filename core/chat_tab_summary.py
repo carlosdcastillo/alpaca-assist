@@ -44,6 +44,7 @@ class SummaryHandler:
         self._chat = chat_tab
         self._generated = False
         self._lock = threading.Lock()
+        self._generation = 0
 
     def trigger_if_needed(self) -> None:
         """Trigger summary generation if conditions are met.
@@ -59,6 +60,8 @@ class SummaryHandler:
                 logger.debug("[SUMMARY] Already generated, skipping")
                 return
             self._generated = True
+            self._generation += 1
+            generation = self._generation
 
         # Only require a question — answer content is checked inside _fetch()
         # with retry logic, giving continuations (tool calls) time to complete.
@@ -70,9 +73,29 @@ class SummaryHandler:
 
         # Start the summary generation with consistent 2.0s delay
         logger.info("[SUMMARY] Starting summary generation")
-        threading.Timer(2.0, self._start_generation).start()
+        threading.Timer(2.0, self._start_generation, args=(generation,)).start()
 
-    def _start_generation(self) -> None:
+    def recompute_title(self) -> dict[str, Any]:
+        """Force a fresh title generation for an existing conversation."""
+        questions, answers, _ = self._chat.chat_state.get_safe_copy_full()
+        if (
+            not questions
+            or not answers
+            or not questions[0].strip()
+            or not answers[0].get_text_content().strip()
+        ):
+            return {"started": False, "reason": "empty"}
+
+        with self._lock:
+            self._generated = True
+            self._generation += 1
+            generation = self._generation
+
+        logger.info("[SUMMARY] Recomputing title")
+        self._start_generation(generation)
+        return {"started": True}
+
+    def _start_generation(self, generation: int) -> None:
         """Start the summary generation threads."""
         summary_queue: queue.Queue[str] = queue.Queue()
 
@@ -85,7 +108,7 @@ class SummaryHandler:
 
         handler_thread = threading.Thread(
             target=self._handle_response,
-            args=(summary_queue,),
+            args=(summary_queue, generation),
             daemon=True,
         )
         handler_thread.start()
@@ -216,7 +239,11 @@ class SummaryHandler:
             logger.exception(f"[SUMMARY] Error fetching: {e}")
             summary_queue.put("Chat Summary")
 
-    def _handle_response(self, summary_queue: queue.Queue[str]) -> None:
+    def _handle_response(
+        self,
+        summary_queue: queue.Queue[str],
+        generation: int | None = None,
+    ) -> None:
         """Handle the summary response from the queue.
 
         Args:
@@ -225,9 +252,18 @@ class SummaryHandler:
         try:
             # Use timeout instead of sleep for synchronization
             response = summary_queue.get(timeout=30)
+            if generation is not None:
+                with self._lock:
+                    if generation != self._generation:
+                        logger.debug("[SUMMARY] Discarding stale title response")
+                        return
             # Response from _fetch() was already cleaned before queueing
             self._update_title(response.strip(), already_cleaned=True)
         except queue.Empty:
+            if generation is not None:
+                with self._lock:
+                    if generation != self._generation:
+                        return
             # Fallback "Chat Summary" needs cleaning (though already clean)
             self._update_title("Chat Summary", already_cleaned=True)
 
