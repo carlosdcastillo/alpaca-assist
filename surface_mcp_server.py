@@ -288,14 +288,14 @@ async def _dispatch(
             # stored — never a session — so a conversation reopened next week
             # shows the card and reports the surface is gone.
             return _text(
-                encode_surface_result(
+                f"Surface {result['surface_id']} is live at seq {result['seq']}. "
+                "The user can see and drive it now.\n"
+                + encode_surface_result(
                     result["surface_id"],
                     result["width"],
                     result["height"],
                     result["description"],
-                )
-                + f"\nSurface {result['surface_id']} is live at seq {result['seq']}. "
-                "The user can see and drive it now.",
+                ),
             )
 
         if name == "surface_snapshot":

@@ -131,12 +131,17 @@ async def test_surface_open_records_a_parseable_mirror_event(
     # cli_tool_event handler stores this string verbatim as the tool
     # result content, so anything else silently fails to render.
     recorded = json.loads(event["result"])
-    inner_text = recorded["content"][0]["text"]
-    parsed = parse_surface_result(inner_text)
+    assert recorded["content"][0]["text"] == result[0].text
+
+    # Match chat_tab_processor: it stores the serialized result envelope
+    # verbatim, so escaped newlines after the descriptor would leak into the
+    # card title as a visible ``\n``.
+    parsed = parse_surface_result(event["result"])
     assert parsed is not None
     surface_id, width, height, description = parsed
     assert surface_id == "srf_12345678"
     assert (width, height) == (800, 600)
+    assert description == "xeyes"
 
 
 @pytest.mark.asyncio
