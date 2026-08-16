@@ -43,7 +43,12 @@ server = Server(
         "is on it; surface_click/surface_type/surface_key drive it. Always "
         "snapshot before acting on coordinates — input carries the seq it was "
         "computed against and stale coordinates are refused. The user's own "
-        "input always takes priority over yours."
+        "input always takes priority over yours. surface_open's result "
+        "already renders as a live interactive panel in the conversation — "
+        "do not add a markdown image reference like "
+        "`![...](alpaca://image/...)` for it, unlike internal_view_image; "
+        "no such reference exists for a surface and it will only show up "
+        "broken. Just tell the user in plain text that the surface is open."
     ),
 )
 
