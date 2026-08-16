@@ -1539,6 +1539,18 @@ def _run_cli_jsonl(
     `for line in proc.stdout` blocks indefinitely and can't interleave
     anything while waiting on the next line.
     """
+    # This server's own process always has ANTHROPIC_API_KEY set (required
+    # for the raw-API ClaudeClient path — see ClaudeClient.__init__), and
+    # subprocess.Popen inherits the full parent environment by default.
+    # Left alone, `claude` sees that key and prefers it over the logged-in
+    # subscription session ("claude.ai connectors are disabled because
+    # ANTHROPIC_API_KEY ... takes precedence over your claude.ai login"),
+    # silently billing every claude-code/* request to the metered API
+    # instead of spending subscription usage — defeating the entire point
+    # of this backend. Strip it for the child only.
+    child_env = dict(os.environ)
+    child_env.pop("ANTHROPIC_API_KEY", None)
+
     proc = subprocess.Popen(
         cmd,
         stdin=subprocess.PIPE,
@@ -1548,6 +1560,7 @@ def _run_cli_jsonl(
         bufsize=1,
         encoding="utf-8",
         cwd=working_directory,
+        env=child_env,
     )
     try:
         assert proc.stdin is not None and proc.stdout is not None
