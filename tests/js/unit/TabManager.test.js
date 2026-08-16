@@ -30,6 +30,8 @@ describe("TabManager", () => {
       <button id="tab-scroll-left" class="tab-scroll-btn hidden"></button>
       <div id="tab-container"></div>
       <button id="tab-scroll-right" class="tab-scroll-btn hidden"></button>
+      <button id="toolbar-tab-back"></button>
+      <button id="toolbar-tab-forward"></button>
     `;
     container = document.getElementById("tab-container");
 
@@ -441,6 +443,54 @@ describe("TabManager", () => {
       tabManager.nextTab();
 
       expect(tabManager.activeTabId).toBe(originalActive);
+    });
+  });
+
+  describe("tab visit history", () => {
+    beforeEach(() => {
+      tabManager.createTabUI("tab-1", "Tab 1", false);
+      tabManager.createTabUI("tab-2", "Tab 2", false);
+      tabManager.createTabUI("tab-14", "Tab 14", false);
+    });
+
+    it("navigates back and forward by visit order", async () => {
+      await tabManager.switchToTab("tab-1");
+      await tabManager.switchToTab("tab-14");
+
+      await tabManager.goBack();
+      expect(tabManager.activeTabId).toBe("tab-1");
+      expect(document.getElementById("toolbar-tab-forward").disabled).toBe(
+        false,
+      );
+
+      await tabManager.goForward();
+      expect(tabManager.activeTabId).toBe("tab-14");
+    });
+
+    it("skips closed tabs without removing earlier history", async () => {
+      await tabManager.switchToTab("tab-2");
+      await tabManager.switchToTab("tab-1");
+      await tabManager.switchToTab("tab-14");
+      await tabManager.closeTab("tab-1");
+
+      await tabManager.goBack();
+      expect(tabManager.activeTabId).toBe("tab-2");
+
+      await tabManager.goForward();
+      expect(tabManager.activeTabId).toBe("tab-14");
+    });
+
+    it("clears forward history after a new manual switch", async () => {
+      await tabManager.switchToTab("tab-1");
+      await tabManager.switchToTab("tab-14");
+      await tabManager.goBack();
+      await tabManager.switchToTab("tab-2");
+
+      await tabManager.goForward();
+      expect(tabManager.activeTabId).toBe("tab-2");
+      expect(document.getElementById("toolbar-tab-forward").disabled).toBe(
+        true,
+      );
     });
   });
 

@@ -168,7 +168,7 @@ html, body {
     transition: all 0.15s ease;
 }
 
-.toolbar-btn:hover {
+.toolbar-btn:hover:not(:disabled) {
     background: var(--bg-hover);
     border-color: var(--border-light);
 }
@@ -221,6 +221,22 @@ html, body {
     stroke-width: 1.8;
     stroke-linecap: round;
     stroke-linejoin: round;
+}
+
+.toolbar-btn:disabled {
+    opacity: 0.4;
+    cursor: default;
+}
+
+.toolbar-tab-navigation {
+    display: flex;
+    gap: 4px;
+}
+
+.toolbar-nav-btn {
+    justify-content: center;
+    width: 32px;
+    padding: 6px;
 }
 
 .toolbar-icon {

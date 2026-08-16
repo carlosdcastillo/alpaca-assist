@@ -1028,6 +1028,13 @@ class AlpacaApp {
     // New Tab button: opens the Local/Pack dropdown, wired in _bindEvents via
     // setupNewTabDropdown, so there is nothing to bind here.
 
+    document
+      .getElementById("toolbar-tab-back")
+      ?.addEventListener("click", () => this.tabManager.goBack());
+    document
+      .getElementById("toolbar-tab-forward")
+      ?.addEventListener("click", () => this.tabManager.goForward());
+
     // Close Tab button
     const closeTabBtn = document.getElementById("toolbar-close-tab");
     if (closeTabBtn) {

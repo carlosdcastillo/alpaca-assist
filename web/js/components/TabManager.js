@@ -8,6 +8,11 @@ class TabManager {
     this.tabs = new Map(); // tabId -> { button, chatDisplay, inputArea, data }
     this._convIds = new Map(); // tabId -> conversation_id (permanent)
     this.activeTabId = null;
+    this.navigationHistory = [];
+    this.navigationHistoryIndex = -1;
+
+    this.backBtn = document.getElementById("toolbar-tab-back");
+    this.forwardBtn = document.getElementById("toolbar-tab-forward");
 
     // Scroll button references
     this.scrollLeftBtn = document.getElementById("tab-scroll-left");
@@ -16,6 +21,7 @@ class TabManager {
 
     this._setupScrollButtons();
     this._setupOverflowObserver();
+    this._updateNavigationButtons();
   }
 
   /**
@@ -166,10 +172,20 @@ class TabManager {
   /**
    * Switch to a tab
    */
-  async switchToTab(tabId) {
+  async switchToTab(tabId, fromHistory = false) {
     if (!this.tabs.has(tabId)) {
       console.error(`Tab ${tabId} not found`);
       return;
+    }
+
+    const isNewDestination = tabId !== this.activeTabId;
+    if (isNewDestination && !fromHistory) {
+      this.navigationHistory = this.navigationHistory.slice(
+        0,
+        this.navigationHistoryIndex + 1,
+      );
+      this.navigationHistory.push(tabId);
+      this.navigationHistoryIndex = this.navigationHistory.length - 1;
     }
 
     // Deactivate current tab
@@ -182,6 +198,7 @@ class TabManager {
     const newTab = this.tabs.get(tabId);
     newTab.button.classList.add("active");
     this.activeTabId = tabId;
+    this._updateNavigationButtons();
 
     // Scroll the active tab into view if it's off-screen
     if (newTab && newTab.button) {
@@ -231,6 +248,7 @@ class TabManager {
     tab.button.remove();
     this.tabs.delete(tabId);
     this._convIds.delete(tabId);
+    this._updateNavigationButtons();
 
     // Notify Python
     await this.api.close_tab(tabId);
@@ -251,6 +269,43 @@ class TabManager {
         detail: { tabId },
       }),
     );
+  }
+
+  /**
+   * Navigate through visit history, skipping tabs that have since been closed.
+   */
+  async goBack() {
+    const destinationIndex = this._findHistoryDestination(-1);
+    if (destinationIndex === -1) return;
+    this.navigationHistoryIndex = destinationIndex;
+    await this.switchToTab(this.navigationHistory[destinationIndex], true);
+  }
+
+  async goForward() {
+    const destinationIndex = this._findHistoryDestination(1);
+    if (destinationIndex === -1) return;
+    this.navigationHistoryIndex = destinationIndex;
+    await this.switchToTab(this.navigationHistory[destinationIndex], true);
+  }
+
+  _findHistoryDestination(direction) {
+    for (
+      let index = this.navigationHistoryIndex + direction;
+      index >= 0 && index < this.navigationHistory.length;
+      index += direction
+    ) {
+      if (this.tabs.has(this.navigationHistory[index])) return index;
+    }
+    return -1;
+  }
+
+  _updateNavigationButtons() {
+    if (this.backBtn) {
+      this.backBtn.disabled = this._findHistoryDestination(-1) === -1;
+    }
+    if (this.forwardBtn) {
+      this.forwardBtn.disabled = this._findHistoryDestination(1) === -1;
+    }
   }
 
   /**
