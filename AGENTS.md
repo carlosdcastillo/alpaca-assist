@@ -165,7 +165,7 @@ JS calls `on_fold_rendered` from inside `_appendFold` — but only if `tabId ===
 
 ## Live App Surfaces (Pack tabs only)
 
-A `<surface-panel>` shows a live, interactive remote GUI app (Xvfb + x11vnc, tunnelled over SSH, rendered with noVNC). See `agents/SURFACE_PLAN.md` for the full design; this section is the load-bearing rules a change here can silently violate.
+A `<surface-panel>` shows a live, interactive remote GUI app (Xvfb + x11vnc, tunnelled over SSH, rendered with noVNC). This section is the load-bearing rules a change here can silently violate.
 
 **The dock lives outside `#chat-container` on purpose.** `chatDisplay.clear()` wipes that container on every tab switch and `_renderFullAnswer` rebuilds it (see "Fold Re-injection on Tab Switch" above) — a live VNC session inside it would be torn down and reconnected every time you glanced at another tab. `#surface-dock` is a sibling of `.main-content`; panels are created once, keyed by `tab_id`, and only hidden when their tab isn't active.
 
