@@ -98,6 +98,10 @@ class AlpacaApp {
       if (this.currentTabId === e.detail.tabId) {
         this.chatDisplay.clear();
       }
+      // Drop this tab's surface panels. Only the local view goes: the
+      // remote Xvfb/x11vnc/app keep running, exactly like the Pack daemon
+      // itself, and the supervisor's idle reaper collects them.
+      window.SurfaceDock?.removeTab(e.detail.tabId);
       // Update input area visibility when tab is closed
       this._updateInputAreaVisibility();
     });
@@ -362,6 +366,7 @@ class AlpacaApp {
 
     // Splitter drag events
     this._setupSplitter();
+    this._setupSurfaceSplitter();
 
     // Keyboard shortcuts
     document.addEventListener("keydown", (e) => {
@@ -549,6 +554,104 @@ class AlpacaApp {
         document.body.style.cursor = "";
         console.log("[SPLITTER] Drag ended");
       }
+    });
+  }
+
+  /**
+   * Open a live app surface on the current Pack tab's remote host.
+   *
+   * Profiles are offered first and a raw command is the fallback. That
+   * ordering is the same one the supervisor enforces from the other side:
+   * the model may only ever name a profile, while this path — a human who
+   * already has ssh access to that host — may type a command.
+   */
+  async _openAppSurface() {
+    const tabId = this.currentTabId;
+    if (!tabId) return;
+
+    const listed = await this.api.surface_control(tabId, "surface_list", {});
+    if (!listed?.success) {
+      await this._showAlert(listed?.error || "Surfaces are unavailable here.");
+      return;
+    }
+
+    const profiles = listed.profiles || [];
+    const choice = await this._showMessageDialog(
+      profiles.length
+        ? "Choose an app to run on the remote display:"
+        : "No profiles are configured. Enter a command to run on the remote display:",
+      {
+        title: "Open App Surface",
+        okText: "Open",
+        cancelText: "Cancel",
+        withInput: profiles.length === 0,
+        selectOptions: profiles.map((name) => ({ value: name, label: name })),
+        selectCustomLabel: "Custom command…",
+      },
+    );
+    if (choice === null || !String(choice).trim()) return;
+
+    const value = String(choice).trim();
+    // Whitespace splitting, not a shell parse: nothing here reaches a shell
+    // (the supervisor spawns an argv list), and a command needing real
+    // quoting belongs in surface_profiles.json anyway.
+    const spec = profiles.includes(value)
+      ? { profile: value }
+      : { argv: value.split(/\s+/) };
+
+    // Opening a surface spawns Xvfb, x11vnc, the app itself and an SSH
+    // tunnel, so it takes a couple of seconds — say so rather than letting
+    // the menu just close.
+    const status = document.getElementById("status-text");
+    if (status) status.textContent = "Starting app surface…";
+    const result = await this.api.surface_open(tabId, spec, 1280, 800);
+    if (!result?.success) {
+      this._updateStatusBar();
+      await this._showAlert(`Could not open the surface: ${result?.error}`);
+      return;
+    }
+    await window.SurfaceDock?.show(tabId, result);
+    this._updateStatusBar();
+  }
+
+  /**
+   * Setup draggable splitter between the chat area and the surface dock.
+   *
+   * Horizontal twin of _setupSplitter: that one resizes the input area
+   * against the chat, this one resizes the dock against the whole of
+   * .main-content. Both are no-ops until their elements exist, and the dock
+   * splitter stays hidden until a surface is actually open.
+   */
+  _setupSurfaceSplitter() {
+    const splitter = document.getElementById("surface-splitter");
+    const dock = document.getElementById("surface-dock");
+    if (!splitter || !dock) return;
+
+    let isDragging = false;
+    let startX = 0;
+    let startWidth = 0;
+
+    splitter.addEventListener("mousedown", (e) => {
+      isDragging = true;
+      startX = e.clientX;
+      startWidth = dock.getBoundingClientRect().width;
+      splitter.classList.add("dragging");
+      document.body.style.cursor = "col-resize";
+      e.preventDefault();
+    });
+
+    document.addEventListener("mousemove", (e) => {
+      if (!isDragging) return;
+      // Dragging left widens the dock; it is pinned to the right edge.
+      const newWidth = Math.max(260, startWidth - (e.clientX - startX));
+      dock.style.flex = `0 0 ${newWidth}px`;
+    });
+
+    document.addEventListener("mouseup", () => {
+      if (!isDragging) return;
+      isDragging = false;
+      splitter.classList.remove("dragging");
+      document.body.style.cursor = "";
     });
   }
 
@@ -848,6 +951,9 @@ class AlpacaApp {
         break;
       case "agent-skills":
         await this._showAgentSkillsDialog();
+        break;
+      case "open-surface":
+        await this._openAppSurface();
         break;
       case "copy-conversation-id": {
         const convId = this.tabManager.getConversationId(
@@ -2021,6 +2127,9 @@ class AlpacaApp {
     this.currentTabId = tabId;
     this._tabSwitchSeq = (this._tabSwitchSeq || 0) + 1;
     const mySeq = this._tabSwitchSeq;
+    // Surface panels are only hidden, never rebuilt — they live in the dock
+    // outside #chat-container precisely so a live session survives this.
+    window.SurfaceDock?.setActiveTab(tabId);
     // Clear any active find highlights before rebuilding chat DOM
     this._findMatches = [];
     this._findCurrentIdx = -1;

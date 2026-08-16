@@ -1165,6 +1165,90 @@ class WebViewAPI:
             logger.warning(f"Could not load video chunk for tab {tab_id}: {e}")
             return {"success": False, "error": str(e)}
 
+    # =======================================================================
+    # Live app surfaces
+    #
+    # Control plane only, and deliberately thin. Framebuffer traffic never
+    # appears here: the panel opens a WebSocket to the tunnel's local end and
+    # noVNC speaks RFB through it. Routing pixels through _safe_evaluate_js
+    # and the 50 ms get_pending_js() poller would be a category error — that
+    # queue exists for chat tokens.
+    #
+    # Every method duck-types on the tab the same way get_video_chunk does,
+    # so a local (Windows) tab, which has no remote display, fails with a
+    # clear message instead of an AttributeError.
+    # =======================================================================
+
+    def _surface_tab(self, tab_id: str) -> Any:
+        tab = self._app.core.tabs.get(tab_id)
+        if tab is None:
+            raise RuntimeError("Tab not found")
+        if not hasattr(tab, "surface_open"):
+            raise RuntimeError(
+                "Live app surfaces need a Pack tab — this tab runs locally, "
+                "and Windows has no X display to share.",
+            )
+        return tab
+
+    def surface_open(
+        self,
+        tab_id: str,
+        spec: dict[str, Any] | None = None,
+        width: int = 1280,
+        height: int = 800,
+    ) -> dict[str, Any]:
+        """Start a remote app surface and return a local ws:// URL for it."""
+        try:
+            result = self._surface_tab(tab_id).surface_open(spec, width, height)
+            return {"success": True, **result}
+        except Exception as e:
+            logger.warning(f"Could not open a surface for tab {tab_id}: {e}")
+            return {"success": False, "error": str(e)}
+
+    def surface_attach(self, tab_id: str, surface_id: str) -> dict[str, Any]:
+        """Re-tunnel to a still-running surface, e.g. from a transcript card."""
+        try:
+            result = self._surface_tab(tab_id).surface_attach(surface_id)
+            return {"success": True, **result}
+        except Exception as e:
+            logger.info(f"Could not attach to surface {surface_id}: {e}")
+            return {"success": False, "error": str(e)}
+
+    def surface_close(self, tab_id: str, surface_id: str) -> dict[str, Any]:
+        try:
+            result = self._surface_tab(tab_id).surface_close(surface_id)
+            return {"success": True, **result}
+        except Exception as e:
+            logger.warning(f"Could not close surface {surface_id}: {e}")
+            return {"success": False, "error": str(e)}
+
+    def surface_control(
+        self,
+        tab_id: str,
+        method: str,
+        params: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Proxy one non-connection surface call (list, touch, lease, snapshot).
+
+        The method name is checked against the supervisor's own table rather
+        than passed through: page JS must not be able to reach an arbitrary
+        Pack daemon RPC by naming it here.
+        """
+        try:
+            from core.surface_supervisor import SURFACE_METHODS
+
+            if method not in SURFACE_METHODS or method in (
+                "surface_open",
+                "surface_attach",
+                "surface_close",
+            ):
+                raise RuntimeError(f"Unsupported surface method: {method}")
+            result = self._surface_tab(tab_id).surface_call(method, params or {})
+            return {"success": True, **result}
+        except Exception as e:
+            logger.info(f"Surface call {method} failed for tab {tab_id}: {e}")
+            return {"success": False, "error": str(e)}
+
     def get_gated_tool_output(self, tab_id: str, gated_text: str) -> dict[str, Any]:
         """Load a gated result on demand, proxying reads for Pack tabs."""
         try:

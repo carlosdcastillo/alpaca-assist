@@ -119,6 +119,29 @@ class PythonAPI {
     return this.call("get_gated_tool_output", tabId, gatedText);
   }
 
+  // =======================================================================
+  // Live app surfaces
+  //
+  // Control plane only. Pixels go over a WebSocket from <surface-panel>
+  // straight to the tunnelled remote x11vnc and never pass through here.
+  // =======================================================================
+
+  async surface_open(tabId, spec, width = 1280, height = 800) {
+    return this.call("surface_open", tabId, spec, width, height);
+  }
+
+  async surface_attach(tabId, surfaceId) {
+    return this.call("surface_attach", tabId, surfaceId);
+  }
+
+  async surface_close(tabId, surfaceId) {
+    return this.call("surface_close", tabId, surfaceId);
+  }
+
+  async surface_control(tabId, method, params = {}) {
+    return this.call("surface_control", tabId, method, params);
+  }
+
   async stop_streaming(tabId) {
     return this.call("stop_streaming", tabId);
   }

@@ -1,0 +1,89 @@
+/* Live app surface dock.
+ *
+ * Sits inside .workspace as a *sibling* of .main-content, deliberately
+ * outside #chat-container: chatDisplay.clear() wipes that container on every
+ * tab switch, so a live VNC session living inside it would be destroyed and
+ * reconnected each time you glanced at another tab. The dock is never
+ * touched by that path.
+ */
+
+#surface-dock {
+    display: flex;
+    flex-direction: column;
+    flex: 0 0 640px;
+    min-width: 260px;
+    max-width: 80%;
+    min-height: 0;
+    overflow: hidden;
+    background: var(--bg-primary);
+    border-left: 1px solid var(--border-color);
+}
+
+#surface-dock.hidden,
+#surface-splitter.hidden {
+    display: none;
+}
+
+#surface-dock surface-panel {
+    flex: 1 1 auto;
+    min-height: 0;
+    border-bottom: 1px solid var(--border-color);
+}
+
+#surface-dock surface-panel:last-child {
+    border-bottom: none;
+}
+
+/* Vertical twin of .splitter, which splits the chat area horizontally. */
+#surface-splitter {
+    width: 8px;
+    flex: 0 0 8px;
+    background: var(--bg-secondary);
+    border-left: 1px solid var(--border-color);
+    border-right: 1px solid var(--border-color);
+    cursor: col-resize;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+#surface-splitter::before {
+    content: '';
+    width: 3px;
+    height: 40px;
+    background: var(--border-color);
+    border-radius: 2px;
+}
+
+#surface-splitter:hover,
+#surface-splitter.dragging {
+    background: var(--bg-hover);
+}
+
+/* Transcript card standing in for a surface. The live pixels are in the
+ * dock; this is only a handle, and for a reopened conversation it is a
+ * headstone — surfaces are never revived. */
+.surface-card {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 12px;
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    background: var(--bg-secondary);
+}
+
+.surface-card-body {
+    flex: 1;
+    min-width: 0;
+}
+
+.surface-card-title {
+    font-weight: 600;
+}
+
+.surface-card-meta {
+    font-family: var(--font-mono, 'Consolas', monospace);
+    font-size: 11px;
+    color: var(--text-secondary);
+}

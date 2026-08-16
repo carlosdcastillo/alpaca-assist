@@ -18,6 +18,8 @@ class ToolFold extends HTMLElement {
     this._imageResult = null;
     this._isVideo = false;
     this._videoResult = null;
+    this._isSurface = false;
+    this._surfaceResult = null;
   }
 
   /**
@@ -130,6 +132,8 @@ class ToolFold extends HTMLElement {
     this._imageResult = null;
     this._isVideo = false;
     this._videoResult = null;
+    this._isSurface = false;
+    this._surfaceResult = null;
 
     if (!this._bodyText) {
       this._highlightedBody = "";
@@ -151,6 +155,15 @@ class ToolFold extends HTMLElement {
       if (videoResult) {
         this._isVideo = true;
         this._videoResult = videoResult;
+        return;
+      }
+      // A live app surface (see core/surface_protocol.py). Only a descriptor
+      // is stored, so this renders a handle, never pixels — those live in
+      // the dock outside the chat container.
+      const surfaceResult = window.SurfaceResultUtils?.parse(this._bodyText);
+      if (surfaceResult) {
+        this._isSurface = true;
+        this._surfaceResult = surfaceResult;
         return;
       }
       // Try to extract plain text from MCP-style JSON before deciding how to display.
@@ -366,6 +379,48 @@ class ToolFold extends HTMLElement {
                     font-family: var(--font-mono, 'Consolas', monospace);
                     font-size: 12px;
                 }
+
+                /* Live surface handle */
+                .surface-card {
+                    display: flex;
+                    align-items: center;
+                    gap: 10px;
+                }
+
+                .surface-card-body {
+                    flex: 1;
+                    min-width: 0;
+                }
+
+                .surface-card-title {
+                    font-weight: 600;
+                    font-family: var(--font-ui, 'Segoe UI', sans-serif);
+                }
+
+                .surface-card-meta {
+                    font-size: 11px;
+                    color: var(--text-secondary, #9d9d9d);
+                }
+
+                .surface-card button {
+                    background: var(--bg-tertiary, #3c3c3c);
+                    color: var(--text-primary, #d4d4d4);
+                    border: 1px solid var(--fold-border, #3e3e42);
+                    border-radius: 4px;
+                    padding: 4px 10px;
+                    cursor: pointer;
+                    font-family: var(--font-ui, 'Segoe UI', sans-serif);
+                    font-size: 12px;
+                }
+
+                .surface-card button:hover {
+                    background: var(--bg-hover, #4a4a4a);
+                }
+
+                .surface-card button[disabled] {
+                    opacity: 0.6;
+                    cursor: default;
+                }
             </style>
             <div class="fold-header">
                 <span class="fold-icon">${type === "call" ? "🔧" : "📦"}</span>
@@ -458,6 +513,11 @@ class ToolFold extends HTMLElement {
       return;
     }
 
+    if (this._isSurface && this._surfaceResult) {
+      this._renderSurfaceCard(bodyDiv, this._surfaceResult);
+      return;
+    }
+
     if (!this._highlightedBody) {
       console.log(
         `[TOOLFOLD DEBUG] _renderBody: no highlightedBody, bodyText="${this._bodyText?.substring(
@@ -485,6 +545,58 @@ class ToolFold extends HTMLElement {
         bodyDiv.innerHTML = `<pre><code class="language-json">${this._highlightedBody}</code></pre>`;
       }
     }
+  }
+
+  /**
+   * Render the handle for a live app surface.
+   *
+   * What is stored in the transcript is a descriptor, never a session, so
+   * this is the one fold type that can legitimately refer to something that
+   * no longer exists. Clicking asks whether the surface is still running;
+   * if it isn't, the card says so and stops. Nothing here ever recreates a
+   * surface — they are ephemeral by design, and asking for the app again is
+   * a fresh `surface_open`.
+   */
+  _renderSurfaceCard(bodyDiv, result) {
+    const { surfaceId, width, height, description } = result;
+    bodyDiv.innerHTML = "";
+
+    const card = document.createElement("div");
+    card.className = "surface-card";
+
+    const body = document.createElement("div");
+    body.className = "surface-card-body";
+    const title = document.createElement("div");
+    title.className = "surface-card-title";
+    title.textContent = description || "Live app surface";
+    const meta = document.createElement("div");
+    meta.className = "surface-card-meta";
+    meta.textContent = `${surfaceId} · ${width}×${height}`;
+    body.append(title, meta);
+
+    const button = document.createElement("button");
+    button.textContent = "Show panel";
+    button.addEventListener("click", async () => {
+      const tabId = window.app?.currentTabId;
+      if (!tabId) {
+        meta.textContent = `${surfaceId} · no active tab`;
+        return;
+      }
+      button.disabled = true;
+      button.textContent = "Attaching…";
+      const attached = await window.pythonAPI.surface_attach(tabId, surfaceId);
+      if (!attached?.success) {
+        button.remove();
+        meta.textContent = `${surfaceId} · session ended`;
+        return;
+      }
+      await window.SurfaceDock?.show(tabId, attached);
+      button.disabled = false;
+      button.textContent = "Show panel";
+    });
+
+    card.append(body, button);
+    bodyDiv.appendChild(card);
   }
 
   /**
