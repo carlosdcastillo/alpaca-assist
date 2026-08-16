@@ -147,6 +147,13 @@ class TabManager {
     titleSpan.textContent = title;
     titleSpan.title = isPack ? `${title} (Pack — remote)` : title;
 
+    let workspaceMeta = null;
+    if (isPack) {
+      workspaceMeta = document.createElement("span");
+      workspaceMeta.className = "tab-workspace-meta";
+      workspaceMeta.textContent = "Repository status loading…";
+    }
+
     const closeBtn = document.createElement("button");
     closeBtn.className = "tab-close";
     closeBtn.innerHTML = "&times;";
@@ -165,6 +172,7 @@ class TabManager {
 
     button.appendChild(titleSpan);
     button.appendChild(closeBtn);
+    if (workspaceMeta) button.appendChild(workspaceMeta);
 
     return button;
   }
@@ -382,6 +390,54 @@ class TabManager {
         tab.button.classList.remove("offline");
       }
     }
+  }
+
+  /**
+   * Keep repository state visible on Pack tabs, including inactive ones.
+   */
+  setPackWorkspaceStatus(tabId, info) {
+    const tab = this.tabs.get(tabId);
+    if (!tab?.isPack) return;
+    const meta = tab.button.querySelector(".tab-workspace-meta");
+    if (!meta) return;
+
+    const workspace = info?.workspace_status || {};
+    const parts = [];
+    if (workspace.branch) parts.push(`⎇ ${workspace.branch}`);
+
+    meta.classList.remove(
+      "tab-workspace-meta--dirty",
+      "tab-workspace-meta--error",
+    );
+    if (!info?.connected) {
+      parts.push("Offline");
+      meta.classList.add("tab-workspace-meta--error");
+    } else if (info.project_setup_state === "setting_up") {
+      parts.push("Setting up…");
+    } else if (info.project_setup_error) {
+      parts.push("Setup failed");
+      meta.classList.add("tab-workspace-meta--error");
+    } else if (workspace.dirty !== null && workspace.dirty !== undefined) {
+      if (workspace.dirty > 0) {
+        parts.push(`${workspace.dirty} modified`);
+        meta.classList.add("tab-workspace-meta--dirty");
+      } else {
+        parts.push("Clean");
+      }
+    }
+
+    if (workspace.unpushed !== null && workspace.unpushed !== undefined) {
+      parts.push(
+        workspace.unpushed > 0 ? `↑ ${workspace.unpushed}` : "Up to date",
+      );
+    } else if (workspace.is_git) {
+      parts.push("No upstream");
+    }
+
+    meta.textContent = parts.join(" · ") || "Repository status unavailable";
+    meta.title = [info?.workspace_path, meta.textContent]
+      .filter(Boolean)
+      .join("\n");
   }
 
   /**

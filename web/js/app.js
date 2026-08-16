@@ -2132,6 +2132,7 @@ class AlpacaApp {
    */
   async _onTabSwitched(tabId) {
     this.currentTabId = tabId;
+    this._updateWorkspaceHeader(null);
     this._tabSwitchSeq = (this._tabSwitchSeq || 0) + 1;
     const mySeq = this._tabSwitchSeq;
     // Surface panels are only hidden, never rebuilt — they live in the dock
@@ -3175,6 +3176,7 @@ class AlpacaApp {
       statusText.textContent = "";
       tokenCount.textContent = "⚪ Idle";
       this._updateConnectionBadge(null);
+      this._updateWorkspaceHeader(null);
       return;
     }
 
@@ -3185,38 +3187,25 @@ class AlpacaApp {
       ? this.tabManager.isTabStreaming(this.currentTabId)
       : false;
 
-    const result = await this.api.get_status_info(this.currentTabId);
-    if (!result || !result.success) return;
+    const tabId = this.currentTabId;
+    const result = await this.api.get_status_info(tabId);
+    if (tabId !== this.currentTabId) return;
+    if (!result || !result.success) {
+      this._updateWorkspaceHeader(null);
+      return;
+    }
 
     // Connection badge: local vs pack, host, and connectivity state.
     this._updateConnectionBadge(result);
+    this._updateWorkspaceHeader(result);
+    if (result.is_pack) {
+      this.tabManager?.setPackWorkspaceStatus(tabId, result);
+    }
 
     // Left: conversation size + token info
     const leftParts = [
       `Chat: ${result.char_count.toLocaleString()} chars, ${result.line_count.toLocaleString()} lines`,
     ];
-    if (result.project) {
-      const workspace = result.workspace_status || {};
-      const projectParts = [result.workspace_path || result.project];
-      if (result.project_setup_state === "setting_up") {
-        projectParts.push("setting up…");
-      }
-      if (workspace.branch) projectParts.push(workspace.branch);
-      if (workspace.dirty !== null && workspace.dirty !== undefined) {
-        projectParts.push(
-          workspace.dirty ? `● ${workspace.dirty} dirty` : "✓ clean",
-        );
-      }
-      if (workspace.unpushed !== null && workspace.unpushed !== undefined) {
-        projectParts.push(`↑ ${workspace.unpushed} unpushed`);
-      } else if (workspace.is_git) {
-        projectParts.push("no upstream");
-      }
-      if (result.project_setup_error) {
-        projectParts.push(`setup failed: ${result.project_setup_error}`);
-      }
-      leftParts.unshift(projectParts.join(" · "));
-    }
     if (result.session_output_tokens > 0 || result.session_input_tokens > 0) {
       // "in" already includes cached tokens (both cache writes and cache
       // reads) — surface how much of it was cache-discounted rather than
@@ -3236,7 +3225,7 @@ class AlpacaApp {
       leftParts.push(`~${result.token_estimate.toLocaleString()} tokens (est)`);
     }
     statusText.textContent = leftParts.join(", ");
-    statusText.title = result.workspace_path || "";
+    statusText.title = "Conversation and session metrics";
 
     // Right: streaming indicator + skills. While a turn is in flight the
     // indicator counts up, so a long wait on a slow tool reads as progress
@@ -3253,6 +3242,73 @@ class AlpacaApp {
       rightParts.push(`📚 ${result.skill_count} skills`);
     }
     tokenCount.textContent = rightParts.join("  ");
+  }
+
+  /**
+   * Promote Pack repository state above the chat instead of burying it in
+   * the status bar. Local tabs do not need this workspace-specific header.
+   */
+  _updateWorkspaceHeader(info) {
+    const header = document.getElementById("workspace-header");
+    if (!header) return;
+    if (!info?.is_pack || !info.project) {
+      header.classList.add("hidden");
+      return;
+    }
+
+    const workspace = info.workspace_status || {};
+    const project = document.getElementById("workspace-header-project");
+    const location = document.getElementById("workspace-header-location");
+    const branch = document.getElementById("workspace-header-branch");
+    const changes = document.getElementById("workspace-header-changes");
+    const sync = document.getElementById("workspace-header-sync");
+
+    project.textContent = info.project;
+    location.textContent =
+      info.workspace_path || info.display_name || info.host || "";
+    location.title = info.workspace_path || "";
+    branch.textContent = workspace.branch
+      ? `⎇ ${workspace.branch}`
+      : "No branch";
+
+    changes.className = "workspace-fact";
+    sync.className = "workspace-fact";
+    changes.title = "";
+    if (!info.connected) {
+      changes.textContent = "Offline";
+      changes.classList.add("workspace-fact--error");
+    } else if (info.project_setup_state === "setting_up") {
+      changes.textContent = "Setting up…";
+    } else if (info.project_setup_error) {
+      changes.textContent = "Setup failed";
+      changes.title = info.project_setup_error;
+      changes.classList.add("workspace-fact--error");
+    } else if (!workspace.is_git) {
+      changes.textContent = "Not a Git repository";
+      changes.classList.add("workspace-fact--error");
+    } else if (workspace.dirty > 0) {
+      changes.textContent = `● ${workspace.dirty} modified`;
+      changes.classList.add("workspace-fact--dirty");
+    } else if (workspace.dirty === 0) {
+      changes.textContent = "✓ Clean";
+      changes.classList.add("workspace-fact--clean");
+    } else {
+      changes.textContent = "Changes unknown";
+    }
+
+    if (workspace.unpushed > 0) {
+      sync.textContent = `↑ ${workspace.unpushed} unpushed`;
+      sync.classList.add("workspace-fact--dirty");
+    } else if (workspace.unpushed === 0) {
+      sync.textContent = "Up to date";
+      sync.classList.add("workspace-fact--clean");
+    } else if (workspace.is_git) {
+      sync.textContent = "No upstream";
+    } else {
+      sync.textContent = "";
+    }
+
+    header.classList.remove("hidden");
   }
 
   /**

@@ -394,6 +394,46 @@ describe("TabManager", () => {
     });
   });
 
+  describe("setPackWorkspaceStatus()", () => {
+    beforeEach(() => {
+      tabManager.createTabUI("pack-1", "Remote work", false, true, "alpaca");
+    });
+
+    it("shows branch, modified count, and unpushed commits on the tab", () => {
+      tabManager.setPackWorkspaceStatus("pack-1", {
+        connected: true,
+        workspace_path: "/work/alpaca",
+        workspace_status: {
+          is_git: true,
+          branch: "feature/pack-status",
+          dirty: 3,
+          unpushed: 2,
+        },
+      });
+
+      const meta = container.querySelector(".tab-workspace-meta");
+      expect(meta.textContent).toBe("⎇ feature/pack-status · 3 modified · ↑ 2");
+      expect(meta.classList.contains("tab-workspace-meta--dirty")).toBe(true);
+      expect(meta.title).toContain("/work/alpaca");
+    });
+
+    it("makes a clean, synced repository explicit", () => {
+      tabManager.setPackWorkspaceStatus("pack-1", {
+        connected: true,
+        workspace_status: {
+          is_git: true,
+          branch: "main",
+          dirty: 0,
+          unpushed: 0,
+        },
+      });
+
+      expect(container.querySelector(".tab-workspace-meta").textContent).toBe(
+        "⎇ main · Clean · Up to date",
+      );
+    });
+  });
+
   describe("tab navigation", () => {
     beforeEach(async () => {
       mockApi.create_tab
