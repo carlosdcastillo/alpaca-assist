@@ -421,6 +421,29 @@ def _absolutize_mcp_config(
     return result
 
 
+def _inject_surface_mcp_server(raw_config: dict[str, Any], repo_root: Path) -> None:
+    """Register `alpaca-surface` even if mcp_servers.json never mentions it.
+
+    mcp_servers.json is gitignored and hand-maintained per machine (see
+    mcp_servers.json.example) — every other MCP server genuinely needs that,
+    since they're arbitrary user integrations, but surfaces ship *in this
+    repo* and every Pack host needs the same entry to use them. Requiring
+    each host's config to be kept in sync by hand is exactly how this was
+    silently missing: the model had no surface_open tool at all and fell
+    back to a raw shell command instead. Registering it is harmless even on
+    a host with no Xvfb/x11vnc/xdotool -- the tools just fail with "no
+    display available" at call time, same as _start_surface_supervisor.
+    """
+    if "alpaca-surface" in raw_config:
+        return
+    if not (repo_root / "surface_mcp_server.py").is_file():
+        return
+    raw_config["alpaca-surface"] = {
+        "command": ["python", "surface_mcp_server.py"],
+        "args": [],
+    }
+
+
 def _prepare_mcp_config(session_dir: Path, repo_root: Path) -> None:
     """Snapshot the repo's mcp_servers.json into the session dir with
 
@@ -430,11 +453,19 @@ def _prepare_mcp_config(session_dir: Path, repo_root: Path) -> None:
     to pick up changes).
     """
     source = repo_root / "mcp_servers.json"
-    if not source.exists():
-        return
+    raw_config: dict[str, Any] = {}
+    if source.exists():
+        try:
+            with open(source, encoding="utf-8") as f:
+                raw_config = json.load(f)
+        except Exception:
+            logger.warning(
+                "Could not read mcp_servers.json; MCP servers may be unavailable",
+                exc_info=True,
+            )
+            return
     try:
-        with open(source, encoding="utf-8") as f:
-            raw_config = json.load(f)
+        _inject_surface_mcp_server(raw_config, repo_root)
         fixed_config = _absolutize_mcp_config(raw_config, repo_root)
         with open(session_dir / "mcp_servers.json", "w", encoding="utf-8") as f:
             json.dump(fixed_config, f, indent=2)

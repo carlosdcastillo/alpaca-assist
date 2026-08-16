@@ -1,6 +1,7 @@
 """Tests for pack_daemon.py — the remote-side Pack tab daemon."""
 from __future__ import annotations
 
+import json
 import socket
 import sys
 import threading
@@ -14,6 +15,7 @@ import pytest
 from core.surface_supervisor import SURFACE_METHODS
 from pack_daemon import _absolutize_mcp_config
 from pack_daemon import _bind_socket
+from pack_daemon import _prepare_mcp_config
 from pack_daemon import make_dispatcher
 from pack_daemon import PackDaemonAdapter
 
@@ -64,6 +66,86 @@ class TestAbsolutizeMcpConfig:
 
         assert fixed["mine"]["args"] == ["-u"]
         assert fixed["mine"]["disabled_tools"] == ["x"]
+
+
+class TestPrepareMcpConfig:
+    """alpaca-surface must show up even when mcp_servers.json never mentions
+    it, since that file is gitignored and hand-maintained per machine —
+    exactly the config that went stale and caused the model to fall back to
+    a raw shell command instead of a surface tool.
+    """
+
+    def _read(self, session_dir: Path) -> dict[str, Any]:
+        loaded: dict[str, Any] = json.loads(
+            (session_dir / "mcp_servers.json").read_text(),
+        )
+        return loaded
+
+    def test_injects_alpaca_surface_when_absent(self, tmp_path: Path) -> None:
+        repo_root = tmp_path / "repo"
+        repo_root.mkdir()
+        (repo_root / "surface_mcp_server.py").write_text("# surface mcp server\n")
+        (repo_root / "mcp_servers.json").write_text(
+            json.dumps({"simple-tools": {"command": ["python", "x.py"], "args": []}}),
+        )
+        session_dir = tmp_path / "session"
+        session_dir.mkdir()
+
+        _prepare_mcp_config(session_dir, repo_root)
+
+        fixed = self._read(session_dir)
+        assert fixed["alpaca-surface"]["command"] == [
+            sys.executable,
+            str(repo_root / "surface_mcp_server.py"),
+        ]
+        assert "simple-tools" in fixed  # existing entries aren't clobbered
+
+    def test_injects_even_with_no_mcp_servers_json_at_all(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        repo_root = tmp_path / "repo"
+        repo_root.mkdir()
+        (repo_root / "surface_mcp_server.py").write_text("# surface mcp server\n")
+        session_dir = tmp_path / "session"
+        session_dir.mkdir()
+
+        _prepare_mcp_config(session_dir, repo_root)
+
+        fixed = self._read(session_dir)
+        assert fixed["alpaca-surface"]["command"] == [
+            sys.executable,
+            str(repo_root / "surface_mcp_server.py"),
+        ]
+
+    def test_does_not_override_an_explicit_entry(self, tmp_path: Path) -> None:
+        repo_root = tmp_path / "repo"
+        repo_root.mkdir()
+        (repo_root / "surface_mcp_server.py").write_text("# surface mcp server\n")
+        (repo_root / "mcp_servers.json").write_text(
+            json.dumps({"alpaca-surface": {"command": ["custom"], "args": ["-x"]}}),
+        )
+        session_dir = tmp_path / "session"
+        session_dir.mkdir()
+
+        _prepare_mcp_config(session_dir, repo_root)
+
+        fixed = self._read(session_dir)
+        assert fixed["alpaca-surface"]["command"] == ["custom"]
+
+    def test_no_injection_when_surface_mcp_server_is_missing_from_repo(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        repo_root = tmp_path / "repo"
+        repo_root.mkdir()
+        session_dir = tmp_path / "session"
+        session_dir.mkdir()
+
+        _prepare_mcp_config(session_dir, repo_root)
+
+        fixed = self._read(session_dir)
+        assert "alpaca-surface" not in fixed
 
 
 class TestPackDaemonAdapter:
