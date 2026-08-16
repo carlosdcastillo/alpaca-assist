@@ -40,7 +40,7 @@ These require `sudo` and only need to be done once:
 
 ```bash
 sudo pacman -S --noconfirm xorg-server-xvfb xdotool xorg-xeyes imagemagick \
-  python-gobject gtk3 webkit2gtk-4.1
+  python-gobject gtk3 webkit2gtk-4.1 x11vnc python-websockify
 ```
 
 | Package            | Purpose                                      |
@@ -52,12 +52,14 @@ sudo pacman -S --noconfirm xorg-server-xvfb xdotool xorg-xeyes imagemagick \
 | `python-gobject`   | PyGObject (`gi`) — required by pywebview GTK  |
 | `gtk3`             | GTK3 runtime — required by pywebview GTK      |
 | `webkit2gtk-4.1`   | WebKit rendering engine — required by pywebview |
+| `x11vnc`           | VNC server for live app surfaces (`core/surface_supervisor.py`) — required |
+| `python-websockify`| WebSocket-to-TCP bridge for the VNC connection — only needed if this build of `x11vnc` lacks `WITH_WEBSOCKETS`; `SurfaceSupervisor` detects which at runtime (`ALPACA_SURFACE_WEBSOCKIFY` env var forces it either way) |
 
 Verify everything is installed:
 
 ```bash
 pacman -Q xorg-server-xvfb xdotool xorg-xeyes imagemagick \
-  python-gobject gtk3 webkit2gtk-4.1
+  python-gobject gtk3 webkit2gtk-4.1 x11vnc python-websockify
 ```
 
 ---

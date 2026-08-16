@@ -160,3 +160,23 @@ JS calls `on_fold_rendered` from inside `_appendFold` — but only if `tabId ===
 - `setBody(text)` can be called before the element is in the DOM — it stores the highlighted text.
 - `connectedCallback` fires on `appendChild` and renders the body into the shadow root.
 - The element starts collapsed; click the header to expand.
+
+---
+
+## Live App Surfaces (Pack tabs only)
+
+A `<surface-panel>` shows a live, interactive remote GUI app (Xvfb + x11vnc, tunnelled over SSH, rendered with noVNC). See `agents/SURFACE_PLAN.md` for the full design; this section is the load-bearing rules a change here can silently violate.
+
+**The dock lives outside `#chat-container` on purpose.** `chatDisplay.clear()` wipes that container on every tab switch and `_renderFullAnswer` rebuilds it (see "Fold Re-injection on Tab Switch" above) — a live VNC session inside it would be torn down and reconnected every time you glanced at another tab. `#surface-dock` is a sibling of `.main-content`; panels are created once, keyed by `tab_id`, and only hidden when their tab isn't active.
+
+**Pixels never touch Python.** noVNC opens its own WebSocket straight to the tunnel's local port and speaks RFB through it. Never route framebuffer data through `_safe_evaluate_js` / the `get_pending_js()` poller — that queue is for chat tokens, and it would be far too slow besides.
+
+**The supervisor lives in `pack_daemon.py`, not the local app.** It is per-Pack-tab, survives SSH drops and local app restarts the same way the rest of a Pack tab's state does, and — deliberately — outlives the local tab closing. Orphan control is three independent guards (`atexit`/`SIGTERM` handler, a startup reaper reading `~/.alpaca_pack/<session>/surfaces/*.json`, and an idle timeout), not one, because the daemon outliving the app is a feature here, not a bug to route around.
+
+**Only a descriptor is persisted, never a session.** `chat_state` gets no new component type — a surface rides the same sentinel-in-a-`tool_result` trick `video_tool_result.py` already uses (`core/surface_protocol.py`), so existing persistence/export/compaction/re-render paths handle it untouched. A conversation reopened later shows the card; if the surface is gone, `surface_attach` reports that cleanly rather than trying to revive it.
+
+**`webview_api.surface_control` is a real security boundary, not a formality.** Its `method` argument comes from page JS. It only forwards names present in `core.surface_supervisor.SURFACE_METHODS`, and explicitly refuses `surface_open`/`surface_attach`/`surface_close` even though they're valid dispatcher methods elsewhere — those need a tunnel built alongside them, which only the three dedicated `WebViewAPI` methods do. Widening this allowlist casually turns it into a general Pack-daemon RPC primitive reachable from the page.
+
+**The model opens surfaces by profile name only, never argv.** `surface_mcp_server.py`'s `surface_open` tool takes `profile`, looked up in `surface_profiles.json`. Passing the model an argv would make "open an app for me" a spelled-out remote-execution primitive. The human-driven path (the panel's own "open app" UI) is allowed to pass a raw command, because a human choosing to do that already has SSH access to the host by other means.
+
+**Model input carries a `seq` and gets refused when stale.** `surface_snapshot` returns the surface's current `seq`; `surface_click`/`surface_type`/`surface_key` are refused if the `seq` they were called with doesn't match (`Surface.check_seq` in `core/surface_supervisor.py`). This is what stops the model from clicking blind coordinates against a screen that has since changed. Human input, by contrast, never goes through this check at all — it goes noVNC → x11vnc directly, bypassing the supervisor entirely, so it can never be refused or lag behind a lease check.
