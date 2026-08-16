@@ -15,6 +15,10 @@ html, body {
     overflow: hidden;
 }
 
+button {
+    font-family: inherit;
+}
+
 #app {
     display: flex;
     flex-direction: column;
