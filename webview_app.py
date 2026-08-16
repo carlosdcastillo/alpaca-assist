@@ -103,6 +103,14 @@ class ChatApp:
             self.window,  # type: ignore[arg-type]
             debug=os.getenv("DEBUG") is not None,
             icon=str(icon_path) if icon_path else None,
+            # Required for the live-surface panel's noVNC bundle: Chromium
+            # treats a file:// page as an opaque origin and blocks ES module
+            # loads (static or dynamic import()) on CORS grounds. pywebview
+            # serves local files through an internal HTTP server instead
+            # when this is set -- no other change needed, since a local
+            # window URL is already routed through that server once it's
+            # running (see webview/__init__.py's has_local_urls check).
+            http_server=True,
         )
 
         # Window has been closed. Run final save + MCP cleanup now.
