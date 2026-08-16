@@ -265,6 +265,55 @@ def test_cli_mcp_config_always_includes_media_bridge(tmp_path: Path) -> None:
     assert any("ALPACA_CLI_MEDIA_EVENTS" in value for value in overrides)
 
 
+def test_cli_mcp_config_surface_server_is_absolute_regardless_of_cwd(
+    tmp_path: Path,
+) -> None:
+    """A bare "python" / relative "surface_mcp_server.py" from a raw
+    mcp_servers.json entry would only resolve by accident, since the CLI
+    subprocess's cwd is the workspace, not the repo -- confirmed as the
+    actual cause of a live failure where the model had no surface_open tool
+    and fell back to a raw shell command instead.
+    """
+    config_path = _build_claude_mcp_config_file(str(tmp_path / "events.jsonl"), None)
+    try:
+        config = json.loads(Path(config_path).read_text())
+    finally:
+        Path(config_path).unlink()
+
+    surface = config["mcpServers"]["alpaca-surface"]
+    assert surface["command"] == sys.executable
+    assert Path(surface["args"][0]).is_absolute()
+    assert surface["args"][0].endswith("surface_mcp_server.py")
+    assert Path(surface["args"][0]).is_file()
+
+
+def test_cli_mcp_config_surface_server_overrides_a_raw_entry(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A stale hand-written mcp_servers.json entry (bare command, relative
+    path) must not win over the absolute one this module always registers.
+    """
+    mcp_file = tmp_path / "mcp_servers.json"
+    mcp_file.write_text(
+        json.dumps(
+            {"alpaca-surface": {"command": ["python", "surface_mcp_server.py"]}},
+        ),
+    )
+    monkeypatch.setattr(
+        "anthropic_ollama_server.MCP_SERVERS_FILE",
+        str(mcp_file),
+    )
+
+    config_path = _build_claude_mcp_config_file(str(tmp_path / "events.jsonl"), None)
+    try:
+        config = json.loads(Path(config_path).read_text())
+    finally:
+        Path(config_path).unlink()
+
+    assert config["mcpServers"]["alpaca-surface"]["command"] == sys.executable
+
+
 def test_cli_jsonl_forwards_media_side_channel(tmp_path: Path) -> None:
     event_path = tmp_path / "events.jsonl"
     event = {"type": "alpaca_tool_event", "id": "media-1"}

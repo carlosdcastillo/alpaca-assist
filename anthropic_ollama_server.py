@@ -1430,6 +1430,20 @@ def _cli_mcp_servers(
         "args": [os.path.join(os.path.dirname(__file__), "cli_media_mcp_server.py")],
         "env": media_env,
     }
+
+    # Unlike a raw mcp_servers.json entry (left as-is above, matching alpaca's
+    # own flat-command format), this one must survive the CLI subprocess's
+    # cwd being the *workspace*, not the repo -- a bare "python" or a
+    # relative "surface_mcp_server.py" would only resolve by accident, the
+    # same class of bug pack_daemon.py's _absolutize_mcp_config exists to
+    # prevent for the non-CLI path. Always registered, same as alpaca-media:
+    # a host with no display just gets "no display available" at call time.
+    surface_script = os.path.join(os.path.dirname(__file__), "surface_mcp_server.py")
+    if os.path.isfile(surface_script):
+        servers["alpaca-surface"] = {
+            "command": sys.executable,
+            "args": [surface_script],
+        }
     return servers
 
 
