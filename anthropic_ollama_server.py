@@ -1804,6 +1804,8 @@ class ClaudeCodeCLIClient:
             )
 
         text_block_indices: set[int] = set()
+        forwarded_message_text = False
+        current_message_has_text = False
 
         try:
             for line in _run_cli_jsonl(
@@ -1840,6 +1842,7 @@ class ClaudeCodeCLIClient:
                 index = event.get("index")
 
                 if event_type == "message_start":
+                    current_message_has_text = False
                     yield event
                 elif event_type == "content_block_start":
                     block_type = event.get("content_block", {}).get("type")
@@ -1854,6 +1857,14 @@ class ClaudeCodeCLIClient:
                         "delta",
                         {},
                     ):
+                        if event["delta"]["text"] and not current_message_has_text:
+                            if forwarded_message_text:
+                                yield {
+                                    "type": "content_block_delta",
+                                    "delta": {"text": "\n\n"},
+                                }
+                            current_message_has_text = True
+                            forwarded_message_text = True
                         yield event
                 elif event_type == "content_block_stop":
                     if index in text_block_indices:
@@ -1955,6 +1966,7 @@ class CodexCLIClient:
         )
 
         yielded_start = False
+        forwarded_agent_message = False
         try:
             for line in _run_cli_jsonl(
                 cmd,
@@ -1976,7 +1988,13 @@ class CodexCLIClient:
 
                 text = _extract_codex_text(line)
                 if text:
+                    if forwarded_agent_message:
+                        yield {
+                            "type": "content_block_delta",
+                            "delta": {"text": "\n\n"},
+                        }
                     yield {"type": "content_block_delta", "delta": {"text": text}}
+                    forwarded_agent_message = True
 
                 if line.get("type") == "error":
                     err = line.get("message") or line.get("error") or str(line)

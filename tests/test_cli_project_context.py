@@ -5,6 +5,7 @@ import sys
 import threading
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 from unittest.mock import MagicMock
 from unittest.mock import patch
 
@@ -108,6 +109,131 @@ def test_cli_clients_forward_heartbeats(
         )
 
     assert {"type": "cli_heartbeat"} in events
+
+
+def _streamed_text(events: list[dict[str, Any]]) -> str:
+    return "".join(
+        str(event.get("delta", {}).get("text", ""))
+        for event in events
+        if event.get("type") == "content_block_delta"
+        and isinstance(event.get("delta"), dict)
+    )
+
+
+def test_claude_cli_separates_assistant_messages_around_hidden_tool_call() -> None:
+    cli_events = [
+        {
+            "type": "stream_event",
+            "event": {"type": "message_start", "message": {"usage": {}}},
+        },
+        {
+            "type": "stream_event",
+            "event": {
+                "type": "content_block_start",
+                "index": 0,
+                "content_block": {"type": "text", "text": ""},
+            },
+        },
+        {
+            "type": "stream_event",
+            "event": {
+                "type": "content_block_delta",
+                "index": 0,
+                "delta": {"type": "text_delta", "text": "session file"},
+            },
+        },
+        {
+            "type": "stream_event",
+            "event": {
+                "type": "content_block_delta",
+                "index": 0,
+                "delta": {"type": "text_delta", "text": "."},
+            },
+        },
+        {
+            "type": "stream_event",
+            "event": {"type": "content_block_stop", "index": 0},
+        },
+        {
+            "type": "stream_event",
+            "event": {
+                "type": "content_block_start",
+                "index": 1,
+                "content_block": {"type": "tool_use", "name": "surface_open"},
+            },
+        },
+        {
+            "type": "stream_event",
+            "event": {"type": "content_block_stop", "index": 1},
+        },
+        {
+            "type": "stream_event",
+            "event": {"type": "message_start", "message": {"usage": {}}},
+        },
+        {
+            "type": "stream_event",
+            "event": {
+                "type": "content_block_start",
+                "index": 0,
+                "content_block": {"type": "text", "text": ""},
+            },
+        },
+        {
+            "type": "stream_event",
+            "event": {
+                "type": "content_block_delta",
+                "index": 0,
+                "delta": {"type": "text_delta", "text": "The surface is open."},
+            },
+        },
+    ]
+
+    with (
+        patch(
+            "anthropic_ollama_server._build_claude_mcp_config_file",
+            return_value=None,
+        ),
+        patch(
+            "anthropic_ollama_server._run_cli_jsonl",
+            return_value=iter(cli_events),
+        ),
+    ):
+        events = list(
+            ClaudeCodeCLIClient().stream_complete(
+                messages=[{"role": "user", "content": "Open the surface."}],
+            ),
+        )
+
+    assert _streamed_text(events) == "session file.\n\nThe surface is open."
+
+
+def test_codex_cli_separates_agent_messages_around_hidden_tool_call() -> None:
+    cli_events = [
+        {
+            "type": "item.completed",
+            "item": {"type": "agent_message", "text": "session file."},
+        },
+        {
+            "type": "item.completed",
+            "item": {"type": "mcp_tool_call", "name": "surface_open"},
+        },
+        {
+            "type": "item.completed",
+            "item": {"type": "agent_message", "text": "The surface is open."},
+        },
+    ]
+
+    with patch(
+        "anthropic_ollama_server._run_cli_jsonl",
+        return_value=iter(cli_events),
+    ):
+        events = list(
+            CodexCLIClient().stream_complete(
+                messages=[{"role": "user", "content": "Open the surface."}],
+            ),
+        )
+
+    assert _streamed_text(events) == "session file.\n\nThe surface is open."
 
 
 def test_proxy_dispatches_the_project_workspace_to_the_selected_backend() -> None:
