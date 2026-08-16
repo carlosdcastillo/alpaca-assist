@@ -35,6 +35,12 @@ class ChatDisplay {
     this.isStreaming = false;
     this.currentAnswerIndex = -1;
 
+    // Map answer_index -> serialized TurnTiming. Held separately from the
+    // answer buffers because on the re-render path timing is known before the
+    // header it belongs in has been created.
+    this.answerTimings = new Map();
+    this._liveTimer = null;
+
     // Configure marked
     this._configureMarked();
 
@@ -590,7 +596,14 @@ class ChatDisplay {
       answerRole.className = "answer-role";
       answerRole.textContent = "Assistant";
 
+      // Always created, filled later by setAnswerTiming or the live ticker.
+      // Creating it up front means the header does not reflow when the first
+      // duration lands mid-stream.
+      const answerTime = document.createElement("span");
+      answerTime.className = "answer-time";
+
       answerHeader.appendChild(answerRole);
+      answerHeader.appendChild(answerTime);
 
       // First text segment — more segments are created dynamically after each
       // result fold so folds and text interleave in the natural narrative order.
@@ -610,6 +623,11 @@ class ChatDisplay {
       };
       this.answerBuffers.set(answerIndex, bufferData);
       isNewBuffer = true;
+
+      // Timing that arrived before this header existed (the re-render path
+      // hands it over up front) now has somewhere to go.
+      const known = this.answerTimings.get(answerIndex);
+      if (known) this.setAnswerTiming(answerIndex, known);
     }
 
     // Flush any pending folds into the wrapper whenever a buffer exists.
@@ -1090,6 +1108,11 @@ class ChatDisplay {
     fold.id = foldData.id;
     fold.setAttribute("data-type", foldData.type);
     fold.setAttribute("data-answer-index", foldData.answerIndex);
+    // Set before setBody so the shadow root renders the duration on its first
+    // pass rather than needing a second update.
+    if (foldData.durationMs !== null && foldData.durationMs !== undefined) {
+      fold.setAttribute("data-duration-ms", String(foldData.durationMs));
+    }
     fold.contentEditable = "false"; // skip as atomic unit on arrow-key navigation
     fold.setBody(foldData.content);
     return fold;
@@ -1327,7 +1350,7 @@ class ChatDisplay {
    * is ready, then injects.  This is more reliable than depending on
    * appendToAnswerBuffer to notice pendingFolds entries.
    */
-  injectFoldWithId(answerIndex, content, foldType, foldId) {
+  injectFoldWithId(answerIndex, content, foldType, foldId, durationMs = null) {
     console.log(
       `[CHAT DEBUG] injectFoldWithId: answerIndex=${answerIndex}, type=${foldType}, foldId=${foldId}`,
     );
@@ -1340,7 +1363,13 @@ class ChatDisplay {
       return;
     }
 
-    const foldData = { id: foldId, content, type: foldType, answerIndex };
+    const foldData = {
+      id: foldId,
+      content,
+      type: foldType,
+      answerIndex,
+      durationMs,
+    };
 
     // Store in pendingFolds so the flush-on-appendToAnswerBuffer path also
     // works as a secondary safety net.
@@ -1440,6 +1469,8 @@ class ChatDisplay {
     this.injectedFolds.clear();
     this.answerToolResults.clear();
     this.gatedToolResultLoads.clear();
+    this.answerTimings.clear();
+    this.stopAnswerTimer();
     this.currentAnswerIndex = -1;
   }
 
@@ -1447,8 +1478,34 @@ class ChatDisplay {
    * Add a question message.
    * @param {string} text - The question text.
    * @param {string[]} images - Array of data URI strings for image previews.
+   * @param {object} [meta] - Optional timing: {timestamp, previousEnd}.
+   *   `timestamp` is when the question was sent (epoch seconds or ISO);
+   *   `previousEnd` is when the previous answer finished, used to measure the
+   *   pause.  Both absent for conversations saved before timing existed, in
+   *   which case the header renders exactly as it always did.
    */
-  addQuestion(text, images = []) {
+  addQuestion(text, images = [], meta = {}) {
+    const T = window.TimeFormat;
+    const askedAt = T ? T.toEpoch(meta.timestamp) : null;
+    const previousEnd = T ? T.toEpoch(meta.previousEnd) : null;
+
+    // A visible break for a real pause, so scrolling back through a
+    // conversation shows where the sessions actually were.
+    if (T && askedAt !== null && previousEnd !== null) {
+      const gap = askedAt - previousEnd;
+      if (gap >= T.GAP_THRESHOLD_SECONDS) {
+        const dividerEl = document.createElement("div");
+        dividerEl.className = "time-gap";
+        dividerEl.contentEditable = "false";
+        const labelEl = document.createElement("span");
+        labelEl.className = "time-gap-label";
+        labelEl.textContent = T.formatGap(gap);
+        labelEl.title = `Resumed ${T.formatAbsolute(meta.timestamp)}`;
+        dividerEl.appendChild(labelEl);
+        this.container.appendChild(dividerEl);
+      }
+    }
+
     const messageEl = document.createElement("div");
     messageEl.className = "message question";
     messageEl.dataset.rawText = text;
@@ -1457,6 +1514,13 @@ class ChatDisplay {
     headerEl.className = "message-header";
     headerEl.contentEditable = "false";
     headerEl.innerHTML = '<span class="message-role">User</span>';
+    if (T && askedAt !== null) {
+      const timeEl = document.createElement("span");
+      timeEl.className = "message-time";
+      timeEl.textContent = T.formatClock(meta.timestamp);
+      timeEl.title = T.formatAbsolute(meta.timestamp);
+      headerEl.appendChild(timeEl);
+    }
 
     const contentEl = document.createElement("div");
     contentEl.className = "message-content";
@@ -1482,6 +1546,122 @@ class ChatDisplay {
     this.container.appendChild(messageEl);
 
     this.scrollToBottom();
+  }
+
+  /**
+   * Show a finished turn's duration in its answer header.
+   *
+   * Safe to call before the answer buffer exists — the value is remembered and
+   * applied when the header appears, which is what happens on the re-render
+   * path where timing is known before any content has been appended.
+   *
+   * @param {number} answerIndex
+   * @param {object|null} timing - a serialized core.timing.TurnTiming
+   */
+  setAnswerTiming(answerIndex, timing) {
+    if (!timing) return;
+    this.answerTimings.set(answerIndex, timing);
+
+    const el = this._answerTimeElement(answerIndex);
+    if (!el) return;
+    const T = window.TimeFormat;
+    el.textContent = T.formatDurationMs(timing.wall_ms);
+    el.title = T.describeTurn(timing);
+    el.classList.remove("answer-time--live");
+    // The split bar is the whole point of recording three clocks rather than
+    // one: it shows at a glance whether a slow turn was the model or a tool.
+    this._renderTurnSplit(answerIndex, timing);
+  }
+
+  /**
+   * Start a live stopwatch in the answer header for an in-flight turn.
+   * @param {number} answerIndex
+   */
+  startAnswerTimer(answerIndex) {
+    // A tool loop re-fires onStreamingStart for every continuation. Restarting
+    // there would reset the elapsed count to zero partway through the very
+    // turns whose length is most worth seeing.
+    if (this._liveTimer && this._liveTimer.answerIndex === answerIndex) return;
+    // A turn that has already reported its final duration must never go back
+    // to counting: the stopwatch has no stop signal of its own, so one that
+    // restarts after the turn ended runs until the tab is switched away.
+    if (this.answerTimings.has(answerIndex)) return;
+    this.stopAnswerTimer();
+    this._liveTimer = {
+      answerIndex,
+      startedAt: Date.now(),
+      handle: setInterval(() => {
+        const el = this._answerTimeElement(answerIndex);
+        if (!el) return;
+        el.classList.add("answer-time--live");
+        el.textContent = window.TimeFormat.formatStopwatch(
+          Date.now() - this._liveTimer.startedAt,
+        );
+      }, 1000),
+    };
+  }
+
+  /** Stop the live stopwatch, leaving whatever it last rendered in place. */
+  stopAnswerTimer() {
+    if (this._liveTimer) {
+      clearInterval(this._liveTimer.handle);
+      this._liveTimer = null;
+    }
+  }
+
+  /**
+   * Elapsed milliseconds on the running turn, or null when none is running.
+   * @returns {number|null}
+   */
+  liveTurnElapsedMs() {
+    return this._liveTimer ? Date.now() - this._liveTimer.startedAt : null;
+  }
+
+  _answerTimeElement(answerIndex) {
+    const bd = this.answerBuffers.get(answerIndex);
+    return bd?.answerWrapper?.querySelector(".answer-time") || null;
+  }
+
+  /**
+   * Draw the model/tools/overhead proportions as a thin bar under the header.
+   *
+   * Skipped for turns under a second, where the segments would be narrower
+   * than their own borders and the bar would read as decoration.
+   */
+  _renderTurnSplit(answerIndex, timing) {
+    const bd = this.answerBuffers.get(answerIndex);
+    const wrapper = bd?.answerWrapper;
+    if (!wrapper || !timing.wall_ms || timing.wall_ms < 1000) return;
+
+    const header = wrapper.querySelector(".answer-header");
+    if (!header) return;
+
+    wrapper.querySelector(".turn-split")?.remove();
+
+    const total = timing.wall_ms;
+    const llm = Math.max(0, timing.llm_ms || 0);
+    const tools = Math.max(0, timing.tool_ms || 0);
+    const overhead = Math.max(0, total - llm - tools);
+    const T = window.TimeFormat;
+
+    const bar = document.createElement("div");
+    bar.className = "turn-split";
+    bar.contentEditable = "false";
+    bar.title = T.describeTurn(timing);
+
+    for (const [kind, value] of [
+      ["llm", llm],
+      ["tools", tools],
+      ["overhead", overhead],
+    ]) {
+      if (value <= 0) continue;
+      const seg = document.createElement("span");
+      seg.className = `turn-split-seg turn-split-seg--${kind}`;
+      seg.style.width = `${(value / total) * 100}%`;
+      bar.appendChild(seg);
+    }
+
+    header.insertAdjacentElement("afterend", bar);
   }
 
   /**

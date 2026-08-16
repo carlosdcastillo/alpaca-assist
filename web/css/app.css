@@ -1777,6 +1777,97 @@ a[href^="alpaca://conv/"] {
     color: var(--success-color);
 }
 
+/* ---------------------------------------------------------------------------
+   Time awareness
+
+   Three surfaces, one visual language: message headers carry a wall-clock
+   time, answer headers carry the turn's duration plus a proportion bar, and a
+   divider marks pauses between sessions. All three are secondary text — they
+   should be findable when looked for and invisible when reading prose.
+   --------------------------------------------------------------------------- */
+
+.message-time,
+.answer-time {
+    margin-left: auto;
+    font-size: 11px;
+    font-variant-numeric: tabular-nums;
+    color: var(--text-muted);
+    letter-spacing: 0.02em;
+    cursor: default;
+}
+
+.answer-time {
+    color: var(--text-secondary);
+}
+
+/* The live stopwatch. Pulsing rather than static so a turn stuck on a slow
+   tool still looks alive while the number sits on the same second. */
+.answer-time--live {
+    color: var(--success-color);
+    animation: answer-time-pulse 2s ease-in-out infinite;
+}
+
+@keyframes answer-time-pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.45; }
+}
+
+/* Where the turn's wall time actually went. */
+.turn-split {
+    display: flex;
+    height: 2px;
+    width: 100%;
+    margin: -6px 0 10px;
+    border-radius: 1px;
+    overflow: hidden;
+    opacity: 0.65;
+    transition: opacity 0.15s;
+    cursor: default;
+}
+
+.turn-split:hover {
+    opacity: 1;
+}
+
+.turn-split-seg--llm {
+    background: var(--success-color);
+}
+
+.turn-split-seg--tools {
+    background: var(--accent-primary);
+}
+
+.turn-split-seg--overhead {
+    background: var(--border-light);
+}
+
+/* A pause long enough that the conversation resumed rather than continued. */
+.time-gap {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin: 28px 0 20px;
+    user-select: none;
+}
+
+.time-gap::before,
+.time-gap::after {
+    content: "";
+    flex: 1;
+    height: 1px;
+    background: var(--border-color);
+}
+
+.time-gap-label {
+    font-family: var(--font-ui);
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--text-muted);
+    white-space: nowrap;
+    cursor: default;
+}
+
 /* Answer content - same high-end styling as message-content */
 .answer {
     font-family: var(--font-content);

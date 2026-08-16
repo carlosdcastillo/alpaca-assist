@@ -2225,6 +2225,9 @@ class AlpacaApp {
     // Walk active path, pairing user/assistant nodes and rendering them.
     let answerIndex = 0;
     let pendingUserId = null;
+    // When the previous turn stopped producing output, so each question's gap
+    // measures the user's own pause rather than including the model's work.
+    let previousEnd = null;
 
     for (const id of activePath) {
       const node = graph.nodes[id];
@@ -2248,7 +2251,19 @@ class AlpacaApp {
                   .map((c) => (typeof c === "string" ? c : c.content))
                   .join("")
               : "";
-        this.chatDisplay.addQuestion(questionText, images);
+        this.chatDisplay.addQuestion(questionText, images, {
+          timestamp: userNode.created_at,
+          previousEnd,
+        });
+
+        // Registered before rendering so the header picks it up the moment
+        // the answer buffer is created.
+        if (node.timing) {
+          this.chatDisplay.setAnswerTiming(answerIndex, node.timing);
+        }
+        previousEnd =
+          node.timing?.completed_at ??
+          window.TimeFormat.toEpoch(node.created_at);
 
         // Render answer content
         const content = node.content;
@@ -2269,6 +2284,11 @@ class AlpacaApp {
         pendingUserId = null;
       }
     }
+
+    // Carry the last turn's end forward so the first question typed after
+    // reopening an old conversation gets its divider immediately, rather than
+    // only once the conversation is reloaded from disk again.
+    this._lastTurnEnd = previousEnd;
   }
 
   /**
@@ -2383,6 +2403,7 @@ class AlpacaApp {
             component.content,
             "result",
             foldId,
+            component.duration_ms ?? null,
           );
         }
       } else if (typeof component === "string") {
@@ -2410,6 +2431,9 @@ class AlpacaApp {
   _renderLegacyChatState(chatState) {
     const questions = chatState.questions || [];
     const answers = chatState.answers || [];
+    const questionTimes = chatState.question_times || [];
+    const turnTimings = chatState.turn_timings || [];
+    let previousEnd = null;
 
     console.log("[DEBUG] _renderLegacyChatState called");
     console.log("[DEBUG] questions:", questions.length);
@@ -2426,7 +2450,16 @@ class AlpacaApp {
         `[DEBUG] Adding question ${i}:`,
         questions[i].substring(0, 50),
       );
-      this.chatDisplay.addQuestion(questions[i], questionImages);
+      this.chatDisplay.addQuestion(questions[i], questionImages, {
+        timestamp: questionTimes[i],
+        previousEnd,
+      });
+      if (turnTimings[i]) {
+        this.chatDisplay.setAnswerTiming(i, turnTimings[i]);
+      }
+      previousEnd =
+        turnTimings[i]?.completed_at ??
+        window.TimeFormat.toEpoch(questionTimes[i]);
 
       // Render answer if exists
       if (i < answers.length && answers[i]) {
@@ -2456,6 +2489,7 @@ class AlpacaApp {
       }
     }
 
+    this._lastTurnEnd = previousEnd;
     console.log("[DEBUG] _renderLegacyChatState complete");
   }
 
@@ -2480,7 +2514,10 @@ class AlpacaApp {
     // Send to Python (fast call, just starts a thread)
     try {
       await this.api.send_message(this.currentTabId, text, base64s);
-      this.chatDisplay.addQuestion(text, dataUris);
+      this.chatDisplay.addQuestion(text, dataUris, {
+        timestamp: Date.now() / 1000,
+        previousEnd: this._lastTurnEnd,
+      });
     } catch (e) {
       // Nothing was actually persisted on the Python side, so don't show a
       // bubble implying it was sent — restore the text instead so it isn't
@@ -2571,7 +2608,9 @@ class AlpacaApp {
     // Only update UI if this is the current tab
     if (tabId === this.currentTabId) {
       this.chatDisplay.setStreaming(true);
+      this.chatDisplay.startAnswerTimer(answerIndex);
       this.inputArea.setStreaming(true);
+      this._startStatusTicker();
       this._updateStatusBar();
     }
   }
@@ -2583,11 +2622,50 @@ class AlpacaApp {
     // Always update the tab's streaming state, even if not the current tab
     this.tabManager.setTabStreaming(tabId, false);
 
+    // The turn stopwatch is deliberately NOT stopped here — this fires once
+    // per LLM invocation, so a tool loop hits it several times mid-turn.
+    // onTurnTiming is the once-per-turn signal that ends it.
+
     // Only update UI if this is the current tab
     if (tabId === this.currentTabId) {
       this.chatDisplay.setStreaming(false);
       this.inputArea.setStreaming(false);
       this._updateStatusBar();
+    }
+  }
+
+  /**
+   * Called by Python once a whole turn (including its tool loop) has finished,
+   * with the wall/model/tool breakdown for it.
+   */
+  onTurnTiming(tabId, answerIndex, timing) {
+    if (tabId !== this.currentTabId) return;
+    // Anchor for the next question's gap, so a divider appears live during a
+    // session and not only after the conversation is reloaded from disk.
+    this._lastTurnEnd = timing?.completed_at ?? Date.now() / 1000;
+    this.chatDisplay.stopAnswerTimer();
+    this._stopStatusTicker();
+    this.chatDisplay.setAnswerTiming(answerIndex, timing);
+    this._updateStatusBar();
+  }
+
+  /**
+   * Drive the status bar's live elapsed counter while a turn is in flight.
+   *
+   * Kept separate from _scheduleStatusUpdate: that one throttles refreshes
+   * caused by arriving content, and a turn that is waiting on a slow tool
+   * produces no content at all — exactly when the user most wants to see the
+   * clock moving.
+   */
+  _startStatusTicker() {
+    if (this._statusTicker) return;
+    this._statusTicker = setInterval(() => this._updateStatusBar(), 1000);
+  }
+
+  _stopStatusTicker() {
+    if (this._statusTicker) {
+      clearInterval(this._statusTicker);
+      this._statusTicker = null;
     }
   }
 
@@ -2706,6 +2784,7 @@ class AlpacaApp {
         foldData.body,
         foldData.type,
         foldData.fold_id,
+        foldData.duration_ms ?? null,
       );
     }
   }
@@ -3159,8 +3238,17 @@ class AlpacaApp {
     statusText.textContent = leftParts.join(", ");
     statusText.title = result.workspace_path || "";
 
-    // Right: streaming indicator + skills
-    const rightParts = [isStreaming ? "🟢 Streaming" : "⚪ Idle"];
+    // Right: streaming indicator + skills. While a turn is in flight the
+    // indicator counts up, so a long wait on a slow tool reads as progress
+    // rather than as a hang.
+    const elapsed = this.chatDisplay?.liveTurnElapsedMs?.();
+    const rightParts = [
+      isStreaming
+        ? elapsed !== null && elapsed !== undefined
+          ? `🟢 Streaming ${window.TimeFormat.formatStopwatch(elapsed)}`
+          : "🟢 Streaming"
+        : "⚪ Idle",
+    ];
     if (result.skill_count > 0) {
       rightParts.push(`📚 ${result.skill_count} skills`);
     }

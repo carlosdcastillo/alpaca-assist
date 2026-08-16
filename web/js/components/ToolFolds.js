@@ -40,19 +40,49 @@ class ToolFold extends HTMLElement {
    * Update the fold title based on body content
    */
   _updateTitle() {
-    const type = this.getAttribute("data-type") || "call";
-    const toolName = this._extractToolName();
-    const titleText =
-      type === "call"
-        ? toolName
-          ? `Tool Call: ${toolName}`
-          : "Tool Call"
-        : "Tool Result";
-
     const titleEl = this.shadowRoot?.querySelector(".fold-title");
     if (titleEl) {
-      titleEl.textContent = titleText;
+      titleEl.textContent = this._titleText();
     }
+    this._updateDuration();
+  }
+
+  /**
+   * Header label for this fold, independent of where it is being rendered.
+   */
+  _titleText() {
+    const type = this.getAttribute("data-type") || "call";
+    const toolName = this._extractToolName();
+    return type === "call"
+      ? toolName
+        ? `Tool Call: ${toolName}`
+        : "Tool Call"
+      : "Tool Result";
+  }
+
+  /**
+   * Show how long the tool took, on the result fold that reports it.
+   *
+   * Only result folds carry data-duration-ms: the duration is not known when
+   * the call fold is injected (that happens the moment the model asks for the
+   * tool), and back-filling it there later would mean reaching across two
+   * shadow roots to do what one attribute on the right element does.
+   */
+  _updateDuration() {
+    const durationEl = this.shadowRoot?.querySelector(".fold-duration");
+    if (!durationEl) return;
+    const raw = this.getAttribute("data-duration-ms");
+    const ms = raw === null ? null : Number(raw);
+    if (ms === null || Number.isNaN(ms)) {
+      durationEl.textContent = "";
+      return;
+    }
+    durationEl.textContent = window.TimeFormat
+      ? window.TimeFormat.formatDurationMs(ms)
+      : `${ms}ms`;
+    // A tool that ran for minutes is worth noticing when scanning a long
+    // answer; one that returned instantly is not.
+    durationEl.classList.toggle("fold-duration--slow", ms >= 5000);
   }
 
   /**
@@ -239,14 +269,7 @@ class ToolFold extends HTMLElement {
     const type = this.getAttribute("data-type") || "call";
     const answerIndex = this.getAttribute("data-answer-index") || "0";
 
-    // Extract tool name for display
-    const toolName = this._extractToolName();
-    const titleText =
-      type === "call"
-        ? toolName
-          ? `Tool Call: ${toolName}`
-          : "Tool Call"
-        : "Tool Result";
+    const titleText = this._titleText();
 
     this.shadowRoot.innerHTML = `
             <style>
@@ -283,6 +306,18 @@ class ToolFold extends HTMLElement {
                 .fold-title {
                     flex: 1;
                     font-weight: 500;
+                }
+
+                .fold-duration {
+                    font-size: 11px;
+                    font-variant-numeric: tabular-nums;
+                    color: var(--text-secondary, #9a9a9a);
+                    opacity: 0.85;
+                }
+
+                .fold-duration--slow {
+                    color: var(--warning, #d7a55b);
+                    opacity: 1;
                 }
 
                 .fold-arrow {
@@ -425,6 +460,7 @@ class ToolFold extends HTMLElement {
             <div class="fold-header">
                 <span class="fold-icon">${type === "call" ? "🔧" : "📦"}</span>
                 <span class="fold-title">${titleText}</span>
+                <span class="fold-duration"></span>
                 <span class="fold-arrow ${
                   this.expanded ? "expanded" : ""
                 }">▶</span>
@@ -462,9 +498,7 @@ class ToolFold extends HTMLElement {
       const safeMime = /^image\/[a-zA-Z0-9.+-]+$/.test(mimeType)
         ? mimeType
         : null;
-      const safeData = /^[A-Za-z0-9+/=]*$/.test(base64Data)
-        ? base64Data
-        : null;
+      const safeData = /^[A-Za-z0-9+/=]*$/.test(base64Data) ? base64Data : null;
       if (safeMime && safeData) {
         const safeDesc = this._escapeHtml(description || "");
         bodyDiv.innerHTML = `
