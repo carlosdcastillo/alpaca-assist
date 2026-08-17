@@ -3749,7 +3749,7 @@ class AlpacaApp {
         badge.classList.add("status-connection--disconnected");
       }
     } else {
-      badge.textContent = "Local";
+      badge.textContent = "Runs locally";
       badge.title = "Running on this machine";
       badge.classList.add("status-connection--local");
     }
