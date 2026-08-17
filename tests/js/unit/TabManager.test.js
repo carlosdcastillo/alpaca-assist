@@ -402,7 +402,20 @@ describe("TabManager", () => {
 
   describe("setPackWorkspaceStatus()", () => {
     beforeEach(() => {
-      tabManager.createTabUI("pack-1", "Remote work", false, true, "alpaca");
+      tabManager.createTabUI(
+        "pack-1",
+        "Remote work",
+        false,
+        true,
+        "alpaca",
+        "Deimos",
+      );
+    });
+
+    it("shows the Pack host before status is loaded", () => {
+      expect(container.querySelector(".tab-workspace-meta").textContent).toBe(
+        "Runs on Deimos",
+      );
     });
 
     it("shows the outcome without exposing repository plumbing", () => {
@@ -423,7 +436,7 @@ describe("TabManager", () => {
       expect(meta.textContent).not.toContain("feature/pack-status");
     });
 
-    it("marks a completed task as done", () => {
+    it("marks an idle clean task as ready", () => {
       tabManager.setPackWorkspaceStatus("pack-1", {
         connected: true,
         workspace_status: {
@@ -435,7 +448,7 @@ describe("TabManager", () => {
       });
 
       expect(container.querySelector(".tab-workspace-meta").textContent).toBe(
-        "Done",
+        "Ready",
       );
     });
 

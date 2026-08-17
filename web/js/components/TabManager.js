@@ -109,7 +109,13 @@ class TabManager {
     packHostName = null,
   ) {
     // Create tab button in UI
-    const tabButton = this._createTabButton(tabId, title, isPack, project);
+    const tabButton = this._createTabButton(
+      tabId,
+      title,
+      isPack,
+      project,
+      packHostName,
+    );
     this.container.appendChild(tabButton);
 
     // Create tab data structure
@@ -144,7 +150,13 @@ class TabManager {
   /**
    * Create tab button element
    */
-  _createTabButton(tabId, title, isPack = false, project = null) {
+  _createTabButton(
+    tabId,
+    title,
+    isPack = false,
+    project = null,
+    packHostName = null,
+  ) {
     const button = document.createElement("div");
     button.className = isPack ? "tab pack" : "tab";
     button.dataset.tabId = tabId;
@@ -166,7 +178,9 @@ class TabManager {
     if (isPack) {
       workspaceMeta = document.createElement("span");
       workspaceMeta.className = "tab-workspace-meta";
-      workspaceMeta.textContent = "Preparing offload…";
+      workspaceMeta.textContent = packHostName
+        ? `Runs on ${packHostName}`
+        : "Remote task";
     }
 
     const closeBtn = document.createElement("button");
@@ -446,7 +460,7 @@ class TabManager {
       meta.textContent = "Changes ready to review";
       meta.classList.add("tab-workspace-meta--dirty");
     } else {
-      meta.textContent = "Done";
+      meta.textContent = "Ready";
     }
     meta.title = meta.textContent;
   }
