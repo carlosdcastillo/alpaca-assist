@@ -209,7 +209,7 @@ class AlpacaApp {
       .querySelectorAll(
         ".dialog-close, #cancel-prefs, #history-close-btn, #history-dialog-close, " +
           "#mcp-config-close-btn, #mcp-tools-close-btn, #skills-cancel-btn, " +
-          "#workspace-changes-close-btn",
+          "#workspace-changes-close-btn, #pack-tab-cancel",
       )
       .forEach((btn) => {
         btn.addEventListener("click", () => this._closeDialogs());
@@ -222,6 +222,21 @@ class AlpacaApp {
     document
       .getElementById("workspace-changes-refresh-btn")
       .addEventListener("click", () => this._loadWorkspaceChanges());
+
+    document.getElementById("pack-tab-form").addEventListener("submit", (e) => {
+      e.preventDefault();
+      this._createPackTabFromDialog();
+    });
+    document
+      .getElementById("pack-custom-host")
+      .addEventListener("input", () => {
+        document.querySelector(
+          'input[name="pack-host"][value="__custom__"]',
+        ).checked = true;
+        document
+          .getElementById("pack-custom-host")
+          .removeAttribute("aria-invalid");
+      });
 
     // MCP Config dialog buttons
     document
@@ -768,49 +783,7 @@ class AlpacaApp {
         await this.tabManager.createTab();
         break;
       case "new-pack-tab": {
-        const hostsResult = await this.api.get_pack_hosts();
-        const knownHosts =
-          hostsResult && hostsResult.success ? hostsResult.hosts || [] : [];
-        const selectOptions = knownHosts.map((h) => ({
-          value: h.hostname,
-          label: h.display_name,
-        }));
-        const host = await this._showMessageDialog(
-          "Choose where to offload this task:",
-          {
-            title: "Offload a task",
-            cancelText: "Cancel",
-            withInput: true,
-            selectOptions,
-          },
-        );
-        if (!host || !host.trim()) break;
-
-        const projectsResult = await this.api.get_projects();
-        const projects =
-          projectsResult && projectsResult.success
-            ? projectsResult.projects || []
-            : [];
-        const projectOptions = [
-          { value: "", label: "No project" },
-          ...projects.map((project) => ({
-            value: project.name,
-            label: project.name,
-          })),
-        ];
-        const project = await this._showMessageDialog(
-          "Choose the project this task should work in:",
-          {
-            title: "Offload a task · Project",
-            okText: "Offload",
-            cancelText: "Cancel",
-            selectOptions: projectOptions,
-            selectCustomLabel: null,
-          },
-        );
-        if (project === null) break;
-
-        await this.tabManager.createPackTab(host.trim(), project);
+        await this._showPackTabDialog();
         break;
       }
       case "close-tab":
@@ -2798,6 +2771,142 @@ class AlpacaApp {
   // =======================================================================
   // Dialogs
   // =======================================================================
+
+  async _showPackTabDialog() {
+    const hostChoices = document.getElementById("pack-host-choices");
+    const projectChoices = document.getElementById("pack-project-choices");
+    const customChoice = document.getElementById("pack-custom-host-choice");
+    const customInput = document.getElementById("pack-custom-host");
+    const createBtn = document.getElementById("pack-tab-create");
+
+    hostChoices.textContent = "Loading hosts…";
+    projectChoices.textContent = "Loading projects…";
+    customChoice.style.display = "none";
+    customInput.value = "";
+    customInput.removeAttribute("aria-invalid");
+    createBtn.disabled = true;
+    this._showDialog("pack-tab-dialog");
+
+    let hostsResult;
+    let projectsResult;
+    try {
+      [hostsResult, projectsResult] = await Promise.all([
+        this.api.get_pack_hosts(),
+        this.api.get_projects(),
+      ]);
+    } catch (error) {
+      console.error("Failed to load offload choices:", error);
+    }
+
+    const hosts = hostsResult?.success ? hostsResult.hosts || [] : [];
+    const projects = projectsResult?.success
+      ? projectsResult.projects || []
+      : [];
+    hostChoices.textContent = "";
+    projectChoices.textContent = "";
+    customChoice.style.display = "";
+
+    const addChoice = (container, name, value, title, detail, checked) => {
+      const card = document.createElement("label");
+      card.className = "pack-choice-card";
+      card.title = detail;
+
+      const radio = document.createElement("input");
+      radio.type = "radio";
+      radio.name = name;
+      radio.value = value;
+      radio.checked = checked;
+
+      const content = document.createElement("span");
+      content.className = "pack-choice-content";
+      const heading = document.createElement("strong");
+      heading.textContent = title;
+      const description = document.createElement("span");
+      description.textContent = detail;
+      content.append(heading, description);
+      card.append(radio, content);
+      container.appendChild(card);
+    };
+
+    hosts.forEach((host, index) => {
+      addChoice(
+        hostChoices,
+        "pack-host",
+        host.hostname,
+        host.display_name || host.hostname,
+        host.display_name && host.display_name !== host.hostname
+          ? host.hostname
+          : "Configured remote host",
+        index === 0,
+      );
+    });
+    const customRadio = customChoice.querySelector('input[type="radio"]');
+    customRadio.checked = hosts.length === 0;
+
+    addChoice(
+      projectChoices,
+      "pack-project",
+      "",
+      "No project",
+      "Run without a managed project workspace",
+      true,
+    );
+    projects.forEach((project) => {
+      addChoice(
+        projectChoices,
+        "pack-project",
+        project.name,
+        project.name,
+        `${project.repo_url}${project.branch ? ` · ${project.branch}` : ""}`,
+        false,
+      );
+    });
+
+    createBtn.disabled = false;
+    if (
+      document.getElementById("pack-tab-dialog").classList.contains("active")
+    ) {
+      (hosts.length ? hostChoices.querySelector("input") : customInput).focus();
+    }
+  }
+
+  async _createPackTabFromDialog() {
+    const selectedHost = document.querySelector(
+      'input[name="pack-host"]:checked',
+    );
+    const customInput = document.getElementById("pack-custom-host");
+    const host =
+      selectedHost?.value === "__custom__"
+        ? customInput.value.trim()
+        : selectedHost?.value?.trim();
+    if (!host) {
+      customInput.setAttribute("aria-invalid", "true");
+      customInput.focus();
+      return;
+    }
+
+    const project =
+      document.querySelector('input[name="pack-project"]:checked')?.value || "";
+    const createBtn = document.getElementById("pack-tab-create");
+    createBtn.disabled = true;
+    createBtn.textContent = "Offloading…";
+    try {
+      const tabId = await this.tabManager.createPackTab(host, project);
+      if (tabId) {
+        this._closeDialogs();
+      } else {
+        this._showToast("Could not offload the task.", { type: "error" });
+      }
+    } catch (error) {
+      console.error("Failed to offload task:", error);
+      this._showToast(error?.message || "Could not offload the task.", {
+        type: "error",
+      });
+    } finally {
+      createBtn.disabled = false;
+      createBtn.textContent = "Offload Task";
+    }
+  }
 
   _showDialog(dialogId) {
     document

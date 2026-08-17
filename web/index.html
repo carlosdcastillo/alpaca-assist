@@ -435,6 +435,46 @@
             </div>
         </div>
 
+        <!-- Offload Task Dialog -->
+        <div class="dialog pack-tab-dialog" id="pack-tab-dialog">
+            <div class="dialog-header pack-tab-dialog-header">
+                <div>
+                    <span class="dialog-eyebrow">Remote execution</span>
+                    <h3>Offload a Task</h3>
+                    <p>Choose where this task will run and what it will work on.</p>
+                </div>
+                <button class="dialog-close" type="button" aria-label="Close">&times;</button>
+            </div>
+            <form id="pack-tab-form">
+                <div class="dialog-body pack-tab-dialog-body">
+                    <fieldset class="pack-choice-section">
+                        <legend>Execution host</legend>
+                        <p class="pack-choice-help">The remote machine that will run the agent.</p>
+                        <div class="pack-choice-list" id="pack-host-choices"></div>
+                        <label class="pack-choice-card pack-choice-card--custom" id="pack-custom-host-choice">
+                            <input type="radio" name="pack-host" value="__custom__">
+                            <span class="pack-choice-content">
+                                <strong>Other host</strong>
+                                <span>Connect to another SSH destination</span>
+                                <input type="text" id="pack-custom-host" placeholder="user@hostname"
+                                       autocomplete="off" spellcheck="false" aria-label="SSH destination">
+                            </span>
+                        </label>
+                    </fieldset>
+
+                    <fieldset class="pack-choice-section">
+                        <legend>Project</legend>
+                        <p class="pack-choice-help">Optionally prepare a managed repository workspace.</p>
+                        <div class="pack-choice-list pack-project-choices" id="pack-project-choices"></div>
+                    </fieldset>
+                </div>
+                <div class="dialog-footer">
+                    <button class="btn-secondary" id="pack-tab-cancel" type="button">Cancel</button>
+                    <button class="btn-primary" id="pack-tab-create" type="submit">Offload Task</button>
+                </div>
+            </form>
+        </div>
+
         <!-- Preferences Dialog -->
         <div class="dialog" id="preferences-dialog">
             <div class="dialog-header">

@@ -1714,6 +1714,163 @@ a[href^="alpaca://conv/"] {
     max-height: 60vh;
 }
 
+.pack-tab-dialog {
+    max-width: 720px;
+}
+
+.pack-tab-dialog-header {
+    align-items: flex-start;
+    padding: 20px 22px 17px;
+}
+
+.dialog-eyebrow {
+    display: block;
+    margin-bottom: 3px;
+    color: var(--accent-primary);
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+}
+
+.pack-tab-dialog-header p {
+    margin-top: 3px;
+    color: var(--text-secondary);
+    font-size: 12px;
+}
+
+.pack-tab-dialog form {
+    display: flex;
+    min-height: 0;
+    flex: 1;
+    flex-direction: column;
+}
+
+.pack-tab-dialog-body {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 22px;
+    width: 100%;
+    padding: 20px 22px 22px;
+}
+
+.pack-choice-section {
+    min-width: 0;
+    border: 0;
+}
+
+.pack-choice-section legend {
+    color: var(--text-primary);
+    font-size: 13px;
+    font-weight: 700;
+}
+
+.pack-choice-help {
+    margin: 2px 0 10px;
+    color: var(--text-secondary);
+    font-size: 11px;
+}
+
+.pack-choice-list {
+    display: flex;
+    flex-direction: column;
+    gap: 7px;
+}
+
+.pack-project-choices {
+    max-height: 280px;
+    padding-right: 3px;
+    overflow-y: auto;
+}
+
+.pack-choice-card {
+    display: flex;
+    gap: 10px;
+    min-width: 0;
+    padding: 10px 11px;
+    color: var(--text-primary);
+    background: var(--bg-primary);
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    cursor: pointer;
+    transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+.pack-choice-card:hover {
+    background: var(--bg-tertiary);
+    border-color: var(--border-light);
+}
+
+.pack-choice-card:has(input[type="radio"]:checked) {
+    background: var(--accent-secondary);
+    border-color: var(--accent-primary);
+    box-shadow: inset 3px 0 0 var(--accent-primary);
+}
+
+.pack-choice-card > input[type="radio"] {
+    flex: 0 0 auto;
+    margin-top: 3px;
+    accent-color: var(--accent-primary);
+}
+
+.pack-choice-content {
+    display: flex;
+    min-width: 0;
+    flex: 1;
+    flex-direction: column;
+}
+
+.pack-choice-content strong {
+    overflow: hidden;
+    font-size: 12px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.pack-choice-content > span {
+    overflow: hidden;
+    color: var(--text-secondary);
+    font-size: 10px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+#pack-custom-host {
+    display: none;
+    width: 100%;
+    margin-top: 8px;
+    padding: 7px 9px;
+    color: var(--text-primary);
+    background: var(--bg-primary);
+    border: 1px solid var(--border-light);
+    border-radius: 4px;
+    font-family: var(--font-mono);
+    font-size: 12px;
+}
+
+#pack-custom-host[aria-invalid="true"] {
+    border-color: var(--error-color);
+}
+
+.pack-choice-card--custom:has(input[type="radio"]:checked) #pack-custom-host {
+    display: block;
+}
+
+.pack-tab-dialog .btn-primary:disabled {
+    opacity: 0.55;
+    cursor: wait;
+}
+
+.pack-tab-dialog .dialog-footer {
+    padding: 13px 22px;
+}
+
+@media (max-width: 680px) {
+    .pack-tab-dialog-body {
+        grid-template-columns: 1fr;
+    }
+}
+
 .pref-section {
     margin-bottom: 20px;
 }
