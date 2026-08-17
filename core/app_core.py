@@ -370,7 +370,7 @@ class AppCore:
 
         tab_id = self._alloc_tab_id()
         if title is None:
-            title = f"Chat {len(self.tabs) + 1}"
+            title = f"Task {len(self.tabs) + 1}"
         if conversation_id is None:
             conversation_id = self.db.allocate_conversation_id()
 
@@ -400,7 +400,7 @@ class AppCore:
 
         tab_id = self._alloc_tab_id()
         if title is None:
-            title = "Pack Tab"
+            title = "Offloaded Task"
         if conversation_id is None:
             conversation_id = self.db.allocate_conversation_id()
 

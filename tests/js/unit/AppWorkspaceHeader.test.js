@@ -20,7 +20,7 @@ describe("AlpacaApp Pack workspace header", () => {
     document.body.innerHTML = "";
   });
 
-  it("prominently renders dirty Pack repository state", () => {
+  it("renders the offload promise rather than worker infrastructure", () => {
     app._updateWorkspaceHeader({
       is_pack: true,
       project: "alpaca",
@@ -42,13 +42,16 @@ describe("AlpacaApp Pack workspace header", () => {
     ).toHaveTextContent("alpaca");
     expect(
       document.getElementById("workspace-header-branch"),
-    ).toHaveTextContent("feature/header");
+    ).toHaveTextContent("");
     expect(
       document.getElementById("workspace-header-changes"),
-    ).toHaveTextContent("4 modified");
-    expect(document.getElementById("workspace-header-sync")).toHaveTextContent(
-      "2 unpushed",
-    );
+    ).toHaveTextContent("Changes ready to review");
+    expect(
+      document.getElementById("workspace-header-location"),
+    ).toHaveTextContent("Working remotely · your laptop is untouched");
+    expect(
+      document.getElementById("workspace-header-location"),
+    ).not.toHaveTextContent("/work/alpaca");
   });
 
   it("hides the repository header for local tabs", () => {

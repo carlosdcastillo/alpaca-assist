@@ -224,7 +224,7 @@ describe("PythonAPI", () => {
 
     it("create_tab() should pass through whatever title is provided", async () => {
       await api.create_tab();
-      expect(mockPythonAPI.create_tab).toHaveBeenCalledWith("New Chat");
+      expect(mockPythonAPI.create_tab).toHaveBeenCalledWith("New Task");
 
       await api.create_tab("Custom Title");
       expect(mockPythonAPI.create_tab).toHaveBeenCalledWith("Custom Title");
@@ -245,7 +245,7 @@ describe("PythonAPI", () => {
 
       expect(mockPythonAPI.create_pack_tab).toHaveBeenCalledWith(
         "user@host",
-        "Pack Tab",
+        "Offloaded Task",
       );
     });
 

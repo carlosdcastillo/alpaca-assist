@@ -38,7 +38,7 @@ describe("history preview", () => {
     );
     expect(
       document.querySelector(".history-preview-eyebrow"),
-    ).toHaveTextContent("Pinned conversation");
+    ).toHaveTextContent("Pinned task");
     expect(document.querySelector(".history-preview-labels")).toHaveTextContent(
       "Workplanning",
     );

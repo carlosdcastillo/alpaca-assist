@@ -558,14 +558,13 @@ button {
     margin-left: 4px;
 }
 
-/* Pack tab badge — a small glyph before the title, marking a tab whose
-   backend runs on a remote host over SSH instead of locally. */
+/* Every remote task is presented as the same offload affordance rather than
+   as a distinct worker in a fleet. */
 .tab.pack .tab-title::before {
-    content: '\1F517';  /* chain link emoji - broader font-fallback coverage
-                            than the text-mode chains symbol (U+26D3), which
-                            renders as tofu in Cascadia Mono */
+    content: '↗';
     margin-right: 4px;
     font-size: 11px;
+    color: var(--accent-primary);
 }
 
 .tab-project {
@@ -1946,6 +1945,74 @@ a[href^="alpaca://conv/"] {
 
 .turn-split-seg--overhead {
     background: var(--border-light);
+}
+
+.completion-packet {
+    margin: 14px 0 4px;
+    padding: 12px;
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    background: linear-gradient(135deg, var(--bg-tertiary), var(--bg-secondary));
+}
+
+.completion-packet-heading {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 9px;
+}
+
+.completion-packet-heading strong { font-size: 13px; }
+
+.completion-packet-heading span {
+    color: var(--text-secondary);
+    font-size: 11px;
+}
+
+.completion-packet-items {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 7px;
+}
+
+.completion-packet-item {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    padding: 8px 10px;
+    color: var(--text-primary);
+    text-align: left;
+    background: var(--bg-primary);
+    border: 1px solid var(--border-light);
+    border-radius: 6px;
+    cursor: pointer;
+}
+
+.completion-packet-item:hover {
+    border-color: var(--accent-secondary);
+    background: var(--bg-hover);
+}
+
+.completion-packet-item strong,
+.completion-packet-item small { display: block; }
+
+.completion-packet-item small {
+    margin-top: 2px;
+    color: var(--text-secondary);
+    font-size: 10px;
+}
+
+.completion-packet-icon {
+    display: grid;
+    place-items: center;
+    width: 24px;
+    height: 24px;
+    flex: 0 0 24px;
+    color: var(--accent-primary);
+    background: var(--bg-tertiary);
+    border-radius: 5px;
+    font-weight: 700;
 }
 
 /* A pause long enough that the conversation resumed rather than continued. */

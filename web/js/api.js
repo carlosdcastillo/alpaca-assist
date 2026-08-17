@@ -62,11 +62,11 @@ class PythonAPI {
   // Tab Management
   // =======================================================================
 
-  async create_tab(title = "New Chat") {
+  async create_tab(title = "New Task") {
     return this.call("create_tab", title);
   }
 
-  async create_pack_tab(host, title = "Pack Tab", project = "") {
+  async create_pack_tab(host, title = "Offloaded Task", project = "") {
     if (!project) return this.call("create_pack_tab", host, title);
     return this.call("create_pack_tab", host, title, project);
   }

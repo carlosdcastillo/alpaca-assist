@@ -517,7 +517,7 @@ class ToolFold extends HTMLElement {
       bodyDiv.innerHTML = '<div class="video-status">Loading video…</div>';
       const tabId = window.app?.currentTabId;
       if (!tabId) {
-        bodyDiv.textContent = "Video is unavailable because no tab is active.";
+        bodyDiv.textContent = "Video is unavailable because no task is active.";
         return;
       }
       window.VideoResultUtils.load(tabId, result)
@@ -613,7 +613,7 @@ class ToolFold extends HTMLElement {
     button.addEventListener("click", async () => {
       const tabId = window.app?.currentTabId;
       if (!tabId) {
-        meta.textContent = `${surfaceId} · no active tab`;
+        meta.textContent = `${surfaceId} · no active task`;
         return;
       }
       button.disabled = true;

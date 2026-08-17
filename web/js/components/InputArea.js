@@ -20,6 +20,12 @@ class InputArea {
     this.markdownInput = new MarkdownInput("markdown-input-container", {
       placeholder: "Type your message... (Ctrl+Enter to send)",
       onSend: (text) => {
+        if (this.isStreaming) {
+          this.setStatus(
+            "Draft saved here — send it when the current task finishes",
+          );
+          return;
+        }
         if (this.onSendCallback) {
           this.onSendCallback(text, [...this.attachedImages]);
         }
@@ -81,11 +87,14 @@ class InputArea {
    * Send the current message
    */
   _sendMessage() {
+    if (this.isStreaming) {
+      this.setStatus(
+        "Draft saved here — send it when the current task finishes",
+      );
+      return;
+    }
     const text = this.markdownInput.getValue().trim();
     if (!text) return;
-
-    // Note: We don't check isStreaming here - that's the caller's responsibility
-    // to know if the current tab is streaming or not
 
     // Clear input
     this.markdownInput.clear();
@@ -193,10 +202,14 @@ class InputArea {
     this.isStreaming = isStreaming;
     this.sendBtn.disabled = isStreaming || !this.isConnected;
     this.stopBtn.disabled = !isStreaming;
-    this.markdownInput.setDisabled(isStreaming);
+    // Keep the composer editable so another thought can be drafted while an
+    // offloaded task runs. Sending remains disabled until the current turn ends.
+    this.markdownInput.setDisabled(false);
 
     if (isStreaming) {
-      this.markdownInput.setPlaceholder("Streaming...");
+      this.markdownInput.setPlaceholder(
+        "Draft your next message while this task runs…",
+      );
     } else {
       this.markdownInput.setPlaceholder(
         "Type your message... (Ctrl+Enter to send)",

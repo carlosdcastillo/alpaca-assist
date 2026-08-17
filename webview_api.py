@@ -100,7 +100,7 @@ class WebViewAPI:
     # JavaScript-callable API methods
     # =======================================================================
 
-    def create_tab(self, title: str = "New Chat") -> dict[str, Any]:
+    def create_tab(self, title: str = "New Task") -> dict[str, Any]:
         """Create new tab — Python generates the ID."""
         try:
             tab_id, tab = self._app.core.create_tab(title)
@@ -207,7 +207,7 @@ class WebViewAPI:
     def create_pack_tab(
         self,
         host: str,
-        title: str = "Pack Tab",
+        title: str = "Offloaded Task",
         project: str = "",
     ) -> dict[str, Any]:
         """Create a new Pack tab — a tab whose backend runs on `host` over SSH.
@@ -1732,7 +1732,7 @@ class WebViewAPI:
 
     def create_tab_and_notify_js(
         self,
-        title: str = "New Chat",
+        title: str = "New Task",
         auto_switch: bool = True,
         conversation_id: int | None = None,
     ) -> dict[str, Any]:
@@ -1775,7 +1775,7 @@ class WebViewAPI:
         self,
         host: str,
         session_id: str,
-        title: str = "Pack Tab",
+        title: str = "Offloaded Task",
         auto_switch: bool = True,
         conversation_id: int | None = None,
         project: str | None = None,

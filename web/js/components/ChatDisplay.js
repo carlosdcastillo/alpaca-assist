@@ -1050,6 +1050,12 @@ class ChatDisplay {
 
     this.injectedFolds.set(key, foldData);
     this.pendingFolds.delete(key);
+    if (
+      foldData.type === "result" &&
+      this.answerTimings.has(foldData.answerIndex)
+    ) {
+      this._renderCompletionPacket(foldData.answerIndex);
+    }
     console.log(
       `[CHAT DEBUG] Injected fold ${foldData.id} (type=${foldData.type})`,
     );
@@ -1571,6 +1577,86 @@ class ChatDisplay {
     // The split bar is the whole point of recording three clocks rather than
     // one: it shows at a glance whether a slow turn was the model or a tool.
     this._renderTurnSplit(answerIndex, timing);
+    this._renderCompletionPacket(answerIndex);
+  }
+
+  /**
+   * Index reviewable evidence at the end of a completed turn. The original
+   * folds remain the source of truth; this packet gives screenshots, video,
+   * tests and diffs a stable outcome-oriented entry point instead of asking
+   * the user to scan tool plumbing.
+   */
+  _renderCompletionPacket(answerIndex) {
+    const wrapper = this.answerBuffers.get(answerIndex)?.answerWrapper;
+    if (!wrapper) return;
+
+    wrapper.querySelector(".completion-packet")?.remove();
+    const groups = new Map([
+      ["Screenshots", []],
+      ["Video", []],
+      ["Tests", []],
+      ["Diffs", []],
+    ]);
+
+    for (const fold of wrapper.querySelectorAll(
+      'tool-fold[data-type="result"]',
+    )) {
+      const result = fold.getBody?.() || "";
+      const callId = fold.id.replace("fold-result-", "fold-call-");
+      const call = wrapper.querySelector(`#${CSS.escape(callId)}`);
+      const command = `${call?.getBody?.() || ""}\n${result}`.toLowerCase();
+
+      if (window.ImageResultUtils?.parse(result)) {
+        groups.get("Screenshots").push(fold);
+      } else if (window.VideoResultUtils?.parse(result)) {
+        groups.get("Video").push(fold);
+      } else if (
+        /(?:^|[\s"'])(?:pytest|jest|vitest|mocha|rspec|cargo test|go test|npm (?:run )?test|pnpm (?:run )?test|yarn test)(?:[\s"']|$)/m.test(
+          command,
+        )
+      ) {
+        groups.get("Tests").push(fold);
+      } else if (
+        /(?:git diff|diff --git|git status|\+\+\+ b\/|--- a\/)/m.test(command)
+      ) {
+        groups.get("Diffs").push(fold);
+      }
+    }
+
+    const available = [...groups].filter(([, folds]) => folds.length > 0);
+    if (available.length === 0) return;
+
+    const packet = document.createElement("section");
+    packet.className = "completion-packet";
+    packet.contentEditable = "false";
+    packet.setAttribute("aria-label", "Completion packet");
+
+    const heading = document.createElement("div");
+    heading.className = "completion-packet-heading";
+    heading.innerHTML =
+      "<strong>Completion packet</strong><span>Evidence from this task</span>";
+    const items = document.createElement("div");
+    items.className = "completion-packet-items";
+
+    const icons = { Screenshots: "▣", Video: "▶", Tests: "✓", Diffs: "±" };
+    for (const [label, folds] of available) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "completion-packet-item";
+      button.innerHTML = `<span class="completion-packet-icon">${
+        icons[label]
+      }</span><span><strong>${label}</strong><small>${folds.length} ${
+        folds.length === 1 ? "item" : "items"
+      } · review output</small></span>`;
+      button.addEventListener("click", () => {
+        folds[0].expand?.();
+        folds[0].scrollIntoView?.({ behavior: "smooth", block: "center" });
+      });
+      items.appendChild(button);
+    }
+
+    packet.append(heading, items);
+    wrapper.appendChild(packet);
   }
 
   /**

@@ -989,4 +989,45 @@ describe("ChatDisplay", () => {
       expect(parseInt(hash, 36)).toBeGreaterThanOrEqual(0);
     });
   });
+
+  describe("completion packet", () => {
+    it("groups screenshots, video, tests, and diffs as reviewable evidence", () => {
+      chatDisplay.appendToAnswerBuffer(0, "Task complete", true);
+      const wrapper = chatDisplay.answerBuffers.get(0).answerWrapper;
+      window.ImageResultUtils.parse = jest.fn((body) =>
+        body === "screenshot" ? { mimeType: "image/png" } : null,
+      );
+      window.VideoResultUtils = {
+        parse: jest.fn((body) =>
+          body === "video" ? { mimeType: "video/mp4" } : null,
+        ),
+      };
+
+      const addPair = (id, callBody, resultBody) => {
+        const call = document.createElement("tool-fold");
+        call.id = `fold-call-0-${id}`;
+        call.setAttribute("data-type", "call");
+        call.getBody = () => callBody;
+        const result = document.createElement("tool-fold");
+        result.id = `fold-result-0-${id}`;
+        result.setAttribute("data-type", "result");
+        result.getBody = () => resultBody;
+        wrapper.append(call, result);
+      };
+      addPair("image", "view image", "screenshot");
+      addPair("video", "record demo", "video");
+      addPair("tests", '{"command":"npm test"}', "12 tests passed");
+      addPair("diff", '{"command":"git diff"}', "diff --git a/a b/a");
+
+      chatDisplay._renderCompletionPacket(0);
+
+      const packet = wrapper.querySelector(".completion-packet");
+      expect(packet).not.toBeNull();
+      expect(packet.textContent).toContain("Completion packet");
+      expect(packet.textContent).toContain("Screenshots");
+      expect(packet.textContent).toContain("Video");
+      expect(packet.textContent).toContain("Tests");
+      expect(packet.textContent).toContain("Diffs");
+    });
+  });
 });

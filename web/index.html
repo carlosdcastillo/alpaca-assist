@@ -29,11 +29,11 @@
             <div class="menu-category">
                 <button class="menu-category-btn">File</button>
                 <div class="menu-dropdown">
-                    <button class="menu-item" data-action="new-tab">New Tab <span class="shortcut">Ctrl+N</span></button>
-                    <button class="menu-item" data-action="new-pack-tab">New Pack Tab&hellip;</button>
-                    <button class="menu-item" data-action="close-tab">Close Tab <span class="shortcut">Ctrl+W</span></button>
+                    <button class="menu-item" data-action="new-tab">New Task <span class="shortcut">Ctrl+N</span></button>
+                    <button class="menu-item" data-action="new-pack-tab">Offload a Task&hellip;</button>
+                    <button class="menu-item" data-action="close-tab">Close Task <span class="shortcut">Ctrl+W</span></button>
                     <div class="menu-divider"></div>
-                    <button class="menu-item" data-action="history">Conversation History <span class="shortcut">Ctrl+Y</span></button>
+                    <button class="menu-item" data-action="history">Task History <span class="shortcut">Ctrl+Y</span></button>
                     <div class="menu-divider"></div>
                     <button class="menu-item" data-action="export">Export to HTML <span class="shortcut">Ctrl+T</span></button>
                     <div class="menu-divider"></div>
@@ -59,7 +59,7 @@
 
             <!-- Chat Menu -->
             <div class="menu-category">
-                <button class="menu-category-btn">Chat</button>
+                <button class="menu-category-btn">Task</button>
                 <div class="menu-dropdown">
                     <button class="menu-item" data-action="submit">Submit Message <span class="shortcut">Ctrl+Enter</span></button>
                     <div class="menu-divider"></div>
@@ -68,7 +68,7 @@
                     <button class="menu-item" data-action="pop">Pop</button>
                     <div class="menu-divider"></div>
                     <button class="menu-item" data-action="handoff">Handoff <span class="shortcut">Ctrl+Shift+H</span></button>
-                    <button class="menu-item" data-action="clone-conversation">Clone Conversation</button>
+                    <button class="menu-item" data-action="clone-conversation">Clone Task</button>
                     <button class="menu-item" data-action="recompute-title">Recompute Title</button>
                 </div>
             </div>
@@ -86,7 +86,7 @@
                     <div class="menu-divider"></div>
                     <button class="menu-item" data-action="open-surface">Open App Surface&hellip;</button>
                     <div class="menu-divider"></div>
-                    <button class="menu-item" data-action="copy-conversation-id">Copy Conversation ID</button>
+                    <button class="menu-item" data-action="copy-conversation-id">Copy Task ID</button>
                 </div>
             </div>
 
@@ -101,33 +101,33 @@
 
         <div class="app-body">
             <!-- Conversation tabs -->
-            <aside class="tab-bar" id="tab-bar" aria-label="Conversations">
+            <aside class="tab-bar" id="tab-bar" aria-label="Tasks">
                 <div class="tab-bar-header">
-                    <div class="tab-bar-label">Conversations</div>
+                    <div class="tab-bar-label">Tasks</div>
                     <button class="sidebar-hide-toggle" id="sidebar-hide-toggle" type="button"
-                            title="Hide conversations sidebar" aria-label="Hide conversations sidebar"
+                            title="Hide tasks sidebar" aria-label="Hide tasks sidebar"
                             aria-controls="tab-bar" aria-expanded="true">
                         <svg class="sidebar-chevron" viewBox="0 0 24 24" aria-hidden="true">
                             <path d="M15 18l-6-6 6-6"></path>
                         </svg>
                     </button>
                 </div>
-                <button class="tab-scroll-btn tab-scroll-left hidden" id="tab-scroll-left" title="Scroll tabs up" aria-label="Scroll tabs up">↑</button>
+                <button class="tab-scroll-btn tab-scroll-left hidden" id="tab-scroll-left" title="Scroll tasks up" aria-label="Scroll tasks up">↑</button>
                 <div class="tabs-container" id="tabs-container"></div>
-                <button class="tab-scroll-btn tab-scroll-right hidden" id="tab-scroll-right" title="Scroll tabs down" aria-label="Scroll tabs down">↓</button>
+                <button class="tab-scroll-btn tab-scroll-right hidden" id="tab-scroll-right" title="Scroll tasks down" aria-label="Scroll tasks down">↓</button>
             </aside>
 
             <div class="content-column">
                 <!-- Toolbar -->
                 <div class="toolbar" id="toolbar">
                     <button class="toolbar-btn sidebar-show-toggle" id="sidebar-show-toggle" type="button"
-                            title="Show conversations sidebar" aria-label="Show conversations sidebar"
+                            title="Show tasks sidebar" aria-label="Show tasks sidebar"
                             aria-controls="tab-bar" aria-expanded="false" hidden>
                         <svg class="sidebar-chevron" viewBox="0 0 24 24" aria-hidden="true">
                             <path d="M9 18l6-6-6-6"></path>
                         </svg>
                     </button>
-                    <div class="toolbar-tab-navigation" aria-label="Tab navigation">
+                    <div class="toolbar-tab-navigation" aria-label="Task navigation">
                         <button class="toolbar-btn toolbar-nav-btn" id="toolbar-tab-back" title="Back" aria-label="Back" disabled>
                             <span class="toolbar-icon">←</span>
                         </button>
@@ -136,28 +136,28 @@
                         </button>
                     </div>
                     <div class="toolbar-new-tab-dropdown" id="toolbar-new-tab-dropdown">
-                        <button class="toolbar-btn" id="toolbar-new-tab" title="New Tab (Ctrl+N)" aria-haspopup="true" aria-expanded="false">
+                        <button class="toolbar-btn" id="toolbar-new-tab" title="New Task (Ctrl+N)" aria-haspopup="true" aria-expanded="false">
                             <span class="toolbar-icon">+</span>
-                            <span class="toolbar-text">New Tab</span>
+                            <span class="toolbar-text">New Task</span>
                             <span class="new-tab-caret"></span>
                         </button>
                         <div class="new-tab-menu" id="toolbar-new-tab-menu" role="menu">
                             <button class="new-tab-menu-item" data-action="new-tab" role="menuitem">
                                 <span class="new-tab-menu-icon">🖥</span>
-                                <span>Local Tab</span>
+                                <span>Local Task</span>
                                 <span class="new-tab-menu-shortcut">Ctrl+N</span>
                             </button>
                             <button class="new-tab-menu-item" data-action="new-pack-tab" role="menuitem">
-                                <span class="new-tab-menu-icon">📦</span>
-                                <span>Pack Tab</span>
+                                <span class="new-tab-menu-icon">↗</span>
+                                <span>Offload a Task</span>
                             </button>
                         </div>
                     </div>
-                    <button class="toolbar-btn" id="toolbar-close-tab" title="Close Tab (Ctrl+W)">
+                    <button class="toolbar-btn" id="toolbar-close-tab" title="Close Task (Ctrl+W)">
                         <span class="toolbar-icon">×</span>
-                        <span class="toolbar-text">Close Tab</span>
+                        <span class="toolbar-text">Close Task</span>
                     </button>
-                    <button class="toolbar-btn" id="toolbar-history" title="Conversation History (Ctrl+Y)">
+                    <button class="toolbar-btn" id="toolbar-history" title="Task History (Ctrl+Y)">
                         <span class="toolbar-icon">🕐</span>
                         <span class="toolbar-text">History</span>
                     </button>
@@ -175,11 +175,11 @@
 
                 <section class="workspace-header hidden" id="workspace-header" aria-live="polite">
                     <div class="workspace-header-identity">
-                        <span class="workspace-header-label">Pack workspace</span>
+                        <span class="workspace-header-label">Offloaded task</span>
                         <strong id="workspace-header-project"></strong>
                         <span class="workspace-header-location" id="workspace-header-location"></span>
                     </div>
-                    <div class="workspace-header-facts" aria-label="Repository status">
+                    <div class="workspace-header-facts" aria-label="Task status">
                         <span class="workspace-fact workspace-fact--branch" id="workspace-header-branch"></span>
                         <button type="button" class="workspace-fact workspace-fact--action" id="workspace-header-changes"
                                 title="Show git status and diff"></button>
@@ -193,7 +193,7 @@
                         <!-- Find Bar (floats over chat area) -->
                         <div class="find-bar hidden" id="find-bar">
                             <span class="find-label">Find:</span>
-                            <input type="text" id="find-input" placeholder="Search in chat..." autocomplete="off" spellcheck="false" />
+                            <input type="text" id="find-input" placeholder="Search in task..." autocomplete="off" spellcheck="false" />
                             <span class="find-count" id="find-count"></span>
                             <button class="find-btn" id="find-prev" title="Previous match (Shift+Enter)">↑</button>
                             <button class="find-btn" id="find-next" title="Next match (Enter)">↓</button>
@@ -252,18 +252,18 @@
             <div class="dialog-header">
                 <div>
                     <h3>History</h3>
-                    <p class="history-subtitle">Search, organize, and reopen past conversations</p>
+                    <p class="history-subtitle">Search, organize, and reopen past tasks</p>
                 </div>
                 <button class="dialog-close" id="history-dialog-close">&times;</button>
             </div>
             <div class="history-dialog-body">
                 <div class="history-search-row">
                     <span class="history-search-icon">⌕</span>
-                    <input type="text" id="history-search" placeholder="Search titles and conversation contents..." autocomplete="off" spellcheck="false" />
+                    <input type="text" id="history-search" placeholder="Search task titles and contents..." autocomplete="off" spellcheck="false" />
                 </div>
                 <div class="history-workspace">
                     <nav class="history-sidebar" aria-label="History filters">
-                        <button class="history-filter active" data-history-filter="all">All conversations</button>
+                        <button class="history-filter active" data-history-filter="all">All tasks</button>
                         <button class="history-filter" data-history-filter="pinned">Pinned</button>
                         <button class="history-filter" data-history-filter="archived">Archived</button>
                         <div class="history-sidebar-heading">Folders</div>
@@ -289,7 +289,7 @@
                         </div>
                     </div>
                     <aside class="history-preview" id="history-preview">
-                        <div class="history-preview-empty">Select a conversation to see its preview.</div>
+                        <div class="history-preview-empty">Select a task to see its preview.</div>
                     </aside>
                 </div>
             </div>
@@ -298,7 +298,7 @@
                 <details class="history-more-menu" id="history-more-menu">
                     <summary class="btn-secondary">More <span aria-hidden="true">▾</span></summary>
                     <div class="history-more-popover">
-                        <button id="history-backup-btn">Back up conversations…</button>
+                        <button id="history-backup-btn">Back up tasks…</button>
                         <button id="history-import-btn">Import backup…</button>
                     </div>
                 </details>

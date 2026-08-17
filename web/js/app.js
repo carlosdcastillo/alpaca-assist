@@ -190,7 +190,7 @@ class AlpacaApp {
         this.api.navigate_to_conv(convId).then((result) => {
           if (!result || !result.success) {
             this._showAlert(
-              `The original conversation could not be found (${
+              `The original task could not be found (${
                 result?.error || "unknown"
               }).`,
             );
@@ -701,7 +701,7 @@ class AlpacaApp {
    */
   onSessionRestoreComplete() {
     if (this.tabManager.tabs.size === 0) {
-      this.tabManager.createTab("New Chat");
+      this.tabManager.createTab("New Task");
     }
     this._updateInputAreaVisibility();
   }
@@ -775,12 +775,15 @@ class AlpacaApp {
           value: h.hostname,
           label: h.display_name,
         }));
-        const host = await this._showMessageDialog("Remote host (user@host):", {
-          title: "New Pack Tab",
-          cancelText: "Cancel",
-          withInput: true,
-          selectOptions,
-        });
+        const host = await this._showMessageDialog(
+          "Choose where to offload this task:",
+          {
+            title: "Offload a task",
+            cancelText: "Cancel",
+            withInput: true,
+            selectOptions,
+          },
+        );
         if (!host || !host.trim()) break;
 
         const projectsResult = await this.api.get_projects();
@@ -789,19 +792,17 @@ class AlpacaApp {
             ? projectsResult.projects || []
             : [];
         const projectOptions = [
-          { value: "", label: "None — raw Pack tab" },
+          { value: "", label: "No project" },
           ...projects.map((project) => ({
             value: project.name,
-            label: `${project.name} — ${project.repo_url}${
-              project.branch ? ` (${project.branch})` : ""
-            }`,
+            label: project.name,
           })),
         ];
         const project = await this._showMessageDialog(
-          "Choose a project for this remote conversation:",
+          "Choose the project this task should work in:",
           {
-            title: "New Pack Tab · Project",
-            okText: "Create",
+            title: "Offload a task · Project",
+            okText: "Offload",
             cancelText: "Cancel",
             selectOptions: projectOptions,
             selectCustomLabel: null,
@@ -895,7 +896,7 @@ class AlpacaApp {
               await this._reloadConversationDisplay();
             } else if (truncateResult.success && !truncateResult.truncated) {
               await this._showAlert(
-                "Nothing to truncate: conversation has only one Q\u2060/\u2060A pair.",
+                "Nothing to truncate: this task has only one Q\u2060/\u2060A pair.",
               );
             } else if (!truncateResult.success) {
               await this._showAlert(
@@ -970,7 +971,7 @@ class AlpacaApp {
         );
         if (convId !== null) {
           await navigator.clipboard.writeText(String(convId));
-          this._showToast(`Conversation ID #${convId} copied`, {
+          this._showToast(`Task ID #${convId} copied`, {
             type: "success",
             duration: 2000,
           });
@@ -1402,13 +1403,12 @@ class AlpacaApp {
     document.getElementById("history-count").textContent =
       conversations.length === 0
         ? ""
-        : `${conversations.length} conversation${
+        : `${conversations.length} task${
             conversations.length !== 1 ? "s" : ""
           }`;
 
     if (conversations.length === 0) {
-      list.innerHTML =
-        '<div class="history-empty">No conversations found.</div>';
+      list.innerHTML = '<div class="history-empty">No tasks found.</div>';
       this._updateHistorySelection();
       this._updateHistoryScrollbar();
       return;
@@ -1571,9 +1571,7 @@ class AlpacaApp {
 
     const eyebrow = document.createElement("div");
     eyebrow.className = "history-preview-eyebrow";
-    eyebrow.textContent = conv.pinned
-      ? "★ Pinned conversation"
-      : "Conversation";
+    eyebrow.textContent = conv.pinned ? "★ Pinned task" : "Task";
 
     const title = document.createElement("h4");
     title.className = "history-preview-title";
@@ -1613,7 +1611,7 @@ class AlpacaApp {
     const markdown =
       conv.preview_markdown ||
       conv.preview ||
-      "No text preview is available for this conversation.";
+      "No text preview is available for this task.";
     text.innerHTML = DOMPurify.sanitize(marked.parse(markdown), {
       FORBID_ATTR: ["href"],
     });
@@ -1678,7 +1676,7 @@ class AlpacaApp {
       // Nothing to do — user can see the tab is already there
     } else {
       await this._showAlert(
-        `Failed to open conversation: ${result.error || "unknown error"}`,
+        `Failed to open task: ${result.error || "unknown error"}`,
       );
     }
   }
@@ -1690,7 +1688,7 @@ class AlpacaApp {
       ids.map((id) => this.api.update_history_entry(id, { ...changes })),
     );
     if (results.some((result) => !result.success)) {
-      await this._showAlert("One or more conversations could not be updated.");
+      await this._showAlert("One or more tasks could not be updated.");
     }
     await this._reloadHistory();
   }
@@ -1699,9 +1697,9 @@ class AlpacaApp {
     const conv = this._primaryHistoryConversation();
     if (!conv) return;
     const title = await this._showPrompt(
-      "Conversation name",
+      "Task name",
       conv.title,
-      "Rename conversation",
+      "Rename task",
     );
     if (title && title.trim()) {
       await this.api.update_history_entry(conv.id, { title: title.trim() });
@@ -1721,7 +1719,7 @@ class AlpacaApp {
     const folder = await this._showPrompt(
       "Folder name (leave blank to remove from a folder)",
       conv.folder || "",
-      "Move conversation",
+      "Move task",
     );
     if (folder !== null)
       await this._updateSelectedHistory({ folder: folder.trim() });
@@ -1752,9 +1750,7 @@ class AlpacaApp {
     );
     if (result.success) {
       await this._showAlert(
-        `Backed up ${result.count} conversation${
-          result.count === 1 ? "" : "s"
-        }.`,
+        `Backed up ${result.count} task${result.count === 1 ? "" : "s"}.`,
       );
     } else if (!result.cancelled) {
       await this._showAlert(
@@ -1769,9 +1765,7 @@ class AlpacaApp {
     if (result.success) {
       await this._reloadHistory();
       await this._showAlert(
-        `Imported ${result.imported} conversation${
-          result.imported === 1 ? "" : "s"
-        }.`,
+        `Imported ${result.imported} task${result.imported === 1 ? "" : "s"}.`,
       );
     } else if (!result.cancelled) {
       await this._showAlert(
@@ -1785,10 +1779,10 @@ class AlpacaApp {
     if (!ids.length) return;
 
     const confirmed = await this._showConfirm(
-      `Permanently delete ${ids.length} conversation${
+      `Permanently delete ${ids.length} task${
         ids.length === 1 ? "" : "s"
       }? This cannot be undone.`,
-      "Delete conversations",
+      "Delete tasks",
     );
     if (!confirmed) return;
 
@@ -1796,7 +1790,7 @@ class AlpacaApp {
     if (result.success) {
       this._historySelectedIds.clear();
       document.getElementById("history-preview").innerHTML =
-        '<div class="history-preview-empty">Select a conversation to see its preview.</div>';
+        '<div class="history-preview-empty">Select a task to see its preview.</div>';
       await this._reloadHistory();
     }
   }
@@ -2118,7 +2112,7 @@ class AlpacaApp {
       "• Anthropic Claude, Fireworks AI, and local models, side by side\n" +
       "• Agentic tool calling: files, shell commands, MCP servers\n" +
       "• Agent Skills for extending what it can do\n" +
-      "• Multi-tab conversations with searchable history";
+      "• Local and offloaded tasks with searchable history";
     await this._showAlert(aboutText, "About Alpaca Assist");
   }
 
@@ -2700,8 +2694,12 @@ class AlpacaApp {
 
     // Show a toast so errors from background tabs are never silently dropped.
     const tabHint =
-      tabId !== this.currentTabId && tab ? `From tab: ${tab.title}` : null;
-    this._showToast(error.message, { type: "error", tabHint });
+      tabId !== this.currentTabId && tab ? `From task: ${tab.title}` : null;
+    const message =
+      tab?.isPack && /pack tab offline|ssh|daemon/i.test(error.message)
+        ? "Remote work paused. Reopen this offload to reconnect."
+        : error.message;
+    this._showToast(message, { type: "error", tabHint });
   }
 
   /**
@@ -2726,16 +2724,14 @@ class AlpacaApp {
    */
   async onPackSessionLost(tabId) {
     const tab = this.tabManager.tabs.get(tabId);
-    const label = tab ? tab.title : "This Pack tab";
+    const label = tab ? tab.title : "This offloaded task";
     const recreate = await this._showMessageDialog(
-      `${label}'s remote session was lost — the host may have restarted, ` +
-        `or the session was deleted. Your local copy of the conversation ` +
-        `is still here.\n\nRecreate the remote session from your local ` +
-        `copy, or start fresh?`,
+      `${label} was interrupted. Your work is safe here.\n\n` +
+        `Resume the task from your local copy, or start over?`,
       {
-        title: "Pack session lost",
-        okText: "Recreate",
-        cancelText: "Start fresh",
+        title: "Offload interrupted",
+        okText: "Resume task",
+        cancelText: "Start over",
       },
     );
     await this.api.resolve_pack_session_lost(tabId, recreate);
@@ -3213,7 +3209,7 @@ class AlpacaApp {
 
     // Left: conversation size + token info
     const leftParts = [
-      `Chat: ${result.char_count.toLocaleString()} chars, ${result.line_count.toLocaleString()} lines`,
+      `Task: ${result.char_count.toLocaleString()} chars, ${result.line_count.toLocaleString()} lines`,
     ];
     if (result.session_output_tokens > 0 || result.session_input_tokens > 0) {
       // "in" already includes cached tokens (both cache writes and cache
@@ -3234,17 +3230,18 @@ class AlpacaApp {
       leftParts.push(`~${result.token_estimate.toLocaleString()} tokens (est)`);
     }
     statusText.textContent = leftParts.join(", ");
-    statusText.title = "Conversation and session metrics";
+    statusText.title = "Task and session metrics";
 
     // Right: streaming indicator + skills. While a turn is in flight the
     // indicator counts up, so a long wait on a slow tool reads as progress
     // rather than as a hang.
     const elapsed = this.chatDisplay?.liveTurnElapsedMs?.();
+    const workingLabel = result.is_pack ? "Working remotely" : "Streaming";
     const rightParts = [
       isStreaming
         ? elapsed !== null && elapsed !== undefined
-          ? `🟢 Streaming ${window.TimeFormat.formatStopwatch(elapsed)}`
-          : "🟢 Streaming"
+          ? `🟢 ${workingLabel} ${window.TimeFormat.formatStopwatch(elapsed)}`
+          : `🟢 ${workingLabel}`
         : "⚪ Idle",
     ];
     if (result.skill_count > 0) {
@@ -3254,13 +3251,14 @@ class AlpacaApp {
   }
 
   /**
-   * Promote Pack repository state above the chat instead of burying it in
-   * the status bar. Local tabs do not need this workspace-specific header.
+   * Present a Pack tab as an offloaded task. Host, daemon, branch and sync
+   * details are deliberately omitted: the useful promise is that work is
+   * happening elsewhere and this machine remains available.
    */
   _updateWorkspaceHeader(info) {
     const header = document.getElementById("workspace-header");
     if (!header) return;
-    if (!info?.is_pack || !info.project) {
+    if (!info?.is_pack) {
       header.classList.add("hidden");
       return;
     }
@@ -3272,50 +3270,35 @@ class AlpacaApp {
     const changes = document.getElementById("workspace-header-changes");
     const sync = document.getElementById("workspace-header-sync");
 
-    project.textContent = info.project;
-    location.textContent =
-      info.workspace_path || info.display_name || info.host || "";
-    location.title = info.workspace_path || "";
-    branch.textContent = workspace.branch
-      ? `⎇ ${workspace.branch}`
-      : "No branch";
+    project.textContent = info.project || "Remote task";
+    location.textContent = info.connected
+      ? "Working remotely · your laptop is untouched"
+      : "Remote work is paused";
+    location.title = "";
+    branch.textContent = "";
+    branch.className = "workspace-fact hidden";
 
     changes.className = "workspace-fact workspace-fact--action";
     sync.className = "workspace-fact";
     changes.title = "";
     if (!info.connected) {
-      changes.textContent = "Offline";
+      changes.textContent = "Reconnect to continue";
       changes.classList.add("workspace-fact--error");
     } else if (info.project_setup_state === "setting_up") {
-      changes.textContent = "Setting up…";
+      changes.textContent = "Preparing task…";
     } else if (info.project_setup_error) {
-      changes.textContent = "Setup failed";
+      changes.textContent = "Needs attention";
       changes.title = info.project_setup_error;
       changes.classList.add("workspace-fact--error");
-    } else if (!workspace.is_git) {
-      changes.textContent = "Not a Git repository";
-      changes.classList.add("workspace-fact--error");
     } else if (workspace.dirty > 0) {
-      changes.textContent = `● ${workspace.dirty} modified`;
+      changes.textContent = "Changes ready to review";
       changes.classList.add("workspace-fact--dirty");
-    } else if (workspace.dirty === 0) {
-      changes.textContent = "✓ Clean";
+    } else {
+      changes.textContent = "Ready";
       changes.classList.add("workspace-fact--clean");
-    } else {
-      changes.textContent = "Changes unknown";
     }
-
-    if (workspace.unpushed > 0) {
-      sync.textContent = `↑ ${workspace.unpushed} unpushed`;
-      sync.classList.add("workspace-fact--dirty");
-    } else if (workspace.unpushed === 0) {
-      sync.textContent = "Up to date";
-      sync.classList.add("workspace-fact--clean");
-    } else if (workspace.is_git) {
-      sync.textContent = "No upstream";
-    } else {
-      sync.textContent = "";
-    }
+    sync.textContent = "";
+    sync.className = "workspace-fact hidden";
 
     header.classList.remove("hidden");
   }
@@ -3643,25 +3626,13 @@ class AlpacaApp {
     badge.style.display = "";
 
     if (info.is_pack) {
-      const host = info.host || "unknown host";
-      const label = info.display_name || host;
       if (info.connected) {
-        if (info.project) {
-          const setupSuffix =
-            info.project_setup_state === "setting_up" ? " (setting up…)" : "";
-          badge.textContent = `${info.project} · ${label}${setupSuffix}`;
-        } else {
-          badge.textContent = `Pack: ${label}`;
-        }
-        badge.title = info.workspace_path
-          ? `Connected to ${host}\n${info.workspace_path}`
-          : `Connected to ${host}`;
+        badge.textContent = "Working remotely · your laptop is untouched";
+        badge.title = "This task is running away from your laptop";
         badge.classList.add("status-connection--connected");
       } else {
-        badge.textContent = info.project
-          ? `${info.project} · ${label} (offline)`
-          : `Pack: ${label} (offline)`;
-        badge.title = `Disconnected from ${host}`;
+        badge.textContent = "Remote work paused";
+        badge.title = "Reconnect this offload to continue";
         badge.classList.add("status-connection--disconnected");
       }
     } else {
@@ -3708,7 +3679,7 @@ class AlpacaApp {
    *           tabHint?: string}} opts
    *   type     — visual style (default 'error')
    *   duration — ms before auto-dismiss (default 6000; 0 = never)
-   *   tabHint  — shown as a secondary line, e.g. "from tab: My Chat"
+   *   tabHint  — shown as a secondary line, e.g. "from task: Landing page"
    */
   _showToast(message, opts = {}) {
     const { type = "error", duration = 6000, tabHint = null } = opts;

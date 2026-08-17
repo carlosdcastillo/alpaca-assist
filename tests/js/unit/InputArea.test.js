@@ -147,16 +147,26 @@ describe("InputArea", () => {
       expect(inputArea.stopBtn.disabled).toBe(true);
     });
 
-    it("should update markdown input disabled state", () => {
+    it("should keep the composer editable for drafting", () => {
       inputArea.setStreaming(true);
 
-      expect(inputArea.markdownInput.disabled).toBe(true);
+      expect(inputArea.markdownInput.disabled).toBe(false);
     });
 
     it("should update placeholder when streaming", () => {
       inputArea.setStreaming(true);
 
-      expect(inputArea.markdownInput.placeholder).toBe("Streaming...");
+      expect(inputArea.markdownInput.placeholder).toContain("Draft your next");
+    });
+
+    it("should preserve a draft when send is attempted during streaming", () => {
+      inputArea.markdownInput.setValue("Follow-up thought");
+      inputArea.setStreaming(true);
+
+      inputArea._sendMessage();
+
+      expect(inputArea.markdownInput.getValue()).toBe("Follow-up thought");
+      expect(inputArea.statusEl.textContent).toContain("Draft saved");
     });
 
     it("should restore placeholder when not streaming", () => {

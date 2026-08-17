@@ -162,7 +162,10 @@ describe("TabManager", () => {
 
       await tabManager.createPackTab("user@host");
 
-      expect(mockApi.create_pack_tab).toHaveBeenCalledWith("user@host");
+      expect(mockApi.create_pack_tab).toHaveBeenCalledWith(
+        "user@host",
+        "Offloaded task",
+      );
     });
 
     it("should create tab UI tagged as pack on success", async () => {
@@ -399,7 +402,7 @@ describe("TabManager", () => {
       tabManager.createTabUI("pack-1", "Remote work", false, true, "alpaca");
     });
 
-    it("shows branch, modified count, and unpushed commits on the tab", () => {
+    it("shows the outcome without exposing repository plumbing", () => {
       tabManager.setPackWorkspaceStatus("pack-1", {
         connected: true,
         workspace_path: "/work/alpaca",
@@ -412,12 +415,12 @@ describe("TabManager", () => {
       });
 
       const meta = container.querySelector(".tab-workspace-meta");
-      expect(meta.textContent).toBe("⎇ feature/pack-status · 3 modified · ↑ 2");
+      expect(meta.textContent).toBe("Changes ready to review");
       expect(meta.classList.contains("tab-workspace-meta--dirty")).toBe(true);
-      expect(meta.title).toContain("/work/alpaca");
+      expect(meta.textContent).not.toContain("feature/pack-status");
     });
 
-    it("makes a clean, synced repository explicit", () => {
+    it("presents another offload rather than worker state", () => {
       tabManager.setPackWorkspaceStatus("pack-1", {
         connected: true,
         workspace_status: {
@@ -429,7 +432,7 @@ describe("TabManager", () => {
       });
 
       expect(container.querySelector(".tab-workspace-meta").textContent).toBe(
-        "⎇ main · Clean · Up to date",
+        "Ready for another task",
       );
     });
   });
