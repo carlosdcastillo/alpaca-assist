@@ -188,7 +188,7 @@ async def handle_cyclomatic_complexity_tool(
             f"  High complexity (>={threshold}): {high_complexity_count}",
         )
         result_lines.append(
-            f"  Average complexity: {sum((f.complexity for f in complexity_results)) / total_functions:.1f}",
+            f"  Average complexity: {sum(f.complexity for f in complexity_results) / total_functions:.1f}",
         )
         if high_complexity_count > 0:
             result_lines.append("")
