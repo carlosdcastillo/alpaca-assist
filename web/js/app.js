@@ -3381,7 +3381,7 @@ class AlpacaApp {
 
     project.textContent = info.project || "Remote task";
     location.textContent = info.connected
-      ? "Working remotely · your laptop is untouched"
+      ? "Runs without tying up your computer"
       : "Remote work is paused";
     location.title = "";
     branch.textContent = "";
@@ -3736,8 +3736,8 @@ class AlpacaApp {
 
     if (info.is_pack) {
       if (info.connected) {
-        badge.textContent = "Working remotely · your laptop is untouched";
-        badge.title = "This task is running away from your laptop";
+        badge.textContent = "Runs without tying up your computer";
+        badge.title = "Runs without tying up your computer";
         badge.classList.add("status-connection--connected");
       } else {
         badge.textContent = "Remote work paused";

@@ -365,7 +365,7 @@ class TabManager {
         tab.button.classList.add("streaming");
         if (tab.isPack) {
           const meta = tab.button.querySelector(".tab-workspace-meta");
-          if (meta) meta.textContent = "Working remotely · laptop untouched";
+          if (meta) meta.textContent = "Runs without tying up your computer";
         }
       } else {
         tab.button.classList.remove("streaming");
@@ -421,7 +421,7 @@ class TabManager {
       meta.textContent = "Needs attention";
       meta.classList.add("tab-workspace-meta--error");
     } else if (tab.isStreaming) {
-      meta.textContent = "Working remotely · laptop untouched";
+      meta.textContent = "Runs without tying up your computer";
     } else if (workspace.dirty > 0) {
       meta.textContent = "Changes ready to review";
       meta.classList.add("tab-workspace-meta--dirty");
