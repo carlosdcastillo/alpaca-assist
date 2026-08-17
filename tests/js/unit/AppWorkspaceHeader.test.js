@@ -48,7 +48,7 @@ describe("AlpacaApp Pack workspace header", () => {
     ).toHaveTextContent("Changes ready to review");
     expect(
       document.getElementById("workspace-header-location"),
-    ).toHaveTextContent("Runs without tying up your computer");
+    ).toHaveTextContent("Runs on Atreides — without tying up your computer");
     expect(
       document.getElementById("workspace-header-location"),
     ).not.toHaveTextContent("/work/alpaca");
