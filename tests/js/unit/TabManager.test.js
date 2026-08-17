@@ -420,7 +420,7 @@ describe("TabManager", () => {
       expect(meta.textContent).not.toContain("feature/pack-status");
     });
 
-    it("presents another offload rather than worker state", () => {
+    it("marks a completed task as done", () => {
       tabManager.setPackWorkspaceStatus("pack-1", {
         connected: true,
         workspace_status: {
@@ -432,7 +432,7 @@ describe("TabManager", () => {
       });
 
       expect(container.querySelector(".tab-workspace-meta").textContent).toBe(
-        "Ready for another task",
+        "Done",
       );
     });
   });

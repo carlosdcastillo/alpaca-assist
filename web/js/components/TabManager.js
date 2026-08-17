@@ -426,7 +426,7 @@ class TabManager {
       meta.textContent = "Changes ready to review";
       meta.classList.add("tab-workspace-meta--dirty");
     } else {
-      meta.textContent = "Ready for another task";
+      meta.textContent = "Done";
     }
     meta.title = meta.textContent;
   }
