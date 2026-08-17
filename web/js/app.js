@@ -208,11 +208,20 @@ class AlpacaApp {
     document
       .querySelectorAll(
         ".dialog-close, #cancel-prefs, #history-close-btn, #history-dialog-close, " +
-          "#mcp-config-close-btn, #mcp-tools-close-btn, #skills-cancel-btn",
+          "#mcp-config-close-btn, #mcp-tools-close-btn, #skills-cancel-btn, " +
+          "#workspace-changes-close-btn",
       )
       .forEach((btn) => {
         btn.addEventListener("click", () => this._closeDialogs());
       });
+
+    // Workspace changes panel, opened from the header's changes chip
+    document
+      .getElementById("workspace-header-changes")
+      .addEventListener("click", () => this._showWorkspaceChanges());
+    document
+      .getElementById("workspace-changes-refresh-btn")
+      .addEventListener("click", () => this._loadWorkspaceChanges());
 
     // MCP Config dialog buttons
     document
@@ -3271,7 +3280,7 @@ class AlpacaApp {
       ? `⎇ ${workspace.branch}`
       : "No branch";
 
-    changes.className = "workspace-fact";
+    changes.className = "workspace-fact workspace-fact--action";
     sync.className = "workspace-fact";
     changes.title = "";
     if (!info.connected) {
@@ -3309,6 +3318,293 @@ class AlpacaApp {
     }
 
     header.classList.remove("hidden");
+  }
+
+  /**
+   * Open the workspace changes panel — `git status` as a file list, with
+   * the selected file's diff beside it.
+   */
+  async _showWorkspaceChanges() {
+    this._showDialog("workspace-changes-dialog");
+    await this._loadWorkspaceChanges();
+  }
+
+  /**
+   * Fetch the current status/diff for the active tab's Pack workspace.
+   * Also the Refresh button's handler: the workspace keeps changing
+   * under a running turn, so this is deliberately not cached.
+   */
+  async _loadWorkspaceChanges() {
+    const files = document.getElementById("workspace-changes-files");
+    const diff = document.getElementById("workspace-changes-diff");
+    document.getElementById("workspace-changes-summary").textContent = "";
+    document.getElementById("workspace-changes-subtitle").textContent = "";
+    files.innerHTML = "";
+    diff.innerHTML =
+      '<div class="workspace-changes-empty">Loading changes…</div>';
+
+    if (!this.currentTabId) {
+      this._renderWorkspaceChanges({ success: false, error: "No active tab" });
+      return;
+    }
+    let result;
+    try {
+      result = await this.api.get_workspace_changes(this.currentTabId);
+    } catch (error) {
+      result = { success: false, error: error.message };
+    }
+    this._renderWorkspaceChanges(result);
+    // The header chip only refreshes on activity, so a workspace that
+    // changed while the tab sat idle would keep claiming to be clean
+    // behind a panel that just proved otherwise.
+    this._updateStatusBar();
+  }
+
+  /**
+   * Render a get_workspace_changes result into the panel.
+   *
+   * @param {object} result
+   */
+  _renderWorkspaceChanges(result) {
+    const files = document.getElementById("workspace-changes-files");
+    const diff = document.getElementById("workspace-changes-diff");
+    const subtitle = document.getElementById("workspace-changes-subtitle");
+    const summary = document.getElementById("workspace-changes-summary");
+    files.innerHTML = "";
+    diff.innerHTML = "";
+    this._workspaceChangeEntries = [];
+
+    if (!result || !result.success) {
+      diff.appendChild(
+        this._workspaceChangesNotice(
+          (result && result.error) || "Could not read workspace changes",
+        ),
+      );
+      return;
+    }
+
+    const parts = [];
+    if (result.branch) parts.push(`⎇ ${result.branch}`);
+    if (result.head) parts.push(result.head);
+    if (result.workspace_path) parts.push(result.workspace_path);
+    subtitle.textContent = parts.join("  ·  ");
+    subtitle.title = result.workspace_path || "";
+
+    if (!result.is_git) {
+      diff.appendChild(
+        this._workspaceChangesNotice(
+          result.exists
+            ? "This workspace is not a Git repository."
+            : "This workspace does not exist yet.",
+        ),
+      );
+      return;
+    }
+
+    const entries = result.entries || [];
+    this._workspaceChangeEntries = entries;
+    if (entries.length === 0) {
+      summary.textContent = "Working tree clean";
+      diff.appendChild(
+        this._workspaceChangesNotice("Nothing to show — the tree is clean."),
+      );
+      return;
+    }
+
+    let added = 0;
+    let removed = 0;
+    for (const entry of entries) {
+      const counts = this._countDiffLines(entry.diff || "");
+      entry._added = counts.added;
+      entry._removed = counts.removed;
+      added += counts.added;
+      removed += counts.removed;
+    }
+
+    const summaryParts = [
+      `${entries.length} file${entries.length !== 1 ? "s" : ""}`,
+      `+${added}`,
+      `−${removed}`,
+    ];
+    if (result.omitted_files > 0) {
+      summaryParts.push(`${result.omitted_files} more not shown`);
+    }
+    if (result.truncated) summaryParts.push("diff truncated");
+    summary.textContent = summaryParts.join("  ·  ");
+
+    if (entries.length > 1) {
+      files.appendChild(
+        this._workspaceChangeRow(
+          { path: "All changes", _all: true, _added: added, _removed: removed },
+          -1,
+        ),
+      );
+    }
+    entries.forEach((entry, index) => {
+      files.appendChild(this._workspaceChangeRow(entry, index));
+    });
+
+    this._selectWorkspaceChange(entries.length > 1 ? -1 : 0);
+  }
+
+  /**
+   * One row in the changed-file list. index -1 is the "All changes" row.
+   */
+  _workspaceChangeRow(entry, index) {
+    const status = this._workspaceChangeStatus(entry);
+    const row = document.createElement("button");
+    row.type = "button";
+    row.className = "workspace-change-row";
+    row.dataset.changeIndex = String(index);
+
+    const badge = document.createElement("span");
+    badge.className = `workspace-change-badge workspace-change-badge--${status.kind}`;
+    badge.textContent = status.code;
+    badge.title = status.label;
+    row.appendChild(badge);
+
+    const path = document.createElement("span");
+    path.className = "workspace-change-path";
+    path.textContent = entry.path;
+    row.appendChild(path);
+
+    const counts = document.createElement("span");
+    counts.className = "workspace-change-counts";
+    counts.textContent = `+${entry._added || 0} −${entry._removed || 0}`;
+    row.appendChild(counts);
+
+    row.title = entry.renamed_from
+      ? `${status.label} from ${entry.renamed_from}`
+      : `${status.label}: ${entry.path}`;
+    row.addEventListener("click", () => this._selectWorkspaceChange(index));
+    return row;
+  }
+
+  /**
+   * Turn a porcelain XY status pair into something a human reads.
+   * Worst-case wins: a delete that is also staged still reads "Deleted".
+   */
+  _workspaceChangeStatus(entry) {
+    if (entry._all) return { code: "Σ", kind: "all", label: "All changes" };
+    if (entry.untracked) {
+      return { code: "?", kind: "untracked", label: "Untracked" };
+    }
+    const codes = `${entry.index || ""}${entry.worktree || ""}`;
+    const staged = entry.index && entry.index !== " " ? " (staged)" : "";
+    if (codes.includes("U")) {
+      return { code: "U", kind: "conflict", label: "Conflicted" };
+    }
+    if (codes.includes("D")) {
+      return { code: "D", kind: "deleted", label: `Deleted${staged}` };
+    }
+    if (codes.includes("R")) {
+      return { code: "R", kind: "renamed", label: `Renamed${staged}` };
+    }
+    if (codes.includes("A")) {
+      return { code: "A", kind: "added", label: `Added${staged}` };
+    }
+    if (codes.includes("M")) {
+      return { code: "M", kind: "modified", label: `Modified${staged}` };
+    }
+    return { code: codes.trim() || "•", kind: "modified", label: "Changed" };
+  }
+
+  /**
+   * Show one file's diff, or every file's when index is -1.
+   */
+  _selectWorkspaceChange(index) {
+    const files = document.getElementById("workspace-changes-files");
+    const diff = document.getElementById("workspace-changes-diff");
+    files.querySelectorAll(".workspace-change-row").forEach((row) => {
+      row.classList.toggle("active", row.dataset.changeIndex === String(index));
+    });
+
+    const entries = this._workspaceChangeEntries || [];
+    const shown = index === -1 ? entries : [entries[index]].filter(Boolean);
+    diff.innerHTML = "";
+    diff.scrollTop = 0;
+    for (const entry of shown) {
+      if (shown.length > 1) {
+        const heading = document.createElement("div");
+        heading.className = "workspace-diff-file";
+        heading.textContent = entry.path;
+        diff.appendChild(heading);
+      }
+      if (entry.diff) {
+        diff.appendChild(this._renderDiffLines(entry.diff));
+      }
+      if (entry.truncated) {
+        diff.appendChild(
+          this._workspaceChangesNotice(
+            "Diff too large to show in full — open the file to see the rest.",
+          ),
+        );
+      } else if (!entry.diff) {
+        diff.appendChild(
+          this._workspaceChangesNotice(
+            "No textual diff (binary file, or a mode change only).",
+          ),
+        );
+      }
+    }
+  }
+
+  /**
+   * Colourize a unified diff. Built from text nodes rather than markup so
+   * file contents can never become DOM.
+   *
+   * @param {string} text
+   * @returns {DocumentFragment}
+   */
+  _renderDiffLines(text) {
+    const fragment = document.createDocumentFragment();
+    for (const line of text.split("\n")) {
+      // A trailing newline would otherwise render as a blank last line.
+      if (line === "" && text.endsWith("\n")) continue;
+      const el = document.createElement("div");
+      el.className = `diff-line diff-line--${this._diffLineKind(line)}`;
+      el.textContent = line;
+      fragment.appendChild(el);
+    }
+    return fragment;
+  }
+
+  _diffLineKind(line) {
+    if (line.startsWith("@@")) return "hunk";
+    if (line.startsWith("+++") || line.startsWith("---")) return "meta";
+    if (line.startsWith("diff ") || line.startsWith("index ")) return "meta";
+    if (
+      line.startsWith("new file") ||
+      line.startsWith("deleted file") ||
+      line.startsWith("old mode") ||
+      line.startsWith("new mode") ||
+      line.startsWith("similarity index") ||
+      line.startsWith("rename from") ||
+      line.startsWith("rename to") ||
+      line.startsWith("Binary files")
+    ) {
+      return "meta";
+    }
+    if (line.startsWith("+")) return "add";
+    if (line.startsWith("-")) return "del";
+    return "context";
+  }
+
+  _countDiffLines(text) {
+    let added = 0;
+    let removed = 0;
+    for (const line of text.split("\n")) {
+      if (line.startsWith("+") && !line.startsWith("+++")) added++;
+      else if (line.startsWith("-") && !line.startsWith("---")) removed++;
+    }
+    return { added, removed };
+  }
+
+  _workspaceChangesNotice(message) {
+    const notice = document.createElement("div");
+    notice.className = "workspace-changes-empty";
+    notice.textContent = message;
+    return notice;
   }
 
   /**

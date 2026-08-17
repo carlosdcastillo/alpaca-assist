@@ -149,3 +149,36 @@ class TestGetStatusInfoPack:
 
         assert result["success"] is False
         assert "error" in result
+
+
+class TestGetWorkspaceChanges:
+    def test_pack_tab_returns_status_and_diffs(self, api, core) -> None:
+        from core.pack_tab import PackTab
+
+        tab = Mock(spec=PackTab)
+        tab.get_workspace_changes.return_value = {
+            "is_git": True,
+            "branch": "main",
+            "entries": [{"path": "core/app.py", "diff": "@@\n+added\n"}],
+        }
+        core.tabs["tab-pack"] = tab
+
+        result = api.get_workspace_changes("tab-pack")
+
+        assert result["success"] is True
+        assert result["branch"] == "main"
+        assert result["entries"][0]["path"] == "core/app.py"
+
+    def test_local_tab_is_refused(self, api, core) -> None:
+        core.tabs["tab-1"] = Mock()
+
+        result = api.get_workspace_changes("tab-1")
+
+        assert result["success"] is False
+        assert "Pack" in result["error"]
+
+    def test_missing_tab_returns_error(self, api) -> None:
+        result = api.get_workspace_changes("no-such-tab")
+
+        assert result["success"] is False
+        assert result["error"] == "Tab not found"

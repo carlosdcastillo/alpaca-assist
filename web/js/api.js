@@ -305,6 +305,10 @@ class PythonAPI {
     return this.call("get_status_info", tabId);
   }
 
+  async get_workspace_changes(tabId) {
+    return this.call("get_workspace_changes", tabId);
+  }
+
   // =======================================================================
   // Conversation History
   // =======================================================================

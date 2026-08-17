@@ -214,6 +214,18 @@ button {
     white-space: nowrap;
 }
 
+/* The changes chip is a button — it opens the workspace changes panel. */
+.workspace-fact--action {
+    cursor: pointer;
+    font-size: 11px;
+    font-weight: 600;
+}
+
+.workspace-fact--action:hover {
+    background: var(--bg-hover);
+    border-color: var(--accent-primary);
+}
+
 .workspace-fact--branch { color: var(--text-primary); }
 .workspace-fact--clean { color: var(--success-color); }
 .workspace-fact--dirty { color: var(--warning-color); }
@@ -2328,6 +2340,168 @@ mark.find-current {
 }
 
 /* History Dialog */
+/* Workspace changes panel — git status as a file list, diff beside it. */
+#workspace-changes-dialog {
+    width: min(1180px, 96vw);
+    max-width: 1180px;
+    height: min(720px, 88vh);
+}
+
+.workspace-changes-subtitle {
+    margin-top: 2px;
+    overflow: hidden;
+    color: var(--text-secondary);
+    font-size: 12px;
+    font-weight: 400;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.workspace-changes-body {
+    display: grid;
+    grid-template-columns: minmax(200px, 300px) 1fr;
+    gap: 12px;
+    flex: 1;
+    min-height: 0;
+    padding: 12px 16px;
+}
+
+.workspace-changes-files {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-height: 0;
+    padding-right: 6px;
+    overflow-y: auto;
+    border-right: 1px solid var(--border-color);
+}
+
+.workspace-change-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    padding: 6px 8px;
+    border: 0;
+    border-radius: 4px;
+    background: transparent;
+    color: var(--text-primary);
+    font-size: 12px;
+    text-align: left;
+    cursor: pointer;
+}
+
+.workspace-change-row:hover { background: var(--bg-hover); }
+.workspace-change-row.active {
+    background: var(--accent-secondary);
+    color: var(--text-highlight);
+}
+
+.workspace-change-badge {
+    flex-shrink: 0;
+    width: 18px;
+    border-radius: 3px;
+    background: var(--bg-tertiary);
+    color: var(--text-secondary);
+    font-family: var(--font-mono);
+    font-size: 11px;
+    font-weight: 700;
+    text-align: center;
+}
+
+.workspace-change-badge--added,
+.workspace-change-badge--untracked { color: var(--success-color); }
+.workspace-change-badge--modified { color: var(--warning-color); }
+.workspace-change-badge--deleted,
+.workspace-change-badge--conflict { color: var(--error-color); }
+.workspace-change-badge--renamed { color: var(--accent-primary); }
+
+.workspace-change-path {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.workspace-change-counts {
+    flex-shrink: 0;
+    color: var(--text-secondary);
+    font-size: 11px;
+    font-variant-numeric: tabular-nums;
+}
+
+.workspace-change-row.active .workspace-change-counts,
+.workspace-change-row.active .workspace-change-badge {
+    color: var(--text-highlight);
+}
+
+.workspace-changes-diff {
+    min-width: 0;
+    padding: 8px 0;
+    overflow: auto;
+    background: var(--code-bg);
+    border: 1px solid var(--code-border);
+    border-radius: 6px;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    line-height: 1.5;
+}
+
+.diff-line {
+    padding: 0 10px;
+    overflow-wrap: anywhere;
+    white-space: pre-wrap;
+}
+
+.diff-line--add {
+    background: rgba(78, 201, 176, 0.14);
+    color: var(--success-color);
+}
+
+.diff-line--del {
+    background: rgba(244, 135, 113, 0.14);
+    color: var(--error-color);
+}
+
+.diff-line--hunk {
+    background: var(--bg-tertiary);
+    color: var(--accent-primary);
+}
+
+.diff-line--meta { color: var(--text-muted); }
+
+/* Sticky so the file a hunk belongs to stays visible while scrolling the
+   combined "All changes" view. */
+.workspace-diff-file {
+    position: sticky;
+    top: -8px;
+    margin: 10px 0 4px;
+    padding: 5px 10px;
+    background: var(--bg-tertiary);
+    color: var(--text-primary);
+    font-family: var(--font-ui);
+    font-size: 12px;
+    font-weight: 600;
+    overflow-wrap: anywhere;
+}
+
+.workspace-diff-file:first-child { margin-top: 0; }
+
+.workspace-changes-empty {
+    padding: 16px;
+    color: var(--text-secondary);
+    font-family: var(--font-ui);
+    font-size: 12px;
+}
+
+.workspace-changes-summary {
+    margin-right: auto;
+    align-self: center;
+    color: var(--text-secondary);
+    font-size: 12px;
+}
+
 #history-dialog {
     width: min(1260px, 96vw);
     max-width: 1260px;

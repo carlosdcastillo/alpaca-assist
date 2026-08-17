@@ -181,7 +181,8 @@
                     </div>
                     <div class="workspace-header-facts" aria-label="Repository status">
                         <span class="workspace-fact workspace-fact--branch" id="workspace-header-branch"></span>
-                        <span class="workspace-fact" id="workspace-header-changes"></span>
+                        <button type="button" class="workspace-fact workspace-fact--action" id="workspace-header-changes"
+                                title="Show git status and diff"></button>
                         <span class="workspace-fact" id="workspace-header-sync"></span>
                     </div>
                 </section>
@@ -304,6 +305,28 @@
                 <button class="btn-secondary history-danger-btn" id="history-delete-btn">Delete</button>
                 <button class="btn-primary" id="history-revive-btn">Open</button>
                 <button class="btn-secondary" id="history-close-btn">Close</button>
+            </div>
+        </div>
+
+        <!-- Workspace Changes Dialog (opened from the header's changes chip) -->
+        <div class="dialog" id="workspace-changes-dialog">
+            <div class="dialog-header">
+                <div>
+                    <h3>Workspace Changes</h3>
+                    <p class="workspace-changes-subtitle" id="workspace-changes-subtitle"></p>
+                </div>
+                <button class="dialog-close" id="workspace-changes-dialog-close">&times;</button>
+            </div>
+            <div class="workspace-changes-body">
+                <div class="workspace-changes-files" id="workspace-changes-files" aria-label="Changed files"></div>
+                <div class="workspace-changes-diff" id="workspace-changes-diff">
+                    <div class="workspace-changes-empty">Loading&hellip;</div>
+                </div>
+            </div>
+            <div class="dialog-footer">
+                <span class="workspace-changes-summary" id="workspace-changes-summary"></span>
+                <button class="btn-secondary" id="workspace-changes-refresh-btn">Refresh</button>
+                <button class="btn-secondary" id="workspace-changes-close-btn">Close</button>
             </div>
         </div>
 

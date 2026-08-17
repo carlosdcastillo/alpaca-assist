@@ -58,6 +58,7 @@ VIDEO_CHUNK_TIMEOUT = 30.0
 FILE_CHUNK_TIMEOUT = 30.0
 GATED_OUTPUT_TIMEOUT = 30.0
 STOP_STREAMING_TIMEOUT = 10.0
+WORKSPACE_CHANGES_TIMEOUT = 60.0
 FOLD_RENDER_TIMEOUT = 2.0
 # Building a surface means spawning Xvfb, x11vnc and the app itself and
 # waiting for each to become reachable, so it is meaningfully slower than
@@ -561,6 +562,21 @@ class PackTab:
         except PackTransportError:
             pass
         return self._workspace_status
+
+    def get_workspace_changes(self) -> dict[str, Any]:
+        """Fetch `git status` plus per-file diffs for the remote workspace.
+
+        Uncached, unlike get_workspace_status: this only runs when the
+        user opens the changes panel, and a stale diff there would be
+        worse than a moment's wait.
+        """
+        self._ensure_connected(timeout=ATTACH_TIMEOUT)
+        result: dict[str, Any] = self._transport.send_request(
+            "workspace_changes",
+            {},
+            timeout=WORKSPACE_CHANGES_TIMEOUT,
+        )
+        return result
 
     def read_video_chunk(self, locator: str, offset: int) -> dict[str, Any]:
         """Fetch a bounded video chunk from the remote Pack daemon."""

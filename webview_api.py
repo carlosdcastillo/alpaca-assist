@@ -529,6 +529,25 @@ class WebViewAPI:
             logger.error(f"Error getting status info: {e}")
             return {"success": False, "error": str(e)}
 
+    def get_workspace_changes(self, tab_id: str) -> dict[str, Any]:
+        """Return `git status` and per-file diffs behind the header's
+        changes chip. Pack-only: the workspace it reports on is the one
+        the Pack daemon manages, which local tabs don't have.
+        """
+        try:
+            tab = self._app.core.tabs.get(tab_id)
+            if not tab:
+                return {"success": False, "error": "Tab not found"}
+            if not isinstance(tab, PackTab):
+                return {
+                    "success": False,
+                    "error": "Workspace changes are only available on Pack tabs",
+                }
+            return {"success": True, **tab.get_workspace_changes()}
+        except Exception as e:
+            logger.error(f"Error getting workspace changes: {e}")
+            return {"success": False, "error": str(e)}
+
     def get_history(
         self,
         search_term: str = "",

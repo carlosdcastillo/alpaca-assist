@@ -12,6 +12,7 @@ from core.projects import list_projects
 from core.projects import load_project
 from core.projects import prepare_workspace
 from core.projects import probe_workspace
+from core.projects import workspace_changes
 
 
 def _write_project(root: Path, name: str = "alpaca") -> Path:
@@ -200,3 +201,128 @@ def test_pack_daemon_configures_project_context(monkeypatch, tmp_path: Path) -> 
     assert tab.project_spinup_pending is True
     assert os.environ["ALPACA_WORKSPACE"] == workspace
     core.save_session.assert_called_once_with()
+
+
+def _init_repo(path: Path) -> None:
+    path.mkdir(parents=True, exist_ok=True)
+    subprocess.run(
+        ["git", "init", "-b", "main", str(path)],
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "-C", str(path), "config", "user.email", "test@example.test"],
+        check=True,
+    )
+    subprocess.run(["git", "-C", str(path), "config", "user.name", "Test"], check=True)
+
+
+def test_workspace_changes_reports_status_and_per_file_diffs(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    _init_repo(workspace)
+    (workspace / "tracked.txt").write_text("one\ntwo\n", encoding="utf-8")
+    (workspace / "removed.txt").write_text("gone\n", encoding="utf-8")
+    subprocess.run(["git", "-C", str(workspace), "add", "."], check=True)
+    subprocess.run(
+        ["git", "-C", str(workspace), "commit", "-m", "initial"],
+        check=True,
+        capture_output=True,
+    )
+    (workspace / "tracked.txt").write_text("one\nTWO\n", encoding="utf-8")
+    (workspace / "removed.txt").unlink()
+    (workspace / "fresh.txt").write_text("brand new\n", encoding="utf-8")
+    subprocess.run(["git", "-C", str(workspace), "add", "tracked.txt"], check=True)
+
+    changes = workspace_changes(str(workspace))
+    by_path = {entry["path"]: entry for entry in changes["entries"]}
+
+    assert changes["is_git"] is True
+    assert changes["branch"] == "main"
+    assert changes["head"].endswith("initial")
+    assert set(by_path) == {"tracked.txt", "removed.txt", "fresh.txt"}
+    # Staged and unstaged work alike: both are diffed against HEAD.
+    assert "+TWO" in by_path["tracked.txt"]["diff"]
+    assert "-gone" in by_path["removed.txt"]["diff"]
+    # Untracked files have no index entry, so they diff against /dev/null.
+    assert by_path["fresh.txt"]["untracked"] is True
+    assert "+brand new" in by_path["fresh.txt"]["diff"]
+    assert changes["truncated"] is False
+    assert changes["omitted_files"] == 0
+
+
+def test_workspace_changes_bounds_large_diffs(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setattr("core.projects.DIFF_FILE_LIMIT", 1)
+    monkeypatch.setattr("core.projects.DIFF_FILE_BYTES", 120)
+    workspace = tmp_path / "workspace"
+    _init_repo(workspace)
+    (workspace / "a.txt").write_text("line\n" * 400, encoding="utf-8")
+    (workspace / "b.txt").write_text("other\n", encoding="utf-8")
+
+    changes = workspace_changes(str(workspace))
+
+    assert len(changes["entries"]) == 1
+    assert changes["omitted_files"] == 1
+    assert changes["truncated"] is True
+    assert len(changes["entries"][0]["diff"]) == 120
+    assert changes["entries"][0]["truncated"] is True
+
+
+def test_workspace_changes_on_clean_and_non_git_paths(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    _init_repo(workspace)
+    plain = tmp_path / "plain"
+    plain.mkdir()
+
+    clean = workspace_changes(str(workspace))
+    not_git = workspace_changes(str(plain))
+    missing = workspace_changes(str(tmp_path / "nowhere"))
+
+    assert clean["is_git"] is True
+    assert clean["entries"] == []
+    # No commits yet, so there is no HEAD to name.
+    assert clean["head"] is None
+    assert not_git["exists"] is True and not_git["is_git"] is False
+    assert missing["exists"] is False and missing["is_git"] is False
+
+
+def test_workspace_changes_handles_renames_and_spaces(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    _init_repo(workspace)
+    (workspace / "old name.txt").write_text("stable\n", encoding="utf-8")
+    subprocess.run(["git", "-C", str(workspace), "add", "."], check=True)
+    subprocess.run(
+        ["git", "-C", str(workspace), "commit", "-m", "initial"],
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "-C", str(workspace), "mv", "old name.txt", "new name.txt"],
+        check=True,
+    )
+
+    entries = workspace_changes(str(workspace))["entries"]
+
+    assert len(entries) == 1
+    assert entries[0]["path"] == "new name.txt"
+    assert entries[0]["renamed_from"] == "old name.txt"
+    assert entries[0]["index"] == "R"
+
+
+def test_pack_daemon_serves_workspace_changes(tmp_path: Path) -> None:
+    from pack_daemon import PackDaemonAdapter
+    from pack_daemon import make_dispatcher
+
+    workspace = tmp_path / "workspace"
+    _init_repo(workspace)
+    (workspace / "note.txt").write_text("hello\n", encoding="utf-8")
+    tab = MagicMock()
+    tab.workspace_path = str(workspace)
+    dispatch = make_dispatcher(tab, PackDaemonAdapter(), False, MagicMock())
+
+    result = dispatch("workspace_changes", {})
+
+    assert result["is_git"] is True
+    assert [entry["path"] for entry in result["entries"]] == ["note.txt"]
+
+    tab.workspace_path = None
+    assert dispatch("workspace_changes", {})["entries"] == []

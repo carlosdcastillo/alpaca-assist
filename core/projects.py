@@ -17,6 +17,15 @@ from typing import Any
 PROJECTS_DIR = Path.home() / "packs"
 _PROJECT_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 
+# Bounds for workspace_changes. A Pack workspace mid-task can hold a
+# generated build tree or a huge vendored blob, and the whole payload
+# crosses the SSH channel as one JSON-RPC response before the panel can
+# show anything — so cap per file and in total, and say so in the result
+# rather than silently returning a partial diff.
+DIFF_FILE_LIMIT = 200
+DIFF_FILE_BYTES = 200_000
+DIFF_TOTAL_BYTES = 2_000_000
+
 
 @dataclass(frozen=True)
 class ProjectConfig:
@@ -182,6 +191,25 @@ def prepare_workspace(payload: dict[str, Any]) -> str:
     return str(workspace.resolve())
 
 
+def _git(
+    workspace: Path,
+    *args: str,
+    timeout: float = 10,
+) -> subprocess.CompletedProcess[str]:
+    """Run a read-only git command in `workspace`, never raising on failure."""
+    return subprocess.run(
+        ["git", "-C", str(workspace), *args],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+        text=True,
+        # A workspace can hold files git treats as text but that aren't
+        # valid UTF-8; a diff panel is not worth an exception.
+        errors="replace",
+        timeout=timeout,
+        check=False,
+    )
+
+
 def probe_workspace(workspace_path: str) -> dict[str, Any]:
     """Return compact, honest Git state for a managed workspace."""
     workspace = Path(workspace_path).expanduser()
@@ -198,14 +226,7 @@ def probe_workspace(workspace_path: str) -> dict[str, Any]:
     status["is_git"] = True
 
     def git(*args: str) -> subprocess.CompletedProcess[str]:
-        return subprocess.run(
-            ["git", "-C", str(workspace), *args],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.DEVNULL,
-            text=True,
-            timeout=10,
-            check=False,
-        )
+        return _git(workspace, *args)
 
     branch = git("branch", "--show-current")
     if branch.returncode == 0:
@@ -219,6 +240,129 @@ def probe_workspace(workspace_path: str) -> dict[str, Any]:
         if ahead.returncode == 0:
             status["unpushed"] = int(ahead.stdout.strip() or "0")
     return status
+
+
+def _parse_porcelain(raw: str) -> list[dict[str, Any]]:
+    """Parse `git status --porcelain -z` into one record per changed path.
+
+    NUL-separated rather than line-separated because paths with spaces,
+    quotes or newlines are ordinary in a workspace and the line format
+    escapes them into something that has to be unescaped again. Rename
+    and copy entries spend a second field on their origin path.
+    """
+    fields = raw.split("\0")
+    entries: list[dict[str, Any]] = []
+    index = 0
+    while index < len(fields):
+        field = fields[index]
+        index += 1
+        if len(field) < 4:
+            continue
+        index_code, worktree_code, path = field[0], field[1], field[3:]
+        renamed_from = None
+        if "R" in (index_code, worktree_code) or "C" in (index_code, worktree_code):
+            if index < len(fields):
+                renamed_from = fields[index] or None
+                index += 1
+        entries.append(
+            {
+                "path": path,
+                "index": index_code,
+                "worktree": worktree_code,
+                "untracked": index_code == "?",
+                "renamed_from": renamed_from,
+            },
+        )
+    return entries
+
+
+def _entry_diff(
+    workspace: Path,
+    entry: dict[str, Any],
+    has_head: bool,
+) -> str:
+    """Return the unified diff for one changed path, working tree vs HEAD."""
+    if entry["untracked"]:
+        # Untracked files have nothing to diff against inside the index,
+        # so compare against /dev/null to get the same "new file" shape
+        # the panel already knows how to render.
+        result = _git(
+            workspace,
+            "diff",
+            "--no-index",
+            "--",
+            os.devnull,
+            entry["path"],
+            timeout=30,
+        )
+    else:
+        paths = [entry["path"]]
+        if entry["renamed_from"]:
+            paths.append(entry["renamed_from"])
+        # HEAD covers staged and unstaged changes in one diff, which is
+        # what "what does this workspace look like" means. A repository
+        # with no commits yet has no HEAD to compare against.
+        base = ["HEAD"] if has_head else ["--cached"]
+        result = _git(workspace, "diff", *base, "--", *paths, timeout=30)
+    return result.stdout
+
+
+def workspace_changes(workspace_path: str) -> dict[str, Any]:
+    """Return `git status` entries plus a per-file diff for a workspace.
+
+    Shaped for display: one record per changed path carrying its own
+    diff, so the panel can list files and show one file's changes
+    without re-parsing a combined diff.
+    """
+    workspace = Path(workspace_path).expanduser()
+    changes: dict[str, Any] = {
+        "workspace_path": str(workspace),
+        "exists": workspace.is_dir(),
+        "is_git": False,
+        "branch": None,
+        "head": None,
+        "entries": [],
+        "omitted_files": 0,
+        "truncated": False,
+    }
+    if not changes["exists"] or not (workspace / ".git").exists():
+        return changes
+    changes["is_git"] = True
+
+    branch = _git(workspace, "branch", "--show-current")
+    if branch.returncode == 0:
+        changes["branch"] = branch.stdout.strip() or "detached"
+    head = _git(workspace, "log", "-1", "--format=%h %s")
+    has_head = head.returncode == 0
+    if has_head:
+        changes["head"] = head.stdout.strip()
+
+    status = _git(workspace, "status", "--porcelain", "-z", timeout=30)
+    if status.returncode != 0:
+        return changes
+    entries = _parse_porcelain(status.stdout)
+    if len(entries) > DIFF_FILE_LIMIT:
+        changes["omitted_files"] = len(entries) - DIFF_FILE_LIMIT
+        entries = entries[:DIFF_FILE_LIMIT]
+
+    budget = DIFF_TOTAL_BYTES
+    for entry in entries:
+        entry["truncated"] = False
+        if budget <= 0:
+            entry["diff"] = ""
+            entry["truncated"] = True
+            changes["truncated"] = True
+            continue
+        diff = _entry_diff(workspace, entry, has_head)
+        limit = min(DIFF_FILE_BYTES, budget)
+        if len(diff) > limit:
+            diff = diff[:limit]
+            entry["truncated"] = True
+            changes["truncated"] = True
+        entry["diff"] = diff
+        budget -= len(diff)
+    changes["entries"] = entries
+    return changes
 
 
 def _read_optional(path: Path) -> str:

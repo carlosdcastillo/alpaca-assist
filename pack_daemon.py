@@ -40,6 +40,7 @@ from core import pack_protocol
 from core.pack_files import PackFileStore
 from core.projects import prepare_workspace
 from core.projects import probe_workspace
+from core.projects import workspace_changes
 from core.surface_control import SOCKET_NAME
 from core.surface_supervisor import SURFACE_METHODS
 from core.tool_output_gate import read_gated_tool_output
@@ -317,6 +318,16 @@ def make_dispatcher(
             if not status_workspace:
                 return {"workspace_path": None, "exists": False, "is_git": False}
             return probe_workspace(status_workspace)
+        if method == "workspace_changes":
+            diff_workspace = getattr(tab, "workspace_path", None)
+            if not diff_workspace:
+                return {
+                    "workspace_path": None,
+                    "exists": False,
+                    "is_git": False,
+                    "entries": [],
+                }
+            return workspace_changes(diff_workspace)
         if method == "resolve_file_reference":
             return pack_files.resolve(
                 params["path"],
