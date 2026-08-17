@@ -16,6 +16,8 @@ from anthropic_ollama_server import CodexCLIClient
 from anthropic_ollama_server import OllamaRequestHandler
 from anthropic_ollama_server import _build_claude_mcp_config_file
 from anthropic_ollama_server import _codex_mcp_overrides
+from anthropic_ollama_server import _extract_claude_cli_usage
+from anthropic_ollama_server import _extract_codex_cli_usage
 from anthropic_ollama_server import _run_cli_jsonl
 from core.chat_tab_streaming import StreamingHandler
 
@@ -234,6 +236,78 @@ def test_codex_cli_separates_agent_messages_around_hidden_tool_call() -> None:
         )
 
     assert _streamed_text(events) == "session file.\n\nThe surface is open."
+
+
+def test_claude_cli_reports_whole_agent_tree_usage_from_result() -> None:
+    result = {
+        "type": "result",
+        "usage": {
+            "input_tokens": 1,
+            "cache_read_input_tokens": 2,
+            "output_tokens": 3,
+        },
+        "modelUsage": {
+            "claude-sonnet": {
+                "inputTokens": 100,
+                "cacheReadInputTokens": 800,
+                "cacheCreationInputTokens": 50,
+                "outputTokens": 40,
+            },
+            "claude-haiku": {
+                "inputTokens": 20,
+                "cacheReadInputTokens": 30,
+                "cacheCreationInputTokens": 0,
+                "outputTokens": 10,
+            },
+        },
+    }
+
+    assert _extract_claude_cli_usage(result) == {
+        "input_token_count": 1000,
+        "cached_input_token_count": 880,
+        "output_token_count": 50,
+    }
+
+    with (
+        patch(
+            "anthropic_ollama_server._build_claude_mcp_config_file",
+            return_value=None,
+        ),
+        patch(
+            "anthropic_ollama_server._run_cli_jsonl",
+            return_value=iter([result]),
+        ),
+    ):
+        events = list(ClaudeCodeCLIClient().stream_complete())
+
+    assert {"type": "cli_usage", "usage": _extract_claude_cli_usage(result)} in events
+
+
+def test_codex_cli_reports_turn_usage_without_double_counting_subsets() -> None:
+    completed = {
+        "type": "turn.completed",
+        "usage": {
+            "input_tokens": 100,
+            "cached_input_tokens": 40,
+            "cache_write_input_tokens": 10,
+            "output_tokens": 30,
+            "reasoning_output_tokens": 20,
+        },
+    }
+
+    assert _extract_codex_cli_usage(completed) == {
+        "input_token_count": 100,
+        "cached_input_token_count": 50,
+        "output_token_count": 30,
+    }
+
+    with patch(
+        "anthropic_ollama_server._run_cli_jsonl",
+        return_value=iter([completed]),
+    ):
+        events = list(CodexCLIClient().stream_complete())
+
+    assert {"type": "cli_usage", "usage": _extract_codex_cli_usage(completed)} in events
 
 
 def test_proxy_dispatches_the_project_workspace_to_the_selected_backend() -> None:

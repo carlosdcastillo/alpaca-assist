@@ -84,6 +84,29 @@ class TestCleanStreamUnaffected:
         assert chunk["invocation_metrics"]["output_token_count"] == 50
         assert chunk["done_reason"] == "end_turn"
 
+    def test_cli_usage_overrides_partial_internal_stream_usage(self) -> None:
+        handler = _make_handler()
+        events = [
+            _message_start(input_tokens=10),
+            _text_delta("visible answer"),
+            _message_delta(output_tokens=5),
+            {
+                "type": "cli_usage",
+                "usage": {
+                    "input_token_count": 1200,
+                    "cached_input_token_count": 900,
+                    "output_token_count": 250,
+                },
+            },
+        ]
+
+        handler._process_stream(iter(events))
+
+        metrics = _last_chunk(handler)["invocation_metrics"]
+        assert metrics["input_token_count"] == 1200
+        assert metrics["cached_input_token_count"] == 900
+        assert metrics["output_token_count"] == 250
+
 
 class TestMidStreamFailureStillReportsMetrics:
     def test_exception_mid_stream_still_sends_estimated_metrics(self) -> None:

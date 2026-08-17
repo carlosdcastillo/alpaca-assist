@@ -903,6 +903,17 @@ class OllamaRequestHandler(BaseHTTPRequestHandler):
                         # no-op for every consumer of this stream.
                         self._send_text_chunk("", count)
 
+                    elif val.get("type") == "cli_usage":
+                        # CLI agent backends run their own multi-step tool loops.
+                        # Their final usage records already cover the complete
+                        # invocation and use provider-specific cache semantics,
+                        # so accept normalized totals instead of trying to
+                        # reconstruct them from Anthropic stream events.
+                        usage = val.get("usage", {})
+                        input_tokens = usage.get("input_token_count")
+                        output_tokens = usage.get("output_token_count")
+                        cached_tokens = usage.get("cached_input_token_count", 0)
+
                     elif val.get("type") == "message_start":
                         usage = val.get("message", {}).get("usage", {})
                         # Anthropic splits input across three fields when prompt caching
@@ -1925,6 +1936,9 @@ class ClaudeCodeCLIClient:
                     continue
 
                 if line_type == "result":
+                    cli_usage = _extract_claude_cli_usage(line)
+                    if cli_usage is not None:
+                        yield {"type": "cli_usage", "usage": cli_usage}
                     if line.get("is_error"):
                         yield {
                             "type": "content_block_delta",
@@ -1984,6 +1998,47 @@ class ClaudeCodeCLIClient:
                 pass
             if image_temp_dir:
                 shutil.rmtree(image_temp_dir, ignore_errors=True)
+
+
+def _extract_claude_cli_usage(line: dict[str, Any]) -> dict[str, int] | None:
+    """Normalize the final Claude Code result's whole-query token usage.
+
+    ``modelUsage`` includes subagents and auxiliary calls, unlike ``usage``,
+    which only covers the main agent loop. Claude cache read/write counts are
+    additional to ``inputTokens`` and therefore belong in the input total.
+    """
+    model_usage = line.get("modelUsage")
+    if isinstance(model_usage, dict) and model_usage:
+        input_tokens = 0
+        cached_tokens = 0
+        output_tokens = 0
+        for usage in model_usage.values():
+            if not isinstance(usage, dict):
+                continue
+            cache_read = int(usage.get("cacheReadInputTokens") or 0)
+            cache_creation = int(usage.get("cacheCreationInputTokens") or 0)
+            input_tokens += (
+                int(usage.get("inputTokens") or 0) + cache_read + cache_creation
+            )
+            cached_tokens += cache_read + cache_creation
+            output_tokens += int(usage.get("outputTokens") or 0)
+    else:
+        usage = line.get("usage")
+        if not isinstance(usage, dict):
+            return None
+        cache_read = int(usage.get("cache_read_input_tokens") or 0)
+        cache_creation = int(usage.get("cache_creation_input_tokens") or 0)
+        input_tokens = int(usage.get("input_tokens") or 0) + cache_read + cache_creation
+        cached_tokens = cache_read + cache_creation
+        output_tokens = int(usage.get("output_tokens") or 0)
+
+    if input_tokens == 0 and output_tokens == 0:
+        return None
+    return {
+        "input_token_count": input_tokens,
+        "cached_input_token_count": cached_tokens,
+        "output_token_count": output_tokens,
+    }
 
 
 class CodexCLIClient:
@@ -2086,6 +2141,11 @@ class CodexCLIClient:
                     yield line
                     continue
 
+                if line.get("type") == "turn.completed":
+                    cli_usage = _extract_codex_cli_usage(line)
+                    if cli_usage is not None:
+                        yield {"type": "cli_usage", "usage": cli_usage}
+
                 text = _extract_codex_text(line)
                 if text:
                     if forwarded_agent_message:
@@ -2126,6 +2186,23 @@ def _extract_codex_text(line: dict[str, Any]) -> str | None:
     ):
         return item.get("text") or item.get("content") or item.get("message")
     return None
+
+
+def _extract_codex_cli_usage(line: dict[str, Any]) -> dict[str, int] | None:
+    """Normalize exact per-turn usage from ``codex exec --json``.
+
+    Codex's input/output totals already include their cache and reasoning
+    subsets, so those detail fields must not be added to the totals.
+    """
+    usage = line.get("usage")
+    if not isinstance(usage, dict):
+        return None
+    return {
+        "input_token_count": int(usage.get("input_tokens") or 0),
+        "cached_input_token_count": int(usage.get("cached_input_tokens") or 0)
+        + int(usage.get("cache_write_input_tokens") or 0),
+        "output_token_count": int(usage.get("output_tokens") or 0),
+    }
 
 
 # Model IDs served by the local Anthropic-compatible endpoint at 192.168.0.125:11434.
