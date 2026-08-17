@@ -9,6 +9,7 @@ import threading
 import time
 from pathlib import Path
 from unittest.mock import MagicMock
+from unittest.mock import call
 from unittest.mock import patch
 
 import pytest
@@ -425,6 +426,23 @@ class TestAppCoreTabLifecycle:
         assert tab.host == "user@host"
         assert tab.session_id == "sess-1"
         assert tab.title == "My Pack"
+
+    def test_create_pack_tab_seeds_restored_state_before_connecting(self, core):
+        initial_data = {"chat_state": {"questions": ["saved"], "answers": []}}
+        with patch("core.pack_tab.PackTab") as pack_tab_cls:
+            tab = pack_tab_cls.return_value
+
+            core.create_pack_tab(
+                "user@host",
+                "sess-1",
+                "My Pack",
+                initial_data=initial_data,
+            )
+
+        assert tab.method_calls == [
+            call.load_from_data(initial_data),
+            call.connect_async(model=None),
+        ]
 
     def test_alloc_tab_id_format(self, core):
         """Tab IDs should follow expected format."""

@@ -51,6 +51,7 @@ class TestReviveConversationRoutesPackTabs:
             "My Pack",
             auto_switch=True,
             conversation_id=42,
+            initial_data=tab_data,
         )
         mock_create_regular.assert_not_called()
         assert result == {"success": True, "tab_id": "new-1"}
@@ -77,7 +78,7 @@ class TestReviveConversationRoutesPackTabs:
         mock_create_pack.assert_not_called()
         assert result == {"success": True, "tab_id": "new-2"}
 
-    def test_revived_pack_tab_loads_saved_state(self) -> None:
+    def test_revived_pack_tab_passes_saved_state_into_creation(self) -> None:
         tab_data = {
             "tab_type": "pack",
             "host": "user@host",
@@ -91,11 +92,12 @@ class TestReviveConversationRoutesPackTabs:
             WebViewAPI,
             "create_pack_tab_and_notify_js",
             return_value={"success": True, "tab_id": "new-1"},
-        ):
+        ) as mock_create_pack:
             mock_app.core.tabs = {"new-1": revived_tab}
             api.revive_conversation(42)
 
-        revived_tab.load_from_data.assert_called_once_with(tab_data)
+        assert mock_create_pack.call_args.kwargs["initial_data"] is tab_data
+        revived_tab.load_from_data.assert_not_called()
 
 
 class TestGetHistoryReportsTabType:

@@ -2093,10 +2093,13 @@ class AlpacaApp {
    * Reload the conversation display from Python state.
    * Called after in-place mutations (compact, truncate, pop).
    */
-  async _reloadConversationDisplay() {
-    if (!this.currentTabId) return;
+  async _reloadConversationDisplay(tabId = this.currentTabId) {
+    if (!tabId || tabId !== this.currentTabId) return;
+    this._tabSwitchSeq = (this._tabSwitchSeq || 0) + 1;
+    const mySeq = this._tabSwitchSeq;
+    const result = await this.api.get_conversation_state(tabId);
+    if (tabId !== this.currentTabId || mySeq !== this._tabSwitchSeq) return;
     this.chatDisplay.clear();
-    const result = await this.api.get_conversation_state(this.currentTabId);
     if (result.success && result.state) {
       this._renderConversationState(result.state);
     }
@@ -2684,7 +2687,7 @@ class AlpacaApp {
   async onPackStateSynced(tabId) {
     this.tabManager.setTabOffline(tabId, false);
     if (tabId !== this.currentTabId) return;
-    await this._reloadConversationDisplay();
+    await this._reloadConversationDisplay(tabId);
     this._updateStatusBar();
   }
 

@@ -386,6 +386,7 @@ class AppCore:
         model: str | None = None,
         conversation_id: int | None = None,
         project_payload: dict[str, Any] | None = None,
+        initial_data: dict[str, Any] | None = None,
     ) -> tuple[str, PackTab]:
         """Create a new Pack tab — a tab whose backend runs on a remote
 
@@ -414,6 +415,12 @@ class AppCore:
             project_payload=project_payload,
         )
         self.tabs[tab_id] = tab
+        # Restored Pack tabs must be seeded before the background attach can
+        # replace that snapshot with authoritative daemon state. Starting the
+        # connection first lets a fast attach win, only to be overwritten by
+        # the stale saved copy when the caller loads it afterward.
+        if initial_data is not None:
+            tab.load_from_data(initial_data)
         tab.connect_async(model=model)
         return tab_id, tab
 

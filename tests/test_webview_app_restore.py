@@ -67,6 +67,7 @@ class TestRestoreSessionRoutesPackTabs:
             "My Pack",
             auto_switch=False,
             conversation_id=5,
+            initial_data=app.core.load_session.return_value[0][0],
         )
         app.api.create_tab_and_notify_js.assert_not_called()
 

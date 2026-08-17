@@ -195,6 +195,7 @@ class ChatApp:
                         title,
                         auto_switch=False,
                         conversation_id=saved_conv_id,
+                        initial_data=tab_data,
                         **project_kwargs,
                     )
                 else:
@@ -214,7 +215,8 @@ class ChatApp:
                     tab = self.core.tabs.get(new_id)
                     if tab:
                         logger.info(f"Before load_from_data: tab.title='{tab.title}'")
-                        tab.load_from_data(tab_data)
+                        if tab_data.get("tab_type") != "pack":
+                            tab.load_from_data(tab_data)
                         logger.info(
                             f"After load_from_data: tab.title='{tab.title}', chat_state has {len(tab.chat_state.questions)} questions",
                         )

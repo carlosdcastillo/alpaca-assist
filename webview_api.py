@@ -673,6 +673,7 @@ class WebViewAPI:
                     title,
                     auto_switch=True,
                     conversation_id=conv_id,
+                    initial_data=tab_data,
                     **project_kwargs,
                 )
             else:
@@ -685,7 +686,7 @@ class WebViewAPI:
                 return result
             tab_id = result["tab_id"]
             new_tab = self._app.core.tabs.get(tab_id)
-            if new_tab:
+            if new_tab and tab_data.get("tab_type") != "pack":
                 new_tab.load_from_data(tab_data)
             logger.info(f"Revived conversation {conv_id} as tab {tab_id}")
             return {"success": True, "tab_id": tab_id}
@@ -1780,6 +1781,7 @@ class WebViewAPI:
         conversation_id: int | None = None,
         project: str | None = None,
         workspace_path: str | None = None,
+        initial_data: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Create a new Pack tab and notify JavaScript to create the UI.
 
@@ -1801,6 +1803,7 @@ class WebViewAPI:
                 title,
                 conversation_id=conversation_id,
                 project_payload=project_payload,
+                initial_data=initial_data,
             )
             self._current_answer_index[tab_id] = -1
 
