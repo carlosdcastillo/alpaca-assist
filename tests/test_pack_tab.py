@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import base64
+import threading
 import time
 from typing import Any
 from unittest import mock
@@ -124,6 +125,84 @@ class TestConnect:
             time.sleep(0.02)
 
         pack_tab._transport.connect.assert_called_once_with(model=None)
+
+    def test_video_load_waits_for_initial_attach(
+        self,
+        pack_tab: PackTab,
+    ) -> None:
+        """Revive renders saved videos while connect_async is still attaching."""
+        transport = pack_tab._transport
+        transport.connected = True
+        attach_started = threading.Event()
+        release_attach = threading.Event()
+
+        def send_request(method, params, timeout):
+            if method == "attach":
+                attach_started.set()
+                assert release_attach.wait(timeout=2.0)
+                return ATTACH_RESPONSE
+            assert method == "read_video_chunk"
+            return {"data": "YWJj", "done": True}
+
+        transport.send_request.side_effect = send_request
+        pack_tab.connect_async()
+        assert attach_started.wait(timeout=2.0)
+
+        result: dict[str, Any] = {}
+
+        def load_video() -> None:
+            result.update(pack_tab.read_video_chunk("locator", 0))
+
+        video_thread = threading.Thread(target=load_video)
+        video_thread.start()
+        time.sleep(0.05)
+
+        assert video_thread.is_alive()
+        assert [call.args[0] for call in transport.send_request.call_args_list] == [
+            "attach",
+        ]
+
+        release_attach.set()
+        video_thread.join(timeout=2.0)
+
+        assert not video_thread.is_alive()
+        assert result == {"data": "YWJj", "done": True}
+        transport.connect.assert_called_once_with(model=None)
+
+    def test_video_load_cannot_start_a_second_connection_before_connect_thread(
+        self,
+        pack_tab: PackTab,
+    ) -> None:
+        """Immediate restored media may run before connect_async's thread."""
+        transport = pack_tab._transport
+        transport.connected = False
+
+        def connect(model=None):
+            transport.connected = True
+
+        def send_request(method, params, timeout):
+            if method == "attach":
+                return ATTACH_RESPONSE
+            assert method == "read_video_chunk"
+            return {"data": "YWJj", "done": True}
+
+        transport.connect.side_effect = connect
+        transport.send_request.side_effect = send_request
+
+        with patch("core.pack_tab.threading.Thread") as thread_class:
+            pack_tab.connect_async()
+            worker = thread_class.call_args.kwargs["target"]
+            worker_args = thread_class.call_args.kwargs["args"]
+
+            result = pack_tab.read_video_chunk("locator", 0)
+            worker(*worker_args)
+
+        assert result == {"data": "YWJj", "done": True}
+        transport.connect.assert_called_once_with()
+        assert [call.args[0] for call in transport.send_request.call_args_list] == [
+            "attach",
+            "read_video_chunk",
+        ]
 
 
 class TestHandleUserMessage:

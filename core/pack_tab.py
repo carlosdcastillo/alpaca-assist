@@ -111,6 +111,7 @@ class PackTab:
         self.offline = False
         self._current_answer_index = -1
         self._connect_lock = threading.Lock()
+        self._connect_pending = False
         # Set by _apply_resync_result when the daemon reports resumed=False
         # while we still hold real local content — see resolve_session_lost.
         self._pending_recreate_state: dict[str, Any] | None = None
@@ -149,6 +150,12 @@ class PackTab:
 
         — the tab button appears immediately, exactly like a local tab).
         """
+        # Claim connection ownership before starting the thread.  A revived
+        # tab can render saved media immediately, before the new thread gets
+        # scheduled; _ensure_connected uses this flag to finish the same
+        # connection rather than starting a competing one.
+        with self._connect_lock:
+            self._connect_pending = True
         threading.Thread(target=self._connect, args=(model,), daemon=True).start()
 
     def reconnect_async(self) -> None:
@@ -161,6 +168,7 @@ class PackTab:
             if not self.offline:
                 return
             self._transport = self._build_transport()
+            self._connect_pending = True
             self.project_setup_error = None
             if self._project_payload:
                 self.project_setup_state = "setting_up"
@@ -169,6 +177,14 @@ class PackTab:
 
     def _connect(self, model: str | None) -> None:
         with self._connect_lock:
+            # A synchronous request may have won the race with the newly
+            # started background thread and completed this connection.
+            if (
+                not self._connect_pending
+                and self._transport.connected
+                and not self.offline
+            ):
+                return
             try:
                 self._transport.connect(model=model)
                 self._resync(timeout=ATTACH_TIMEOUT)
@@ -194,6 +210,8 @@ class PackTab:
                 api = self._app_core.api
                 if api is not None:
                     api.on_error(self.tab_id, f"Project setup failed: {e}")
+            finally:
+                self._connect_pending = False
 
     def _configure_project(self) -> None:
         if not self._project_payload:
@@ -223,17 +241,26 @@ class PackTab:
         reconnect before giving up, so a user who's already looking at
         the tab and just types doesn't need to click away and back.
         """
-        if self.offline or not self._transport.connected:
-            self._transport = self._build_transport()
-            self.project_setup_error = None
-            if self._project_payload:
-                self.project_setup_state = "setting_up"
-                self._project_ready.clear()
-            self._transport.connect()
-            self._resync(timeout=timeout)
-            self._configure_project()
-            self.offline = False
-            self._notify_if_active()
+        # Also take this lock when the transport already says "connected":
+        # the background _connect may still be waiting for its attach
+        # response.  Sending a restored video's first chunk during that
+        # window can otherwise create a competing bridge or queue work on a
+        # daemon connection that is not ready yet.
+        with self._connect_lock:
+            if self._connect_pending or self.offline or not self._transport.connected:
+                self._transport = self._build_transport()
+                self.project_setup_error = None
+                if self._project_payload:
+                    self.project_setup_state = "setting_up"
+                    self._project_ready.clear()
+                try:
+                    self._transport.connect()
+                    self._resync(timeout=timeout)
+                    self._configure_project()
+                    self.offline = False
+                    self._notify_if_active()
+                finally:
+                    self._connect_pending = False
         if not self._project_ready.wait(timeout=PROJECT_SETUP_TIMEOUT):
             raise PackTransportError("timed out waiting for project setup")
         if self.project_setup_error:
