@@ -136,6 +136,7 @@ class PackTab:
         transport = PackTransport(self.host, self.session_id)
         transport.on_notification("on_streaming_start", self._on_streaming_start)
         transport.on_notification("on_streaming_end", self._on_streaming_end)
+        transport.on_notification("on_turn_timing", self._on_turn_timing)
         transport.on_notification("on_content_update", self._on_content_update)
         transport.on_notification("on_error", self._on_error)
         transport.on_notification("update_tab_title", self._on_update_tab_title)
@@ -433,6 +434,15 @@ class PackTab:
         # Catch the mirror up and repaint the active tab automatically so
         # those components do not require a tab switch to appear.
         self._resync_async(notify_if_active=True)
+
+    def _on_turn_timing(self, params: dict[str, Any]) -> None:
+        api = self._app_core.api
+        if api is not None:
+            api.on_turn_timing(
+                self.tab_id,
+                params["answer_index"],
+                params["timing"],
+            )
 
     def _on_content_update(self, params: dict[str, Any]) -> None:
         api = self._app_core.api

@@ -173,6 +173,19 @@ class TestPackDaemonAdapter:
             {"tab_id": "tab-1", "answer_index": 2},
         )
 
+    def test_on_turn_timing_forwards_completed_record(self) -> None:
+        adapter = PackDaemonAdapter()
+        conn = MagicMock()
+        adapter.set_connection(conn)
+        timing = {"wall_ms": 4200, "llm_ms": 3000, "tool_ms": 1000}
+
+        adapter.on_turn_timing("tab-1", 2, timing)
+
+        conn.send_notification.assert_called_once_with(
+            "on_turn_timing",
+            {"tab_id": "tab-1", "answer_index": 2, "timing": timing},
+        )
+
     def test_on_content_update_serializes_via_asdict(self) -> None:
         adapter = PackDaemonAdapter()
         conn = MagicMock()

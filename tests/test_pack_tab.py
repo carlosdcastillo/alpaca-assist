@@ -566,6 +566,23 @@ class TestNotificationHandlers:
         assert pack_tab.is_streaming is False
         app_core.api.on_streaming_end.assert_called_once_with("tab-1", 2)
 
+    def test_on_turn_timing_forwards_with_local_tab_id(
+        self,
+        pack_tab: PackTab,
+        app_core: MagicMock,
+    ) -> None:
+        timing = {"wall_ms": 4200, "llm_ms": 3000, "tool_ms": 1000}
+
+        pack_tab._on_turn_timing(
+            {
+                "tab_id": "remote-daemon-tab-99",
+                "answer_index": 2,
+                "timing": timing,
+            },
+        )
+
+        app_core.api.on_turn_timing.assert_called_once_with("tab-1", 2, timing)
+
     def test_on_streaming_end_applies_token_stats_synchronously(
         self,
         pack_tab: PackTab,

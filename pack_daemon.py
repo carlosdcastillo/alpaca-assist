@@ -123,6 +123,21 @@ class PackDaemonAdapter:
             {"tab_id": tab_id, "answer_index": answer_index, **self._token_stats()},
         )
 
+    def on_turn_timing(
+        self,
+        tab_id: str,
+        answer_index: int,
+        timing: dict[str, Any],
+    ) -> None:
+        self._notify(
+            "on_turn_timing",
+            {
+                "tab_id": tab_id,
+                "answer_index": answer_index,
+                "timing": timing,
+            },
+        )
+
     def on_content_update(self, tab_id: str, update: Any) -> None:
         self._notify(
             "on_content_update",
