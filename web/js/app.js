@@ -3363,9 +3363,8 @@ class AlpacaApp {
   }
 
   /**
-   * Present a Pack tab as an offloaded task. Host, daemon, branch and sync
-   * details are deliberately omitted: the useful promise is that work is
-   * happening elsewhere and this machine remains available.
+   * Present a Pack tab as an offloaded task. Show the configured host name,
+   * while omitting daemon, branch, and sync implementation details.
    */
   _updateWorkspaceHeader(info) {
     const header = document.getElementById("workspace-header");
@@ -3383,8 +3382,9 @@ class AlpacaApp {
     const sync = document.getElementById("workspace-header-sync");
 
     project.textContent = info.project || "Remote task";
+    const packHostName = info.display_name || info.host || "remote host";
     location.textContent = info.connected
-      ? "Runs on Atreides — without tying up your computer"
+      ? `Runs on ${packHostName} — without tying up your computer`
       : "Remote work is paused";
     location.title = "";
     branch.textContent = "";
@@ -3739,8 +3739,9 @@ class AlpacaApp {
 
     if (info.is_pack) {
       if (info.connected) {
-        badge.textContent = "Runs on Atreides — without tying up your computer";
-        badge.title = "Runs on Atreides — without tying up your computer";
+        const packHostName = info.display_name || info.host || "remote host";
+        badge.textContent = `Runs on ${packHostName} — without tying up your computer`;
+        badge.title = badge.textContent;
         badge.classList.add("status-connection--connected");
       } else {
         badge.textContent = "Remote work paused";

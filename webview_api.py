@@ -238,6 +238,7 @@ class WebViewAPI:
                 "title": title,
                 "conversation_id": tab.conversation_id,
                 "host": host,
+                "display_name": self._lookup_pack_display_name(host),
                 "session_id": session_id,
                 "project": project_payload.get("name") if project_payload else None,
             }
@@ -1810,7 +1811,8 @@ class WebViewAPI:
             self._safe_evaluate_js(
                 f"app.tabManager.createTabUI({json.dumps(tab_id)}, {json.dumps(title)}, "
                 f"{json.dumps(auto_switch)}, true, "
-                f"{json.dumps(project_payload.get('name') if project_payload else None)});",
+                f"{json.dumps(project_payload.get('name') if project_payload else None)}, "
+                f"{json.dumps(self._lookup_pack_display_name(host))});",
             )
             self._safe_evaluate_js(
                 f"app.tabManager.setConversationId({json.dumps(tab_id)}, {tab.conversation_id});",

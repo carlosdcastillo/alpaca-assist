@@ -63,7 +63,14 @@ class TabManager {
     const convId = result.conversation_id;
     const title = `#${convId}`;
 
-    this.createTabUI(tabId, title, true, true, result.project || null);
+    this.createTabUI(
+      tabId,
+      title,
+      true,
+      true,
+      result.project || null,
+      result.display_name || result.host || host,
+    );
     this._convIds.set(tabId, convId);
     return tabId;
   }
@@ -93,7 +100,14 @@ class TabManager {
   /**
    * Create just the UI for a tab (used when Python already created the tab)
    */
-  createTabUI(tabId, title, autoSwitch = true, isPack = false, project = null) {
+  createTabUI(
+    tabId,
+    title,
+    autoSwitch = true,
+    isPack = false,
+    project = null,
+    packHostName = null,
+  ) {
     // Create tab button in UI
     const tabButton = this._createTabButton(tabId, title, isPack, project);
     this.container.appendChild(tabButton);
@@ -107,6 +121,7 @@ class TabManager {
       inputArea: null,
       isStreaming: false,
       isPack: isPack,
+      packHostName: packHostName,
     };
 
     this.tabs.set(tabId, tabData);
@@ -365,9 +380,8 @@ class TabManager {
         tab.button.classList.add("streaming");
         if (tab.isPack) {
           const meta = tab.button.querySelector(".tab-workspace-meta");
-          if (meta) {
-            meta.textContent =
-              "Runs on Atreides — without tying up your computer";
+          if (meta && tab.packHostName) {
+            meta.textContent = `Runs on ${tab.packHostName} — without tying up your computer`;
           }
         }
       } else {
@@ -400,8 +414,8 @@ class TabManager {
   }
 
   /**
-   * Keep task outcome visible on offloaded tabs without exposing the worker,
-   * branch, or synchronization machinery.
+   * Keep the host and task outcome visible on offloaded tabs without exposing
+   * branch or synchronization machinery.
    */
   setPackWorkspaceStatus(tabId, info) {
     const tab = this.tabs.get(tabId);
@@ -410,6 +424,7 @@ class TabManager {
     if (!meta) return;
 
     const workspace = info?.workspace_status || {};
+    tab.packHostName = info?.display_name || info?.host || tab.packHostName;
 
     meta.classList.remove(
       "tab-workspace-meta--dirty",
@@ -424,7 +439,9 @@ class TabManager {
       meta.textContent = "Needs attention";
       meta.classList.add("tab-workspace-meta--error");
     } else if (tab.isStreaming) {
-      meta.textContent = "Runs on Atreides — without tying up your computer";
+      meta.textContent = tab.packHostName
+        ? `Runs on ${tab.packHostName} — without tying up your computer`
+        : "Working remotely — without tying up your computer";
     } else if (workspace.dirty > 0) {
       meta.textContent = "Changes ready to review";
       meta.classList.add("tab-workspace-meta--dirty");

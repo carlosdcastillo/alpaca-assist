@@ -158,6 +158,7 @@ describe("TabManager", () => {
         success: true,
         tab_id: "tab-2-def456",
         conversation_id: 7,
+        display_name: "Deimos",
       });
 
       await tabManager.createPackTab("user@host");
@@ -173,6 +174,7 @@ describe("TabManager", () => {
         success: true,
         tab_id: "tab-2-def456",
         conversation_id: 7,
+        display_name: "Deimos",
       });
 
       const tabId = await tabManager.createPackTab("user@host");
@@ -181,6 +183,7 @@ describe("TabManager", () => {
       const button = container.querySelector('[data-tab-id="tab-2-def456"]');
       expect(button.classList.contains("pack")).toBe(true);
       expect(tabManager.tabs.get("tab-2-def456").isPack).toBe(true);
+      expect(tabManager.tabs.get("tab-2-def456").packHostName).toBe("Deimos");
     });
 
     it("should return null on failure", async () => {
@@ -433,6 +436,21 @@ describe("TabManager", () => {
 
       expect(container.querySelector(".tab-workspace-meta").textContent).toBe(
         "Done",
+      );
+    });
+
+    it("shows the Pack host name while streaming", () => {
+      tabManager.setPackWorkspaceStatus("pack-1", {
+        connected: true,
+        display_name: "Deimos",
+        host: "192.168.0.58",
+        workspace_status: { dirty: 0 },
+      });
+
+      tabManager.setTabStreaming("pack-1", true);
+
+      expect(container.querySelector(".tab-workspace-meta").textContent).toBe(
+        "Runs on Deimos — without tying up your computer",
       );
     });
   });

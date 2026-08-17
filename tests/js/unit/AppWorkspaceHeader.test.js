@@ -25,6 +25,8 @@ describe("AlpacaApp Pack workspace header", () => {
       is_pack: true,
       project: "alpaca",
       connected: true,
+      display_name: "Deimos",
+      host: "192.168.0.58",
       workspace_path: "/work/alpaca",
       workspace_status: {
         is_git: true,
@@ -48,7 +50,7 @@ describe("AlpacaApp Pack workspace header", () => {
     ).toHaveTextContent("Changes ready to review");
     expect(
       document.getElementById("workspace-header-location"),
-    ).toHaveTextContent("Runs on Atreides — without tying up your computer");
+    ).toHaveTextContent("Runs on Deimos — without tying up your computer");
     expect(
       document.getElementById("workspace-header-location"),
     ).not.toHaveTextContent("/work/alpaca");
