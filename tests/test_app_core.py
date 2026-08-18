@@ -17,6 +17,7 @@ import pytest
 from core.app_core import PREFERENCES_FILE
 from core.app_core import SESSION_FILE
 from core.app_core import AppCore
+from core.config import DEFAULT_PREFERENCES
 
 
 class TestAppCoreSession:
@@ -176,6 +177,30 @@ class TestAppCoreSession:
 
         assert data["tabs"] == []
         assert data["selected_tab_id"] is None
+
+
+class TestAppCorePreferences:
+    def test_load_preferences_migrates_old_default_ui_font(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        Path(PREFERENCES_FILE).write_text(json.dumps({"font_family": "Cascadia Mono"}))
+        core = AppCore.__new__(AppCore)
+        core.preferences = DEFAULT_PREFERENCES.copy()
+
+        core.load_preferences()
+
+        assert core.preferences["font_family"] == DEFAULT_PREFERENCES["font_family"]
+
+    def test_load_preferences_preserves_custom_ui_font(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        Path(PREFERENCES_FILE).write_text(
+            json.dumps({"font_family": "Atkinson Hyperlegible"}),
+        )
+        core = AppCore.__new__(AppCore)
+        core.preferences = DEFAULT_PREFERENCES.copy()
+
+        core.load_preferences()
+
+        assert core.preferences["font_family"] == "Atkinson Hyperlegible"
 
 
 class TestAppCoreAutosave:

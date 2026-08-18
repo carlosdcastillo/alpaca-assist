@@ -15,7 +15,7 @@ from typing import Any
 # unrecognized theme, which rendered as a blank Theme dropdown.
 DEFAULT_PREFERENCES: dict[str, Any] = {
     "api_url": "http://localhost:11434/api/chat",
-    "font_family": "Cascadia Mono",
+    "font_family": "system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
     "content_font_family": "Georgia, 'Noto Serif', 'Iowan Old Style', serif",
     "font_size": 12,
     "theme": "dark",

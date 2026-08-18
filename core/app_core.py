@@ -40,6 +40,7 @@ logger = logging.getLogger(__name__)
 
 SESSION_FILE: str = "chat_session.json"
 PREFERENCES_FILE: str = "preferences.json"
+_OLD_DEFAULT_UI_FONT = "Cascadia Mono"
 
 # Autosave interval in milliseconds (30 seconds)
 _AUTOSAVE_INTERVAL_MS = 30_000
@@ -257,6 +258,8 @@ class AppCore:
             try:
                 with open(PREFERENCES_FILE) as f:
                     saved_prefs = json.load(f)
+                    if saved_prefs.get("font_family") == _OLD_DEFAULT_UI_FONT:
+                        saved_prefs["font_family"] = DEFAULT_PREFERENCES["font_family"]
                     self.preferences.update(saved_prefs)
             except Exception as e:
                 logger.error(f"Error loading preferences: {e}")
