@@ -102,6 +102,7 @@ class AlpacaApp {
       // remote Xvfb/x11vnc/app keep running, exactly like the Pack daemon
       // itself, and the supervisor's idle reaper collects them.
       window.SurfaceDock?.removeTab(e.detail.tabId);
+      window.ArtifactDock?.removeTab(e.detail.tabId);
       // Update input area visibility when tab is closed
       this._updateInputAreaVisibility();
     });
@@ -2117,6 +2118,7 @@ class AlpacaApp {
     // Surface panels are only hidden, never rebuilt — they live in the dock
     // outside #chat-container precisely so a live session survives this.
     window.SurfaceDock?.setActiveTab(tabId);
+    window.ArtifactDock?.setActiveTab(tabId);
     // Clear any active find highlights before rebuilding chat DOM
     this._findMatches = [];
     this._findCurrentIdx = -1;

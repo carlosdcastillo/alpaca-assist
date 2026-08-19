@@ -24,13 +24,15 @@
     display: none;
 }
 
-#surface-dock surface-panel {
+#surface-dock surface-panel,
+#surface-dock artifact-panel {
     flex: 1 1 auto;
     min-height: 0;
     border-bottom: 1px solid var(--border-color);
 }
 
-#surface-dock surface-panel:last-child {
+#surface-dock surface-panel:last-child,
+#surface-dock artifact-panel:last-child {
     border-bottom: none;
 }
 

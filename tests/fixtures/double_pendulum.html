@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Double Pendulum Lab</title>
+  <style>
+    :root { color-scheme: dark; font-family: Inter, system-ui, sans-serif; }
+    * { box-sizing: border-box; }
+    body { margin: 0; min-height: 100vh; overflow: hidden; color: #eaf2ff;
+      background: radial-gradient(circle at 50% 35%, #16264c 0, #090e1b 58%, #05070e 100%); }
+    .shell { height: 100vh; display: grid; grid-template-rows: auto 1fr auto; }
+    header { display: flex; align-items: end; justify-content: space-between; gap: 16px;
+      padding: 18px 22px 10px; }
+    h1 { margin: 0; font-size: clamp(19px, 2.3vw, 30px); letter-spacing: -.04em; }
+    .subtitle { margin-top: 4px; color: #94a8cf; font-size: 12px; }
+    .badge { padding: 5px 9px; border: 1px solid #2f4774; border-radius: 999px;
+      color: #a7c7ff; background: #101a30cc; font: 11px ui-monospace, monospace; }
+    main { min-height: 0; position: relative; margin: 0 16px; border: 1px solid #26395f;
+      border-radius: 16px; overflow: hidden; background: linear-gradient(#0c1428cc, #080d19dd); }
+    canvas { display: block; width: 100%; height: 100%; }
+    .readout { position: absolute; left: 14px; top: 14px; display: grid; gap: 5px;
+      padding: 9px 11px; border: 1px solid #28416d; border-radius: 10px;
+      background: #07101dcc; backdrop-filter: blur(8px); font: 11px ui-monospace, monospace; }
+    .readout span { color: #8da3c9; } .readout strong { color: #f2f7ff; font-weight: 600; }
+    footer { display: flex; align-items: center; justify-content: center; flex-wrap: wrap;
+      gap: 10px 18px; padding: 12px 18px 16px; color: #9cafce; font-size: 11px; }
+    label { display: flex; align-items: center; gap: 7px; }
+    input[type="range"] { width: 112px; accent-color: #60a5fa; }
+    button { border: 1px solid #34548a; border-radius: 8px; padding: 7px 12px;
+      color: #e8f1ff; background: #142440; cursor: pointer; font-weight: 600; }
+    button:hover { background: #1d3560; }
+    .hint { color: #64799e; }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <header>
+      <div><h1>Double Pendulum Lab</h1><div class="subtitle">Deterministic chaos from two coupled arms</div></div>
+      <div class="badge">SELF-CONTAINED HTML</div>
+    </header>
+    <main>
+      <canvas id="scene" aria-label="Animated double pendulum"></canvas>
+      <div class="readout">
+        <div><span>θ₁</span> <strong id="theta1">—</strong></div>
+        <div><span>θ₂</span> <strong id="theta2">—</strong></div>
+        <div><span>energy</span> <strong id="energy">—</strong></div>
+      </div>
+    </main>
+    <footer>
+      <button id="toggle">Pause</button><button id="reset">Reset</button>
+      <label>Gravity <input id="gravity" type="range" min="2" max="18" value="9.81" step="0.1"><output>9.8</output></label>
+      <label>Trail <input id="trail" type="range" min="30" max="500" value="260" step="10"></label>
+      <span class="hint">Drag either mass to perturb the system</span>
+    </footer>
+  </div>
+  <script>
+    const canvas = document.getElementById('scene');
+    const ctx = canvas.getContext('2d');
+    const initial = [2.08, 0, 1.12, 0]; // theta1, omega1, theta2, omega2
+    let state = initial.slice(), running = true, trail = [], last = performance.now();
+    let width = 0, height = 0, scale = 1, origin = { x: 0, y: 0 }, dragging = 0;
+    const gravity = document.getElementById('gravity');
+    const trailSize = document.getElementById('trail');
+
+    function resize() {
+      const box = canvas.getBoundingClientRect(), dpr = Math.min(devicePixelRatio, 2);
+      canvas.width = Math.round(box.width * dpr); canvas.height = Math.round(box.height * dpr);
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0); width = box.width; height = box.height;
+      scale = Math.min(width * .25, height * .32); origin = { x: width * .53, y: height * .16 };
+    }
+    new ResizeObserver(resize).observe(canvas); resize();
+
+    function derivative(s) {
+      const [a, av, b, bv] = s, g = Number(gravity.value), delta = a - b;
+      const den = 2 - Math.cos(2 * delta);
+      const aa = (-g * (2 * Math.sin(a) + Math.sin(a - 2 * b))
+        - 2 * Math.sin(delta) * (bv * bv + av * av * Math.cos(delta))) / den;
+      const ba = (2 * Math.sin(delta) * (2 * av * av + 2 * g * Math.cos(a)
+        + bv * bv * Math.cos(delta))) / den;
+      return [av, aa / scale * 110, bv, ba / scale * 110];
+    }
+    function rk4(s, dt) {
+      const add = (a, b, k) => a.map((v, i) => v + b[i] * k);
+      const k1 = derivative(s), k2 = derivative(add(s, k1, dt / 2));
+      const k3 = derivative(add(s, k2, dt / 2)), k4 = derivative(add(s, k3, dt));
+      return s.map((v, i) => v + dt * (k1[i] + 2*k2[i] + 2*k3[i] + k4[i]) / 6);
+    }
+    function points() {
+      const p1 = { x: origin.x + scale * Math.sin(state[0]), y: origin.y + scale * Math.cos(state[0]) };
+      return [p1, { x: p1.x + scale * Math.sin(state[2]), y: p1.y + scale * Math.cos(state[2]) }];
+    }
+    function draw() {
+      const [p1, p2] = points();
+      trail.push({ x: p2.x, y: p2.y }); while (trail.length > Number(trailSize.value)) trail.shift();
+      ctx.clearRect(0, 0, width, height);
+      ctx.strokeStyle = '#162544'; ctx.lineWidth = 1;
+      for (let x = origin.x % 32; x < width; x += 32) { ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,height); ctx.stroke(); }
+      for (let y = origin.y % 32; y < height; y += 32) { ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(width,y); ctx.stroke(); }
+      if (trail.length > 1) {
+        const grad = ctx.createLinearGradient(0, 0, width, height); grad.addColorStop(0, '#22d3ee22'); grad.addColorStop(1, '#a78bfa');
+        ctx.strokeStyle = grad; ctx.lineWidth = 2; ctx.beginPath();
+        trail.forEach((p, i) => i ? ctx.lineTo(p.x,p.y) : ctx.moveTo(p.x,p.y)); ctx.stroke();
+      }
+      ctx.lineCap = 'round'; ctx.lineWidth = 6; ctx.strokeStyle = '#b8c9e8';
+      ctx.beginPath(); ctx.moveTo(origin.x, origin.y); ctx.lineTo(p1.x,p1.y); ctx.lineTo(p2.x,p2.y); ctx.stroke();
+      [[origin,5,'#d9e5fa'],[p1,13,'#38bdf8'],[p2,16,'#a78bfa']].forEach(([p,r,c]) => {
+        ctx.shadowBlur = 18; ctx.shadowColor = c; ctx.fillStyle = c; ctx.beginPath(); ctx.arc(p.x,p.y,r,0,Math.PI*2); ctx.fill();
+      }); ctx.shadowBlur = 0;
+      const g = Number(gravity.value), energy = -(2*g*Math.cos(state[0]) + g*Math.cos(state[2])) + .5*(state[1]**2 + state[2]**2);
+      document.getElementById('theta1').textContent = `${(state[0]*180/Math.PI).toFixed(1)}°`;
+      document.getElementById('theta2').textContent = `${(state[2]*180/Math.PI).toFixed(1)}°`;
+      document.getElementById('energy').textContent = energy.toFixed(2);
+    }
+    function frame(now) {
+      const dt = Math.min((now-last)/1000, .025); last = now;
+      if (running && !dragging) for (let i=0;i<3;i++) state = rk4(state, dt/3);
+      draw(); requestAnimationFrame(frame);
+    }
+    document.getElementById('toggle').onclick = (e) => { running = !running; e.target.textContent = running ? 'Pause' : 'Play'; };
+    document.getElementById('reset').onclick = () => { state = initial.slice(); trail = []; running = true; document.getElementById('toggle').textContent='Pause'; };
+    gravity.oninput = () => gravity.nextElementSibling.value = Number(gravity.value).toFixed(1);
+    function pointer(e) {
+      const r = canvas.getBoundingClientRect(); return { x:e.clientX-r.left, y:e.clientY-r.top };
+    }
+    canvas.onpointerdown = (e) => { const p=pointer(e), [a,b]=points(); dragging = Math.hypot(p.x-b.x,p.y-b.y) < 30 ? 2 : Math.hypot(p.x-a.x,p.y-a.y) < 30 ? 1 : 0; canvas.setPointerCapture(e.pointerId); };
+    canvas.onpointermove = (e) => { if (!dragging) return; const p=pointer(e), [a]=points(); if (dragging===1) state[0]=Math.atan2(p.x-origin.x,p.y-origin.y); else state[2]=Math.atan2(p.x-a.x,p.y-a.y); state[dragging===1?1:3]=0; trail=[]; };
+    canvas.onpointerup = () => dragging = 0;
+    requestAnimationFrame(frame);
+  </script>
+</body>
+</html>

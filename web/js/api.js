@@ -142,6 +142,10 @@ class PythonAPI {
     return this.call("surface_control", tabId, method, params);
   }
 
+  async artifact_attach(tabId, artifactId) {
+    return this.call("artifact_attach", tabId, artifactId);
+  }
+
   async stop_streaming(tabId) {
     return this.call("stop_streaming", tabId);
   }

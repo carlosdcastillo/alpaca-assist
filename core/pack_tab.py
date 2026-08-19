@@ -786,6 +786,16 @@ class PackTab:
         )
         return result
 
+    def artifact_attach(self, artifact_id: str) -> dict[str, Any]:
+        """Fetch a durable static artifact from this Pack session."""
+        self._ensure_connected(timeout=ATTACH_TIMEOUT)
+        result: dict[str, Any] = self._transport.send_request(
+            "artifact_attach",
+            {"artifact_id": artifact_id},
+            timeout=FILE_CHUNK_TIMEOUT,
+        )
+        return result
+
     def read_gated_tool_output(self, gated_text: str) -> str:
         """Fetch a gated result from the remote Pack daemon's temp file."""
         self._ensure_connected(timeout=ATTACH_TIMEOUT)

@@ -37,6 +37,8 @@ from typing import Any
 from typing import cast
 
 from core import pack_protocol
+from core.artifact_control import ArtifactControlServer
+from core.artifact_store import ArtifactStore
 from core.pack_files import PackFileStore
 from core.projects import prepare_workspace
 from core.projects import probe_workspace
@@ -273,6 +275,7 @@ def make_dispatcher(
     resumed: bool,
     core: Any,
     supervisor: Any = None,
+    artifact_store: Any = None,
 ) -> Callable[[str, dict[str, Any]], Any]:
     """Build the method -> handler mapping for the daemon's one ChatTab."""
 
@@ -381,6 +384,10 @@ def make_dispatcher(
                 params.get("rendered", False),
             )
             return {"ok": True}
+        if method == "artifact_attach":
+            if artifact_store is None:
+                raise RuntimeError("interactive artifacts are unavailable")
+            return artifact_store.attach(params.get("artifact_id"))
         if method == "seed_state":
             # Local side recreating a session we reported resumed=False
             # for (no chat_session.json existed when we started) — load
@@ -472,6 +479,18 @@ def _inject_surface_mcp_server(raw_config: dict[str, Any], repo_root: Path) -> N
     }
 
 
+def _inject_artifact_mcp_server(raw_config: dict[str, Any], repo_root: Path) -> None:
+    """Register the Pack-only self-contained HTML publisher."""
+    if "alpaca-artifact" in raw_config:
+        return
+    if not (repo_root / "artifact_mcp_server.py").is_file():
+        return
+    raw_config["alpaca-artifact"] = {
+        "command": ["python", "artifact_mcp_server.py"],
+        "args": [],
+    }
+
+
 def _prepare_mcp_config(session_dir: Path, repo_root: Path) -> None:
     """Snapshot the repo's mcp_servers.json into the session dir with
 
@@ -494,6 +513,7 @@ def _prepare_mcp_config(session_dir: Path, repo_root: Path) -> None:
             return
     try:
         _inject_surface_mcp_server(raw_config, repo_root)
+        _inject_artifact_mcp_server(raw_config, repo_root)
         fixed_config = _absolutize_mcp_config(raw_config, repo_root)
         with open(session_dir / "mcp_servers.json", "w", encoding="utf-8") as f:
             json.dump(fixed_config, f, indent=2)
@@ -643,8 +663,17 @@ def main() -> None:
     tab.surface_socket = str(session_dir / "surfaces" / SOCKET_NAME)
 
     supervisor = _start_surface_supervisor(session_dir)
+    artifact_store = ArtifactStore(session_dir)
+    ArtifactControlServer(artifact_store).start()
 
-    dispatch = make_dispatcher(tab, adapter, resumed, core, supervisor)
+    dispatch = make_dispatcher(
+        tab,
+        adapter,
+        resumed,
+        core,
+        supervisor,
+        artifact_store,
+    )
 
     sock_path = session_dir / "daemon.sock"
     listener = _bind_socket(sock_path)

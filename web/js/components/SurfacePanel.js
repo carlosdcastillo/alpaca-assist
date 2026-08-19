@@ -398,6 +398,10 @@ const SurfaceDock = {
     return Boolean(this._panels.get(tabId)?.has(surfaceId));
   },
 
+  count(tabId) {
+    return this._panels.get(tabId)?.size || 0;
+  },
+
   /** Create (or reveal) a panel and connect it. */
   async show(tabId, connection) {
     const dock = this._dock();
@@ -463,7 +467,9 @@ const SurfaceDock = {
     const dock = this._dock();
     const splitter = document.getElementById("surface-splitter");
     if (!dock) return;
-    const count = this._panels.get(this._activeTabId)?.size || 0;
+    const count =
+      this.count(this._activeTabId) +
+      (window.ArtifactDock?.count(this._activeTabId) || 0);
     dock.classList.toggle("hidden", count === 0);
     if (splitter) splitter.classList.toggle("hidden", count === 0);
   },

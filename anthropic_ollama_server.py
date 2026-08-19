@@ -1583,6 +1583,21 @@ def _cli_mcp_servers(
             "args": [surface_script],
             "env": surface_env,
         }
+    artifact_script = os.path.join(os.path.dirname(__file__), "artifact_mcp_server.py")
+    if surface_socket and os.path.isfile(artifact_script):
+        session_dir = os.path.dirname(os.path.dirname(surface_socket))
+        servers["alpaca-artifact"] = {
+            "command": sys.executable,
+            "args": [artifact_script],
+            "env": {
+                "ALPACA_CLI_MEDIA_EVENTS": media_event_path,
+                "ALPACA_ARTIFACT_SOCKET": os.path.join(
+                    session_dir,
+                    "artifacts",
+                    "control.sock",
+                ),
+            },
+        }
     return servers
 
 

@@ -20,6 +20,8 @@ class ToolFold extends HTMLElement {
     this._videoResult = null;
     this._isSurface = false;
     this._surfaceResult = null;
+    this._isArtifact = false;
+    this._artifactResult = null;
   }
 
   /**
@@ -164,6 +166,8 @@ class ToolFold extends HTMLElement {
     this._videoResult = null;
     this._isSurface = false;
     this._surfaceResult = null;
+    this._isArtifact = false;
+    this._artifactResult = null;
 
     if (!this._bodyText) {
       this._highlightedBody = "";
@@ -194,6 +198,12 @@ class ToolFold extends HTMLElement {
       if (surfaceResult) {
         this._isSurface = true;
         this._surfaceResult = surfaceResult;
+        return;
+      }
+      const artifactResult = window.ArtifactResultUtils?.parse(this._bodyText);
+      if (artifactResult) {
+        this._isArtifact = true;
+        this._artifactResult = artifactResult;
         return;
       }
       // Try to extract plain text from MCP-style JSON before deciding how to display.
@@ -552,6 +562,11 @@ class ToolFold extends HTMLElement {
       return;
     }
 
+    if (this._isArtifact && this._artifactResult) {
+      this._renderArtifactCard(bodyDiv, this._artifactResult);
+      return;
+    }
+
     if (!this._highlightedBody) {
       console.log(
         `[TOOLFOLD DEBUG] _renderBody: no highlightedBody, bodyText="${this._bodyText?.substring(
@@ -629,6 +644,44 @@ class ToolFold extends HTMLElement {
       button.textContent = "Show panel";
     });
 
+    card.append(body, button);
+    bodyDiv.appendChild(card);
+  }
+
+  _renderArtifactCard(bodyDiv, manifest) {
+    const artifactId = manifest.artifact_id;
+    bodyDiv.innerHTML = "";
+    const card = document.createElement("div");
+    card.className = "surface-card";
+    const body = document.createElement("div");
+    body.className = "surface-card-body";
+    const title = document.createElement("div");
+    title.className = "surface-card-title";
+    title.textContent = manifest.title;
+    const meta = document.createElement("div");
+    meta.className = "surface-card-meta";
+    meta.textContent = `${artifactId} · interactive HTML · r${manifest.revision}`;
+    body.append(title, meta);
+
+    const button = document.createElement("button");
+    button.textContent = "Show panel";
+    button.addEventListener("click", async () => {
+      const tabId = window.app?.currentTabId;
+      if (!tabId) return;
+      button.disabled = true;
+      button.textContent = "Loading…";
+      const attached = await window.pythonAPI.artifact_attach(
+        tabId,
+        artifactId,
+      );
+      if (!attached?.success) {
+        meta.textContent = `${artifactId} · unavailable`;
+      } else {
+        await window.ArtifactDock?.show(tabId, attached);
+      }
+      button.disabled = false;
+      button.textContent = "Show panel";
+    });
     card.append(body, button);
     bodyDiv.appendChild(card);
   }

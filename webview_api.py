@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 from typing import Any
 from typing import Optional
+from typing import cast
 
 from core.pack_tab import PackTab
 from core.projects import list_projects
@@ -1276,6 +1277,20 @@ class WebViewAPI:
             return {"success": True, **result}
         except Exception as e:
             logger.info(f"Surface call {method} failed for tab {tab_id}: {e}")
+            return {"success": False, "error": str(e)}
+
+    def artifact_attach(self, tab_id: str, artifact_id: str) -> dict[str, Any]:
+        """Fetch static HTML for a durable Pack artifact descriptor."""
+        try:
+            tab = self._app.core.tabs.get(tab_id)
+            if tab is None:
+                raise RuntimeError("Tab not found")
+            if not hasattr(tab, "artifact_attach"):
+                raise RuntimeError("Interactive artifacts need a Pack tab")
+            result = cast(Any, tab).artifact_attach(artifact_id)
+            return {"success": True, **result}
+        except Exception as e:
+            logger.info(f"Could not attach to artifact {artifact_id}: {e}")
             return {"success": False, "error": str(e)}
 
     def get_gated_tool_output(self, tab_id: str, gated_text: str) -> dict[str, Any]:
