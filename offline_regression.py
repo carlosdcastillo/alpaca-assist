@@ -13,6 +13,7 @@ import subprocess
 import tempfile
 import threading
 import time
+from collections import Counter
 from collections.abc import Iterator
 from dataclasses import asdict
 from dataclasses import dataclass
@@ -35,11 +36,26 @@ from core.chat_tab import ChatTab
 
 DEFAULT_CASES = Path(__file__).with_name("benchmarks") / "offline_regression_cases.json"
 DEFAULT_MODEL = "glm-5p2"
+DEFAULT_MAX_TOKENS_PER_INVOCATION = 8000
+DEFAULT_MAX_CASE_INVOCATIONS = 20
+DEFAULT_MAX_CASE_TOOL_CALLS = 20
+DEFAULT_MAX_IDENTICAL_TOOL_CALLS = 3
+DEFAULT_MAX_CASE_TOKENS = 250000
+DEFAULT_MAX_CASE_COST_USD = 0.25
+SUITE_TOOL_NAMES = {
+    "internal_modify_file",
+    "internal_read_file",
+    "internal_read_file_range",
+    "internal_run_shell_command",
+    "internal_search_files_for_text",
+    "internal_write_file",
+}
 
 # Fireworks standard serverless pricing, USD per million tokens.
 # https://docs.fireworks.ai/serverless/pricing
 MODEL_PRICING: dict[str, dict[str, float]] = {
     "glm-5p2": {"input": 1.40, "cached_input": 0.14, "output": 4.40},
+    "kimi-k3": {"input": 3.00, "cached_input": 0.30, "output": 15.00},
 }
 
 
@@ -52,6 +68,15 @@ class Usage:
     @property
     def total_tokens(self) -> int:
         return self.input_tokens + self.output_tokens
+
+
+@dataclass(frozen=True)
+class CaseLimits:
+    max_invocations: int = DEFAULT_MAX_CASE_INVOCATIONS
+    max_tool_calls: int = DEFAULT_MAX_CASE_TOOL_CALLS
+    max_identical_tool_calls: int = DEFAULT_MAX_IDENTICAL_TOOL_CALLS
+    max_tokens: int = DEFAULT_MAX_CASE_TOKENS
+    max_cost_usd: float = DEFAULT_MAX_CASE_COST_USD
 
 
 def _update_usage(usage: Usage, event: dict[str, Any]) -> None:
@@ -153,18 +178,28 @@ class _RegressionAPI:
 class _RegressionAppCore(AppCore):
     """Minimal AppCore boundary that retains real prompt/tool construction."""
 
-    def __init__(self, api_url: str, model: str) -> None:
+    def __init__(
+        self,
+        api_url: str,
+        model: str,
+        tool_profile: str = "all",
+    ) -> None:
         self.api: Any = _RegressionAPI()
         self.preferences = {"api_url": api_url, "model": model}
+        self.tool_profile = tool_profile
 
     def get_skills_xml(self) -> str:
         return ""
 
-    def get_system_prompt(self, tab: ChatTab) -> str:
-        return super().get_system_prompt(tab)
-
     def get_available_mcp_tools(self) -> list[dict[str, Any]]:
-        return list(internal_tools.TOOL_SCHEMAS)
+        tools = list(internal_tools.TOOL_SCHEMAS)
+        if self.tool_profile == "suite":
+            tools = [
+                tool
+                for tool in tools
+                if tool.get("function", {}).get("name") in SUITE_TOOL_NAMES
+            ]
+        return tools
 
     def call_mcp_tool(self, *_args: Any, **_kwargs: Any) -> None:
         raise RuntimeError("Offline regression exposes internal tools only")
@@ -175,11 +210,16 @@ class _QuietOllamaRequestHandler(OllamaRequestHandler):
         pass
 
 
+class _RegressionHTTPServer(ThreadingHTTPServer):
+    # Do not make server_close wait for a timed-out provider request.
+    daemon_threads = True
+
+
 @contextlib.contextmanager
 def _ollama_harness_server(client: FireworksClient) -> Iterator[str]:
     previous_client = anthropic_ollama_server.fireworks_client
     anthropic_ollama_server.fireworks_client = client
-    server = ThreadingHTTPServer(("127.0.0.1", 0), _QuietOllamaRequestHandler)
+    server = _RegressionHTTPServer(("127.0.0.1", 0), _QuietOllamaRequestHandler)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     try:
@@ -189,6 +229,27 @@ def _ollama_harness_server(client: FireworksClient) -> Iterator[str]:
         server.server_close()
         thread.join(timeout=5)
         anthropic_ollama_server.fireworks_client = previous_client
+
+
+class _ConfiguredFireworksClient:
+    """Apply benchmark-only generation settings without changing app defaults."""
+
+    def __init__(
+        self,
+        client: FireworksClient,
+        temperature: float | None,
+        max_tokens: int | None,
+    ) -> None:
+        self.client = client
+        self.temperature = temperature
+        self.max_tokens = max_tokens
+
+    def stream_complete(self, *args: Any, **kwargs: Any) -> Any:
+        if self.temperature is not None:
+            kwargs["temperature"] = self.temperature
+        if self.max_tokens is not None:
+            kwargs["max_tokens"] = self.max_tokens
+        return self.client.stream_complete(*args, **kwargs)
 
 
 def _prepare_workspace(case: dict[str, Any], workspace: Path) -> None:
@@ -218,6 +279,85 @@ def _tool_name(call: ToolCall) -> str:
         return ""
 
 
+def _tool_call_data(call: ToolCall) -> tuple[str, Any]:
+    try:
+        parsed = json.loads(call.content)
+        container = parsed.get("tool_call", parsed)
+        if not isinstance(container, dict):
+            return "", None
+        return str(container.get("name", "")), container.get("arguments")
+    except (json.JSONDecodeError, AttributeError):
+        return "", None
+
+
+def _tool_call_fingerprint(call: ToolCall) -> str:
+    name, arguments = _tool_call_data(call)
+    return json.dumps(
+        {"name": name, "arguments": arguments},
+        sort_keys=True,
+        default=str,
+    )
+
+
+def _bounded_diagnostic_value(value: Any, depth: int = 0) -> Any:
+    if depth >= 3:
+        return "<nested>"
+    if isinstance(value, str):
+        if len(value) <= 200:
+            return value
+        return value[:200] + f"... <{len(value) - 200} chars omitted>"
+    if isinstance(value, dict):
+        return {
+            str(key): _bounded_diagnostic_value(item, depth + 1)
+            for key, item in list(value.items())[:20]
+        }
+    if isinstance(value, list):
+        return [_bounded_diagnostic_value(item, depth + 1) for item in value[:10]]
+    return value
+
+
+def _failure_tool_trace(calls: list[ToolCall], limit: int = 20) -> list[dict[str, Any]]:
+    trace: list[dict[str, Any]] = []
+    start = max(0, len(calls) - limit)
+    for index, call in enumerate(calls[start:], start=start):
+        name, arguments = _tool_call_data(call)
+        trace.append(
+            {
+                "index": index,
+                "name": name,
+                "arguments": _bounded_diagnostic_value(arguments),
+            },
+        )
+    return trace
+
+
+def _case_limit_failure(
+    invocations: int,
+    calls: list[ToolCall],
+    usage: Usage,
+    pricing: dict[str, float],
+    limits: CaseLimits,
+) -> str | None:
+    if invocations >= limits.max_invocations:
+        return f"case invocation limit reached ({invocations}/{limits.max_invocations})"
+    if len(calls) >= limits.max_tool_calls:
+        return f"case tool-call limit reached ({len(calls)}/{limits.max_tool_calls})"
+    fingerprints = Counter(_tool_call_fingerprint(call) for call in calls)
+    if fingerprints:
+        repeated = max(fingerprints.values())
+        if repeated >= limits.max_identical_tool_calls:
+            return (
+                "identical tool-call limit reached "
+                f"({repeated}/{limits.max_identical_tool_calls})"
+            )
+    if usage.total_tokens >= limits.max_tokens:
+        return f"case token limit reached ({usage.total_tokens}/{limits.max_tokens})"
+    cost = calculate_cost(usage, pricing)
+    if cost >= limits.max_cost_usd:
+        return f"case cost limit reached (${cost:.6f}/${limits.max_cost_usd:.6f})"
+    return None
+
+
 def _validate_agent_case(
     case: dict[str, Any],
     workspace: Path,
@@ -229,6 +369,11 @@ def _validate_agent_case(
     for required in case.get("required_tools", []):
         if required not in tools:
             failures.append(f"required tool was not called: {required}")
+    for alternatives in case.get("required_tool_groups", []):
+        if not any(tool in tools for tool in alternatives):
+            failures.append(
+                "none of the alternative tools were called: " + ", ".join(alternatives),
+            )
     for expected in case.get("answer_contains", []):
         if expected.lower() not in answer.lower():
             failures.append(f"answer does not contain {expected!r}")
@@ -246,6 +391,13 @@ def _validate_agent_case(
             failures.append(
                 f"{relative_path} is {path.stat().st_size} bytes; expected at least {minimum}",
             )
+    for relative_path in case.get("unchanged_files", []):
+        path = workspace / relative_path
+        expected = case.get("files", {}).get(relative_path)
+        if not path.exists():
+            failures.append(f"protected file was deleted: {relative_path}")
+        elif expected is None or path.read_text(encoding="utf-8") != expected:
+            failures.append(f"protected file was modified: {relative_path}")
     if case.get("requires_gated_result") and not any(
         "[Output truncated:" in result for result in results
     ):
@@ -271,25 +423,55 @@ def run_agent_case(
     api_url: str,
     model: str,
     pricing: dict[str, float],
+    tool_profile: str = "all",
+    limits: CaseLimits | None = None,
 ) -> dict[str, Any]:
+    limits = limits or CaseLimits()
     started = time.perf_counter()
     with tempfile.TemporaryDirectory(prefix=f"alpaca-regression-{case['id']}-") as tmp:
         workspace = Path(tmp)
         _prepare_workspace(case, workspace)
         previous_workspace = os.environ.get("ALPACA_WORKSPACE")
         os.environ["ALPACA_WORKSPACE"] = str(workspace)
-        app_core = _RegressionAppCore(api_url, model)
+        app_core = _RegressionAppCore(
+            api_url,
+            model,
+            tool_profile,
+        )
         chat = ChatTab(f"regression-{case['id']}", case["id"], app_core, 1)
         chat.workspace_path = str(workspace)
         # A title-generation request is UI behavior, not part of the agent turn.
         chat._summary_handler._generated = True
         try:
+            limit_failure: str | None = None
             with contextlib.redirect_stdout(io.StringIO()):
                 chat.handle_user_message(case["prompt"], [])
                 deadline = time.monotonic() + float(case.get("timeout_seconds", 300))
                 while (
                     chat.current_turn_timing is not None and time.monotonic() < deadline
                 ):
+                    turn = chat.current_turn_timing
+                    current_calls = [
+                        component
+                        for component in chat.chat_state.answers[0].components
+                        if isinstance(component, ToolCall)
+                    ]
+                    current_usage = Usage(
+                        input_tokens=chat.session_input_tokens,
+                        cached_input_tokens=chat.session_cached_input_tokens,
+                        output_tokens=chat.session_output_tokens,
+                    )
+                    limit_failure = _case_limit_failure(
+                        turn.invocations if turn is not None else 0,
+                        current_calls,
+                        current_usage,
+                        pricing,
+                        limits,
+                    )
+                    if limit_failure:
+                        chat.stop_streaming()
+                        chat.finalize_turn_timing(0)
+                        break
                     time.sleep(0.05)
             timed_out = chat.current_turn_timing is not None
             if timed_out:
@@ -315,6 +497,8 @@ def run_agent_case(
                 failures.append("no tool-call argument crossed the call gate")
             if timed_out:
                 failures.append("turn timed out")
+            if limit_failure:
+                failures.append(limit_failure)
             failures.extend(app_core.api.errors)
 
             timing = chat.chat_state.turn_timings[0] or {}
@@ -343,6 +527,8 @@ def run_agent_case(
                 ),
                 "response_chars": len(answer),
             }
+            if failures:
+                result["failure_tool_trace"] = _failure_tool_trace(calls)
         finally:
             chat.cleanup_resources()
             if previous_workspace is None:
@@ -422,6 +608,12 @@ def compare_baseline(
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--cases", type=Path, default=DEFAULT_CASES)
+    parser.add_argument(
+        "--case",
+        action="append",
+        dest="case_ids",
+        help="Run only this case ID; repeat to select multiple cases",
+    )
     parser.add_argument("--model", default=DEFAULT_MODEL)
     parser.add_argument(
         "--api-url",
@@ -432,6 +624,47 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--output-cost-per-million", type=float)
     parser.add_argument("--output", type=Path)
     parser.add_argument("--baseline", type=Path)
+    parser.add_argument(
+        "--tool-profile",
+        choices=("all", "suite"),
+        default="all",
+        help="Tool transport exposed to agent cases (default: all production tools)",
+    )
+    parser.add_argument(
+        "--temperature",
+        type=float,
+        help="Fireworks sampling temperature (default: production client default, 0.7)",
+    )
+    parser.add_argument(
+        "--max-tokens",
+        type=int,
+        help=f"Fireworks output-token ceiling per invocation (default: {DEFAULT_MAX_TOKENS_PER_INVOCATION})",
+    )
+    parser.add_argument(
+        "--max-case-invocations",
+        type=int,
+        default=DEFAULT_MAX_CASE_INVOCATIONS,
+    )
+    parser.add_argument(
+        "--max-case-tool-calls",
+        type=int,
+        default=DEFAULT_MAX_CASE_TOOL_CALLS,
+    )
+    parser.add_argument(
+        "--max-identical-tool-calls",
+        type=int,
+        default=DEFAULT_MAX_IDENTICAL_TOOL_CALLS,
+    )
+    parser.add_argument(
+        "--max-case-tokens",
+        type=int,
+        default=DEFAULT_MAX_CASE_TOKENS,
+    )
+    parser.add_argument(
+        "--max-case-cost-usd",
+        type=float,
+        default=DEFAULT_MAX_CASE_COST_USD,
+    )
     parser.add_argument(
         "--regression-threshold-percent",
         type=float,
@@ -469,19 +702,72 @@ def _resolve_pricing(args: argparse.Namespace) -> dict[str, float]:
     return pricing
 
 
+def _select_cases(
+    cases: list[dict[str, Any]],
+    case_ids: list[str] | None,
+) -> list[dict[str, Any]]:
+    if not case_ids:
+        return cases
+    selected_ids = set(case_ids)
+    known_ids = {str(case.get("id")) for case in cases}
+    unknown = sorted(selected_ids - known_ids)
+    if unknown:
+        raise SystemExit("Unknown regression case(s): " + ", ".join(unknown))
+    return [case for case in cases if case.get("id") in selected_ids]
+
+
 def main() -> int:
     args = _parse_args()
+    if args.temperature is not None and not 0 <= args.temperature <= 1:
+        raise SystemExit("Temperature must be between 0 and 1")
+    if args.max_tokens is not None and args.max_tokens < 1:
+        raise SystemExit("--max-tokens must be at least 1")
+    if (
+        min(
+            args.max_case_invocations,
+            args.max_case_tool_calls,
+            args.max_identical_tool_calls,
+            args.max_case_tokens,
+        )
+        < 1
+    ):
+        raise SystemExit(
+            "Case invocation, tool-call, repetition, and token limits must be positive",
+        )
+    if args.max_case_cost_usd <= 0:
+        raise SystemExit("--max-case-cost-usd must be positive")
+    if args.api_url and (args.temperature is not None or args.max_tokens is not None):
+        raise SystemExit(
+            "Generation settings are only supported by the built-in Fireworks proxy",
+        )
     cases = json.loads(args.cases.read_text(encoding="utf-8"))
     if not isinstance(cases, list) or not 5 <= len(cases) <= 10:
         raise SystemExit("The regression suite must contain between 5 and 10 cases")
+    cases = _select_cases(cases, args.case_ids)
 
     pricing = _resolve_pricing(args)
+    limits = CaseLimits(
+        max_invocations=args.max_case_invocations,
+        max_tool_calls=args.max_case_tool_calls,
+        max_identical_tool_calls=args.max_identical_tool_calls,
+        max_tokens=args.max_case_tokens,
+        max_cost_usd=args.max_case_cost_usd,
+    )
     model_id = map_ollama_to_model(args.model)
     provider_model = args.model if args.api_url else model_id
     is_agent_suite = any(case.get("files") or case.get("large_file") for case in cases)
+    suite_started = time.perf_counter()
     if args.api_url and is_agent_suite:
         results = [
-            run_agent_case(case, args.api_url, args.model, pricing) for case in cases
+            run_agent_case(
+                case,
+                args.api_url,
+                args.model,
+                pricing,
+                args.tool_profile,
+                limits,
+            )
+            for case in cases
         ]
     elif is_agent_suite:
         if not model_id.startswith("accounts/fireworks/"):
@@ -489,10 +775,22 @@ def main() -> int:
                 "Running this backend requires its configured Ollama-compatible "
                 "proxy via --api-url",
             )
-        client = FireworksClient()
+        client: Any = _ConfiguredFireworksClient(
+            FireworksClient(),
+            args.temperature,
+            args.max_tokens or DEFAULT_MAX_TOKENS_PER_INVOCATION,
+        )
         with _ollama_harness_server(client) as api_url:
             results = [
-                run_agent_case(case, api_url, args.model, pricing) for case in cases
+                run_agent_case(
+                    case,
+                    api_url,
+                    args.model,
+                    pricing,
+                    args.tool_profile,
+                    limits,
+                )
+                for case in cases
             ]
     else:
         if args.api_url:
@@ -502,11 +800,38 @@ def main() -> int:
             run_case(client, case, model_id, pricing, SYSTEM_PROMPT) for case in cases
         ]
     summary = summarize(results)
+    summary["elapsed_seconds"] = round(time.perf_counter() - suite_started, 3)
     report = {
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "model": args.model,
         "provider_model": provider_model,
         "pricing_usd_per_million_tokens": pricing,
+        "configuration": {
+            "tool_profile": args.tool_profile if is_agent_suite else None,
+            "tool_count": (
+                len(
+                    _RegressionAppCore(
+                        "",
+                        args.model,
+                        args.tool_profile,
+                    ).get_available_mcp_tools(),
+                )
+                if is_agent_suite
+                else 0
+            ),
+            "temperature": (
+                None
+                if args.api_url
+                else args.temperature if args.temperature is not None else 0.7
+            ),
+            "max_tokens": (
+                None
+                if args.api_url
+                else args.max_tokens or DEFAULT_MAX_TOKENS_PER_INVOCATION
+            ),
+            "case_limits": asdict(limits) if is_agent_suite else None,
+            "execution_policy": "efficient" if is_agent_suite else None,
+        },
         "cases": results,
         "summary": summary,
     }

@@ -11,6 +11,7 @@ from unittest.mock import patch
 
 import pytest
 
+from anthropic_ollama_server import SYSTEM_PROMPT
 from anthropic_ollama_server import ClaudeCodeCLIClient
 from anthropic_ollama_server import CodexCLIClient
 from anthropic_ollama_server import OllamaRequestHandler
@@ -329,6 +330,11 @@ def test_proxy_dispatches_the_project_workspace_to_the_selected_backend() -> Non
         backend.stream_complete.call_args.kwargs["working_directory"]
         == "/srv/workspaces/alpaca-session"
     )
+    system = backend.stream_complete.call_args.kwargs["system"]
+    assert system[0]["text"] == SYSTEM_PROMPT
+    assert "without extra workspace discovery" in system[0]["text"]
+    assert system[0]["cache_control"] == {"type": "ephemeral"}
+    assert system[1] == {"type": "text", "text": "project instructions"}
 
 
 @pytest.mark.parametrize("workspace", [None, "/srv/workspaces/alpaca-session"])

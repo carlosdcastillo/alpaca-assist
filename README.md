@@ -180,9 +180,9 @@ python offline_regression.py --output model-baseline.json
 Each case gets an isolated temporary workspace and uses the production
 `ChatTab` streaming, text-embedded tool-call detection, internal tool dispatch,
 continuation, and tool-output gating paths. The suite covers reading, searching,
-writing, modifying, shell validation, gated large results and write arguments,
-cross-file debugging, and state-machine reasoning. The report contains
-correctness, tool and invocation counts, wall time, provider-reported
+writing, modifying, shell validation, gated large results, secure archive
+handling, retry semantics, cross-file debugging, and state-machine reasoning.
+The report contains correctness, tool and invocation counts, wall time, provider-reported
 input/cached/output tokens, and estimated cost. Any model supported by the
 configured proxy can be selected. Models listed in `MODEL_PRICING` use their
 built-in verified rates; provide input, cached-input, and output rates for other
@@ -219,6 +219,28 @@ To fail when aggregate wall time, total tokens, or cost increases by more than
 ```bash
 python offline_regression.py --baseline model-baseline.json
 ```
+
+The Python app's proxy prompt uses the efficient execution policy by default,
+so the agent suite inherits the same policy rather than adding benchmark-only
+instructions. Experiments can select alternate tool profiles, control Fireworks
+generation settings, and record the configuration in the report for review:
+
+```bash
+python offline_regression.py \
+  --temperature 0.7 \
+  --output model-efficient.json
+```
+
+The built-in Fireworks runner limits each invocation to 8,000 output tokens.
+It also stops a case at 20 invocations, 20 tool calls, three identical tool
+calls, 250,000 total tokens, or $0.25 of estimated provider cost. Override the
+corresponding `--max-*` options when a deliberate stress case needs a larger
+budget. Failed cases retain a bounded trace of their last 20 tool calls.
+Use `--case CASE_ID` to rerun only a failed or expensive case without paying
+for the complete suite.
+
+See [`benchmarks/offline_regression_report.md`](benchmarks/offline_regression_report.md)
+for measured tuning results and tradeoffs.
 
 ## License
 

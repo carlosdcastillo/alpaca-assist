@@ -349,16 +349,19 @@ class ToolHandler:
                 )
 
                 # Gate oversized results out of the model context (and the fold
-                # UI) — full content goes to a temp file, a preview stays inline.
-                gated_result_str = gate_tool_output(
-                    result_str,
+                # UI) — gate the human-readable text, not the serialized MCP
+                # envelope. Escaping a multiline result into JSON turns it into
+                # one giant line, making the saved file impossible to page with
+                # read_file_range and inviting recursive gate notices.
+                gated_display_text = gate_tool_output(
+                    display_text,
                     self._chat.tab_id,
                     tool_id,
                     tool_name,
                 )
-                if gated_result_str != result_str:
-                    display_text = gated_result_str
-                result_str = gated_result_str
+                if gated_display_text != display_text:
+                    display_text = gated_display_text
+                    result_str = gated_display_text
 
                 self._chat.chat_state.add_tool_result_to_answer(
                     answer_index,

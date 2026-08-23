@@ -159,6 +159,10 @@ You are a highly skilled software engineer with extensive knowledge in many prog
 14. Make liberal use of inline images when they improve the answer. After calling `internal_view_image`, show the image in your answer by default, not only in the collapsed tool-result fold, using `![descriptive caption](alpaca://image/<tool_call_id>)` with the *exact, full* `id` string from that call, copied verbatim character-for-character (e.g. `internal_view_image_12`) — never shorten, renumber, or invent a simpler-looking id like `1` or `img1`; anything other than the real id silently fails to resolve. Show every useful screenshot, chart, diagram, or other visual you inspected when it supports the explanation or verification; omit it only when it would be redundant or irrelevant. You may place multiple images throughout the prose. An image reference resolves only within the same answer as its tool call, so emit it in that answer and never reference an image call from an earlier turn.
 
 15. To show a recorded feature demonstration, create an MP4, WebM, or Ogg file and call `internal_view_video` with its local path. To also show a player inline in your answer, write `[caption](alpaca://video/<tool_call_id>)` using that call's *exact, full* `id`, copied verbatim the same way as image references above — never shorten, renumber, or invent one. Video bytes are loaded by the UI and are never added to your context.
+
+<execution_policy>
+Minimize latency, tool calls, and tokens while preserving correctness. When the user names files or a tool workflow, follow it directly without extra workspace discovery. Issue independent tool calls together. Keep reasoning and the final response concise.
+</execution_policy>
 """
 
 MODELS_JSON: str = """
@@ -891,7 +895,7 @@ class OllamaRequestHandler(BaseHTTPRequestHandler):
         try:
             if stream:
                 for event in _events_tolerating_mid_stream_failure():
-                    print(event)
+                    _console_logger.debug("Provider stream event: %s", event)
                     val: dict[str, Any] = event
 
                     if val.get("type") == "alpaca_tool_event":
@@ -1110,28 +1114,35 @@ class OllamaRequestHandler(BaseHTTPRequestHandler):
                 # Extract tool call token from headers for secure tag-based detection
                 tool_call_token = self.headers.get("X-Tool-Call-Token")
                 if tool_call_token:
-                    print(f"🔐 Received tool call token: {tool_call_token[:8]}...")
+                    _console_logger.debug(
+                        "Received tool call token: %s...",
+                        tool_call_token[:8],
+                    )
                 else:
-                    print(
-                        "⚠️ No tool call token provided - tool calls will use legacy format",
+                    _console_logger.debug(
+                        "No tool call token provided; tool calls will use legacy format",
                     )
 
                 # Use the model mapping function to get the Anthropic API model ID
                 model = map_ollama_to_model(requested_model)
-                print(f"Requested model: {requested_model}")
-                print(f"Mapped to Anthropic model: {model}")
+                _console_logger.debug(
+                    "Requested model %s mapped to %s",
+                    requested_model,
+                    model,
+                )
 
                 # Extract system prompt from request (Ollama API format)
                 request_system = request_data.get("system")
                 if request_system:
-                    print(
-                        f"Received system prompt from request ({len(request_system)} chars)",
+                    _console_logger.debug(
+                        "Received system prompt from request (%d chars)",
+                        len(request_system),
                     )
 
-                print(f"Received tools: {tools}")
+                _console_logger.debug("Received %d tools", len(tools))
                 messages_out: list[dict[str, Any]] = []
                 for _i, item in enumerate(messages_raw):
-                    print(item)
+                    _console_logger.debug("Received message: %s", item)
                     # Pass through messages as-is to preserve complex content blocks
                     # (tool_use, tool_result, multi-modal, etc.)
                     if isinstance(item, dict):

@@ -19,6 +19,7 @@
     "required_tools": ["internal_read_file", "internal_modify_file", "internal_run_shell_command"],
     "answer_contains": ["REPAIR_OK"],
     "file_contains": {"calculator.py": "return a / b"},
+    "unchanged_files": ["test_calculator.py"],
     "validation_command": "python -m unittest -q"
   },
   {
@@ -46,14 +47,32 @@
     "answer_contains": ["EDGE_AGENT_Z9", "GATE_OK"]
   },
   {
-    "id": "gated_write_argument",
-    "prompt": "Work only in the provided workspace. Exercise the large write boundary: call internal_write_file (not shell) to create payload.txt whose content starts with BEGIN_PAYLOAD, contains at least 17000 lowercase x characters, and ends with END_PAYLOAD. Then finish with WRITE_GATE_OK. The write must be one tool call.",
-    "files": {},
-    "required_tools": ["internal_write_file"],
-    "requires_gated_call": true,
-    "answer_contains": ["WRITE_GATE_OK"],
-    "file_contains": {"payload.txt": "END_PAYLOAD"},
-    "file_min_bytes": {"payload.txt": 17020}
+    "id": "secure_archive_extraction",
+    "prompt": "Work only in the provided workspace. Read SECURITY.md, bundle.py, and test_bundle.py. Fix extract_bundle in bundle.py so valid nested archives still extract, but unsafe member paths are rejected before anything is written. Do not change SECURITY.md or the tests. Run `python -m unittest -q` with internal_run_shell_command and finish with ARCHIVE_OK only if the tests pass.",
+    "files": {
+      "SECURITY.md": "Archive extraction contract:\n- Create the destination when needed and return the extracted file paths relative to it.\n- Before writing any member, reject the entire archive with ValueError if a member path is absolute or resolves outside the destination.\n- A rejected archive must not extract any earlier safe members.\n",
+      "bundle.py": "from pathlib import Path\nfrom zipfile import ZipFile\n\ndef extract_bundle(archive, destination):\n    destination = Path(destination)\n    destination.mkdir(parents=True, exist_ok=True)\n    with ZipFile(archive) as bundle:\n        bundle.extractall(destination)\n    return sorted(\n        str(path.relative_to(destination))\n        for path in destination.rglob('*')\n        if path.is_file()\n    )\n",
+      "test_bundle.py": "import tempfile\nimport unittest\nfrom pathlib import Path\nfrom zipfile import ZipFile\nfrom bundle import extract_bundle\n\nclass Tests(unittest.TestCase):\n    def test_extracts_nested_files(self):\n        with tempfile.TemporaryDirectory() as tmp:\n            root = Path(tmp)\n            archive = root / 'valid.zip'\n            with ZipFile(archive, 'w') as bundle:\n                bundle.writestr('docs/readme.txt', 'hello')\n                bundle.writestr('config.json', '{}')\n            destination = root / 'output'\n            self.assertEqual(extract_bundle(archive, destination), ['config.json', 'docs/readme.txt'])\n            self.assertEqual((destination / 'docs/readme.txt').read_text(), 'hello')\n\n    def test_rejects_traversal_before_extracting_safe_members(self):\n        with tempfile.TemporaryDirectory() as tmp:\n            root = Path(tmp)\n            archive = root / 'unsafe.zip'\n            with ZipFile(archive, 'w') as bundle:\n                bundle.writestr('safe.txt', 'must not be written')\n                bundle.writestr('../escaped.txt', 'bad')\n            destination = root / 'output'\n            with self.assertRaises(ValueError):\n                extract_bundle(archive, destination)\n            self.assertFalse((destination / 'safe.txt').exists())\n            self.assertFalse((root / 'escaped.txt').exists())\n\n    def test_rejects_absolute_member(self):\n        with tempfile.TemporaryDirectory() as tmp:\n            root = Path(tmp)\n            archive = root / 'absolute.zip'\n            with ZipFile(archive, 'w') as bundle:\n                bundle.writestr('/absolute.txt', 'bad')\n            with self.assertRaises(ValueError):\n                extract_bundle(archive, root / 'output')\n"
+    },
+    "required_tools": ["internal_read_file", "internal_run_shell_command"],
+    "required_tool_groups": [["internal_modify_file", "internal_write_file"]],
+    "answer_contains": ["ARCHIVE_OK"],
+    "unchanged_files": ["SECURITY.md", "test_bundle.py"],
+    "validation_command": "python -m unittest -q"
+  },
+  {
+    "id": "async_retry_contract",
+    "prompt": "Work only in the provided workspace. Read RETRY.md, retry.py, and test_retry.py. Repair retry in retry.py while preserving its public signature. Do not change RETRY.md or the tests. Run `python -m unittest -q` with internal_run_shell_command and finish with RETRY_OK only if the tests pass.",
+    "files": {
+      "RETRY.md": "retry(operation, attempts, sleep=asyncio.sleep) contract:\n- attempts must be at least one; otherwise raise ValueError without calling operation.\n- Retry only TransientError. Propagate every other exception immediately.\n- Between transient failures, await sleep with exponential delays 0.01, 0.02, 0.04, and so on. Never sleep after the final attempt.\n- If all attempts fail transiently, re-raise the final TransientError unchanged.\n",
+      "retry.py": "import asyncio\n\nclass TransientError(Exception):\n    pass\n\nasync def retry(operation, attempts, sleep=asyncio.sleep):\n    for index in range(attempts):\n        try:\n            return await operation()\n        except Exception:\n            await sleep(0.01 * (2 ** index))\n    raise RuntimeError('operation failed')\n",
+      "test_retry.py": "import unittest\nfrom retry import TransientError, retry\n\nclass Tests(unittest.IsolatedAsyncioTestCase):\n    async def test_retries_transient_errors_with_backoff(self):\n        calls = 0\n        delays = []\n        async def operation():\n            nonlocal calls\n            calls += 1\n            if calls < 3:\n                raise TransientError('temporary')\n            return 'ok'\n        async def sleep(delay):\n            delays.append(delay)\n        self.assertEqual(await retry(operation, 4, sleep), 'ok')\n        self.assertEqual(calls, 3)\n        self.assertEqual(delays, [0.01, 0.02])\n\n    async def test_propagates_non_transient_immediately(self):\n        calls = 0\n        delays = []\n        async def operation():\n            nonlocal calls\n            calls += 1\n            raise KeyError('bug')\n        async def sleep(delay):\n            delays.append(delay)\n        with self.assertRaises(KeyError):\n            await retry(operation, 3, sleep)\n        self.assertEqual(calls, 1)\n        self.assertEqual(delays, [])\n\n    async def test_reraises_last_transient_without_final_sleep(self):\n        errors = [TransientError('first'), TransientError('last')]\n        delays = []\n        async def operation():\n            raise errors.pop(0)\n        async def sleep(delay):\n            delays.append(delay)\n        with self.assertRaises(TransientError) as raised:\n            await retry(operation, 2, sleep)\n        self.assertEqual(str(raised.exception), 'last')\n        self.assertEqual(delays, [0.01])\n\n    async def test_rejects_nonpositive_attempts(self):\n        called = False\n        async def operation():\n            nonlocal called\n            called = True\n        with self.assertRaises(ValueError):\n            await retry(operation, 0)\n        self.assertFalse(called)\n"
+    },
+    "required_tools": ["internal_read_file", "internal_run_shell_command"],
+    "required_tool_groups": [["internal_modify_file", "internal_write_file"]],
+    "answer_contains": ["RETRY_OK"],
+    "unchanged_files": ["RETRY.md", "test_retry.py"],
+    "validation_command": "python -m unittest -q"
   },
   {
     "id": "implement_parser",
@@ -65,6 +84,7 @@
     "required_tools": ["internal_read_file", "internal_write_file", "internal_run_shell_command"],
     "answer_contains": ["PARSER_OK"],
     "file_contains": {"inventory.py": "def parse_inventory"},
+    "unchanged_files": ["SPEC.md", "test_inventory.py"],
     "validation_command": "python -m unittest -q"
   },
   {
@@ -76,6 +96,7 @@
     },
     "required_tools": ["internal_read_file", "internal_modify_file", "internal_run_shell_command"],
     "answer_contains": ["CONCURRENCY_OK"],
+    "unchanged_files": ["test_cache.py"],
     "validation_command": "python -m unittest -q"
   },
   {

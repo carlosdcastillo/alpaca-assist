@@ -20,6 +20,7 @@ import image_tool_result
 from chat_state import ToolCall
 from chat_state import ToolResult
 from core.chat_tab_tools import ToolHandler
+from core.tool_output_gate import read_gated_tool_output
 
 
 class TestToolHandlerInitialization:
@@ -602,6 +603,42 @@ class TestToolHandlerExecuteToolGating:
         persisted = call_args[0][1]
         assert "Output truncated" in persisted
         assert large_text not in persisted
+        assert read_gated_tool_output(persisted, "tab-gating-test") == large_text
+
+    def test_multiline_mcp_result_is_saved_as_pageable_text(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        import core.tool_output_gate as gate_module
+
+        monkeypatch.setattr(gate_module, "GATE_THRESHOLD_BYTES", 100)
+        monkeypatch.setattr(
+            gate_module,
+            "TOOL_OUTPUT_TEMP_ROOT",
+            tmp_path / "alpaca_assist_tool_outputs",
+        )
+        mock_chat = Mock()
+        mock_chat.chat_state = Mock()
+        mock_chat._app_core = Mock()
+        mock_chat.stop_streaming_flag = threading.Event()
+        mock_chat.content_update_queue = MagicMock()
+        mock_chat.tab_id = "tab-gating-test"
+        mock_chat._app_core.api = Mock()
+        handler = ToolHandler(mock_chat, Mock())
+        handler._pending_count = 1
+        lines = "\n".join(f"line {index}" for index in range(100))
+
+        def mock_call_mcp_tool(server, tool, args, cb):
+            cb({"content": [{"type": "text", "text": lines}], "isError": False})
+
+        mock_chat._app_core.call_mcp_tool = mock_call_mcp_tool
+        handler._execute_tool("server", "read_file", {}, 0, "tool-123")
+
+        persisted = mock_chat.chat_state.add_tool_result_to_answer.call_args[0][1]
+        restored = read_gated_tool_output(persisted, "tab-gating-test")
+        assert restored == lines
+        assert restored.splitlines() == [f"line {index}" for index in range(100)]
 
     def test_small_result_passes_through_unchanged(self) -> None:
         """Results under the threshold should be unaffected by gating."""
