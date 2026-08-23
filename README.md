@@ -168,6 +168,58 @@ pytest
 The `tests/` directory contains the suite (unit and integration tests for the
 API bridge, session restore, streaming, tools, and conversation model).
 
+### Offline LLM regression
+
+Run the eight non-UI agent regression cases using the default model and save a
+metrics report:
+
+```bash
+python offline_regression.py --output model-baseline.json
+```
+
+Each case gets an isolated temporary workspace and uses the production
+`ChatTab` streaming, text-embedded tool-call detection, internal tool dispatch,
+continuation, and tool-output gating paths. The suite covers reading, searching,
+writing, modifying, shell validation, gated large results and write arguments,
+cross-file debugging, and state-machine reasoning. The report contains
+correctness, tool and invocation counts, wall time, provider-reported
+input/cached/output tokens, and estimated cost. Any model supported by the
+configured proxy can be selected. Models listed in `MODEL_PRICING` use their
+built-in verified rates; provide input, cached-input, and output rates for other
+models:
+
+```bash
+python offline_regression.py \
+  --model kimi-k2p7-code \
+  --input-cost-per-million 0.95 \
+  --cached-input-cost-per-million 0.19 \
+  --output-cost-per-million 4.00 \
+  --output model-baseline.json
+```
+
+The runner can start its own local proxy for Fireworks model aliases. For any
+other backend, point it at an already configured Ollama-compatible proxy:
+
+```bash
+python offline_regression.py \
+  --model claude-sonnet-4-6 \
+  --api-url http://localhost:11434 \
+  --input-cost-per-million 0 \
+  --cached-input-cost-per-million 0 \
+  --output-cost-per-million 0 \
+  --output model-baseline.json
+```
+
+Zero rates are valid for subscription-backed or locally hosted models when the
+runner should track time and tokens without assigning an API cost.
+
+To fail when aggregate wall time, total tokens, or cost increases by more than
+10% relative to a prior report:
+
+```bash
+python offline_regression.py --baseline model-baseline.json
+```
+
 ## License
 
 Alpaca Assist is distributed under the [MIT License](LICENSE). Third-party

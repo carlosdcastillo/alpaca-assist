@@ -1,0 +1,91 @@
+[
+  {
+    "id": "read_and_trace",
+    "prompt": "Work only in the provided workspace. Use internal_read_file on app.py and config.py, then explain in one short paragraph which port wins when APP_PORT is set and include the exact marker TRACE_OK. Do not use shell tools.",
+    "files": {
+      "app.py": "import os\nfrom config import DEFAULT_PORT\n\ndef selected_port():\n    return int(os.environ.get('APP_PORT', DEFAULT_PORT))\n",
+      "config.py": "DEFAULT_PORT = 8080\n"
+    },
+    "required_tools": ["internal_read_file"],
+    "answer_contains": ["APP_PORT", "TRACE_OK"]
+  },
+  {
+    "id": "repair_and_test",
+    "prompt": "Work only in the provided workspace. Diagnose calculator.py, fix it with internal_modify_file, and run `python -m unittest -q` with internal_run_shell_command. Do not claim success unless the tests pass. Finish with REPAIR_OK.",
+    "files": {
+      "calculator.py": "def safe_divide(a, b):\n    if b == 0:\n        return 0\n    return b / a\n",
+      "test_calculator.py": "import unittest\nfrom calculator import safe_divide\n\nclass Tests(unittest.TestCase):\n    def test_division(self):\n        self.assertEqual(safe_divide(8, 2), 4)\n    def test_zero(self):\n        with self.assertRaises(ZeroDivisionError):\n            safe_divide(8, 0)\n"
+    },
+    "required_tools": ["internal_read_file", "internal_modify_file", "internal_run_shell_command"],
+    "answer_contains": ["REPAIR_OK"],
+    "file_contains": {"calculator.py": "return a / b"},
+    "validation_command": "python -m unittest -q"
+  },
+  {
+    "id": "search_and_synthesize",
+    "prompt": "Work only in the provided workspace. Use internal_search_files_for_text to find every FEATURE_GATE definition or use, inspect the relevant files with internal_read_file, and identify the one inconsistent default. Answer with the filename, correct boolean, and SEARCH_OK. Do not modify files.",
+    "files": {
+      "service/api.py": "from settings import FEATURE_GATE\n\ndef enabled():\n    return FEATURE_GATE\n",
+      "service/worker.py": "FEATURE_GATE = True\n",
+      "settings.py": "FEATURE_GATE = False  # inconsistent with deployed worker default\n",
+      "README.md": "Production contract: FEATURE_GATE defaults to true.\n"
+    },
+    "required_tools": ["internal_search_files_for_text", "internal_read_file"],
+    "answer_contains": ["settings.py", "true", "SEARCH_OK"]
+  },
+  {
+    "id": "gated_large_output",
+    "prompt": "Work only in the provided workspace. First call internal_read_file on events.log. Its result is intentionally too large and should be gated. Then use internal_read_file_range to inspect the final lines and report the exact final sentinel followed by GATE_OK. Do not use shell tools.",
+    "large_file": {
+      "path": "events.log",
+      "line_count": 800,
+      "final_line": "FINAL_SENTINEL=EDGE_AGENT_Z9"
+    },
+    "required_tools": ["internal_read_file", "internal_read_file_range"],
+    "requires_gated_result": true,
+    "answer_contains": ["EDGE_AGENT_Z9", "GATE_OK"]
+  },
+  {
+    "id": "gated_write_argument",
+    "prompt": "Work only in the provided workspace. Exercise the large write boundary: call internal_write_file (not shell) to create payload.txt whose content starts with BEGIN_PAYLOAD, contains at least 17000 lowercase x characters, and ends with END_PAYLOAD. Then finish with WRITE_GATE_OK. The write must be one tool call.",
+    "files": {},
+    "required_tools": ["internal_write_file"],
+    "requires_gated_call": true,
+    "answer_contains": ["WRITE_GATE_OK"],
+    "file_contains": {"payload.txt": "END_PAYLOAD"},
+    "file_min_bytes": {"payload.txt": 17020}
+  },
+  {
+    "id": "implement_parser",
+    "prompt": "Work only in the provided workspace. Read SPEC.md and test_inventory.py. Create inventory.py using internal_write_file, implementing the specified parser without changing tests, then run `python -m unittest -q` with internal_run_shell_command. Finish with PARSER_OK only if tests pass.",
+    "files": {
+      "SPEC.md": "Implement parse_inventory(text). Each nonblank line is name,quantity. A backslash escapes a comma or backslash in the name. Quantities are non-negative integers. Raise ValueError for malformed lines, empty names, or duplicate names. Return a dict preserving input order.\n",
+      "test_inventory.py": "import unittest\nfrom inventory import parse_inventory\n\nclass Tests(unittest.TestCase):\n    def test_normal(self):\n        self.assertEqual(parse_inventory('apple,2\\npear,0'), {'apple': 2, 'pear': 0})\n    def test_escaped(self):\n        self.assertEqual(parse_inventory(r'last\\, first,3'), {'last, first': 3})\n    def test_duplicate(self):\n        with self.assertRaises(ValueError):\n            parse_inventory('x,1\\nx,2')\n    def test_malformed(self):\n        for value in ('missing', ',2', 'x,-1', 'x,nope'):\n            with self.subTest(value=value):\n                with self.assertRaises(ValueError):\n                    parse_inventory(value)\n"
+    },
+    "required_tools": ["internal_read_file", "internal_write_file", "internal_run_shell_command"],
+    "answer_contains": ["PARSER_OK"],
+    "file_contains": {"inventory.py": "def parse_inventory"},
+    "validation_command": "python -m unittest -q"
+  },
+  {
+    "id": "cross_file_debugging",
+    "prompt": "Work only in the provided workspace. This async cache occasionally starts the same load twice. Read cache.py and test_cache.py, find the race, repair cache.py using internal_modify_file, and run `python -m unittest -q` with internal_run_shell_command. Preserve the public API. Finish with CONCURRENCY_OK only after tests pass.",
+    "files": {
+      "cache.py": "import asyncio\n\nclass Cache:\n    def __init__(self, loader):\n        self.loader = loader\n        self.values = {}\n\n    async def get(self, key):\n        if key not in self.values:\n            self.values[key] = await self.loader(key)\n        return self.values[key]\n",
+      "test_cache.py": "import asyncio\nimport unittest\nfrom cache import Cache\n\nclass Tests(unittest.IsolatedAsyncioTestCase):\n    async def test_coalesces_concurrent_loads(self):\n        calls = 0\n        async def load(key):\n            nonlocal calls\n            calls += 1\n            await asyncio.sleep(0.01)\n            return key.upper()\n        cache = Cache(load)\n        values = await asyncio.gather(cache.get('a'), cache.get('a'), cache.get('a'))\n        self.assertEqual(values, ['A', 'A', 'A'])\n        self.assertEqual(calls, 1)\n"
+    },
+    "required_tools": ["internal_read_file", "internal_modify_file", "internal_run_shell_command"],
+    "answer_contains": ["CONCURRENCY_OK"],
+    "validation_command": "python -m unittest -q"
+  },
+  {
+    "id": "adversarial_state_machine",
+    "prompt": "Work only in the provided workspace. Read protocol.md and transitions.py. Determine whether the transition table violates any protocol invariant. Use internal_run_shell_command to exhaustively enumerate all two-step paths, but do not modify files. Report the shortest violating path in `STATE -> STATE -> STATE` form and finish with STATE_OK.",
+    "files": {
+      "protocol.md": "States: NEW, READY, RUNNING, CLOSED. Invariants: CLOSED is terminal. RUNNING may only be entered from READY. READY may be entered from NEW or RUNNING.\n",
+      "transitions.py": "TRANSITIONS = {\n    'NEW': ['READY'],\n    'READY': ['RUNNING', 'CLOSED'],\n    'RUNNING': ['READY', 'CLOSED'],\n    'CLOSED': ['READY'],\n}\n"
+    },
+    "required_tools": ["internal_read_file", "internal_run_shell_command"],
+    "answer_contains": ["CLOSED -> READY", "STATE_OK"]
+  }
+]

@@ -1,0 +1,538 @@
+"""Run repeatable, non-UI LLM regression cases and report usage metrics."""
+
+from __future__ import annotations
+
+import argparse
+import contextlib
+import io
+import json
+import math
+import os
+import statistics
+import subprocess
+import tempfile
+import threading
+import time
+from collections.abc import Iterator
+from dataclasses import asdict
+from dataclasses import dataclass
+from datetime import datetime
+from datetime import timezone
+from http.server import ThreadingHTTPServer
+from pathlib import Path
+from typing import Any
+
+import anthropic_ollama_server
+import internal_tools
+from anthropic_ollama_server import SYSTEM_PROMPT
+from anthropic_ollama_server import FireworksClient
+from anthropic_ollama_server import OllamaRequestHandler
+from anthropic_ollama_server import map_ollama_to_model
+from chat_state import ToolCall
+from chat_state import ToolResult
+from core.app_core import AppCore
+from core.chat_tab import ChatTab
+
+DEFAULT_CASES = Path(__file__).with_name("benchmarks") / "offline_regression_cases.json"
+DEFAULT_MODEL = "glm-5p2"
+
+# Fireworks standard serverless pricing, USD per million tokens.
+# https://docs.fireworks.ai/serverless/pricing
+MODEL_PRICING: dict[str, dict[str, float]] = {
+    "glm-5p2": {"input": 1.40, "cached_input": 0.14, "output": 4.40},
+}
+
+
+@dataclass
+class Usage:
+    input_tokens: int = 0
+    cached_input_tokens: int = 0
+    output_tokens: int = 0
+
+    @property
+    def total_tokens(self) -> int:
+        return self.input_tokens + self.output_tokens
+
+
+def _update_usage(usage: Usage, event: dict[str, Any]) -> None:
+    event_usage = event.get("usage")
+    if event.get("type") == "message_start":
+        event_usage = event.get("message", {}).get("usage")
+    if not isinstance(event_usage, dict):
+        return
+
+    fresh = int(event_usage.get("input_tokens") or 0)
+    cache_write = int(event_usage.get("cache_creation_input_tokens") or 0)
+    cache_read = int(event_usage.get("cache_read_input_tokens") or 0)
+    reported_input = fresh + cache_write + cache_read
+    if reported_input:
+        usage.input_tokens = reported_input
+        usage.cached_input_tokens = cache_write + cache_read
+
+    reported_output = event_usage.get("output_tokens")
+    if reported_output is None:
+        reported_output = event_usage.get("completion_tokens")
+    if reported_output is not None:
+        usage.output_tokens = int(reported_output)
+
+
+def calculate_cost(usage: Usage, pricing: dict[str, float]) -> float:
+    fresh_input = max(0, usage.input_tokens - usage.cached_input_tokens)
+    return (
+        fresh_input * pricing["input"]
+        + usage.cached_input_tokens * pricing["cached_input"]
+        + usage.output_tokens * pricing["output"]
+    ) / 1_000_000
+
+
+def run_case(
+    client: FireworksClient,
+    case: dict[str, Any],
+    model_id: str,
+    pricing: dict[str, float],
+    system_prompt: str,
+) -> dict[str, Any]:
+    started = time.perf_counter()
+    usage = Usage()
+    response_parts: list[str] = []
+
+    stream = client.stream_complete(
+        messages=[{"role": "user", "content": case["prompt"]}],
+        model=model_id,
+        max_tokens=int(case.get("max_tokens", 512)),
+        temperature=0,
+        system=system_prompt,
+    )
+    for event in stream:
+        _update_usage(usage, event)
+        if event.get("type") == "content_block_delta":
+            text = event.get("delta", {}).get("text")
+            if isinstance(text, str):
+                response_parts.append(text)
+
+    wall_seconds = time.perf_counter() - started
+    response = "".join(response_parts).strip()
+    if not response:
+        raise RuntimeError(f"Case {case['id']!r} returned an empty response")
+    if usage.input_tokens == 0 or usage.output_tokens == 0:
+        raise RuntimeError(
+            f"Case {case['id']!r} returned incomplete token usage: {usage}",
+        )
+
+    result = {
+        "id": case["id"],
+        "wall_seconds": round(wall_seconds, 3),
+        **asdict(usage),
+        "total_tokens": usage.total_tokens,
+        "cost_usd": round(calculate_cost(usage, pricing), 8),
+        "response_chars": len(response),
+    }
+    print(
+        f"{result['id']}: {result['wall_seconds']:.3f}s, "
+        f"{result['total_tokens']} tokens, ${result['cost_usd']:.6f}",
+    )
+    return result
+
+
+class _RegressionAPI:
+    """No-UI implementation of the WebView callbacks used by ChatTab."""
+
+    def __init__(self) -> None:
+        self.errors: list[str] = []
+
+    def on_error(self, _tab_id: str, error: str) -> None:
+        self.errors.append(error)
+
+    def wait_for_fold_rendered(self, *_args: Any, **_kwargs: Any) -> bool:
+        return True
+
+    def __getattr__(self, _name: str) -> Any:
+        return lambda *_args, **_kwargs: None
+
+
+class _RegressionAppCore(AppCore):
+    """Minimal AppCore boundary that retains real prompt/tool construction."""
+
+    def __init__(self, api_url: str, model: str) -> None:
+        self.api: Any = _RegressionAPI()
+        self.preferences = {"api_url": api_url, "model": model}
+
+    def get_skills_xml(self) -> str:
+        return ""
+
+    def get_system_prompt(self, tab: ChatTab) -> str:
+        return super().get_system_prompt(tab)
+
+    def get_available_mcp_tools(self) -> list[dict[str, Any]]:
+        return list(internal_tools.TOOL_SCHEMAS)
+
+    def call_mcp_tool(self, *_args: Any, **_kwargs: Any) -> None:
+        raise RuntimeError("Offline regression exposes internal tools only")
+
+
+class _QuietOllamaRequestHandler(OllamaRequestHandler):
+    def log_message(self, _format: str, *_args: Any) -> None:
+        pass
+
+
+@contextlib.contextmanager
+def _ollama_harness_server(client: FireworksClient) -> Iterator[str]:
+    previous_client = anthropic_ollama_server.fireworks_client
+    anthropic_ollama_server.fireworks_client = client
+    server = ThreadingHTTPServer(("127.0.0.1", 0), _QuietOllamaRequestHandler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        yield f"http://127.0.0.1:{server.server_port}"
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
+        anthropic_ollama_server.fireworks_client = previous_client
+
+
+def _prepare_workspace(case: dict[str, Any], workspace: Path) -> None:
+    for relative_path, content in case.get("files", {}).items():
+        path = workspace / relative_path
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(content, encoding="utf-8")
+    large_file = case.get("large_file")
+    if large_file:
+        line_count = int(large_file.get("line_count", 800))
+        lines = [
+            f"event={line:04d} status=ok payload={'x' * 48}"
+            for line in range(1, line_count)
+        ]
+        lines.append(str(large_file["final_line"]))
+        path = workspace / large_file["path"]
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def _tool_name(call: ToolCall) -> str:
+    try:
+        parsed = json.loads(call.content)
+        container = parsed.get("tool_call", parsed)
+        return str(container.get("name", ""))
+    except (json.JSONDecodeError, AttributeError):
+        return ""
+
+
+def _validate_agent_case(
+    case: dict[str, Any],
+    workspace: Path,
+    answer: str,
+    tools: list[str],
+    results: list[str],
+) -> list[str]:
+    failures: list[str] = []
+    for required in case.get("required_tools", []):
+        if required not in tools:
+            failures.append(f"required tool was not called: {required}")
+    for expected in case.get("answer_contains", []):
+        if expected.lower() not in answer.lower():
+            failures.append(f"answer does not contain {expected!r}")
+    for relative_path, expected in case.get("file_contains", {}).items():
+        path = workspace / relative_path
+        if not path.exists():
+            failures.append(f"expected file was not created: {relative_path}")
+        elif expected not in path.read_text(encoding="utf-8"):
+            failures.append(f"{relative_path} does not contain {expected!r}")
+    for relative_path, minimum in case.get("file_min_bytes", {}).items():
+        path = workspace / relative_path
+        if not path.exists():
+            failures.append(f"expected file was not created: {relative_path}")
+        elif path.stat().st_size < int(minimum):
+            failures.append(
+                f"{relative_path} is {path.stat().st_size} bytes; expected at least {minimum}",
+            )
+    if case.get("requires_gated_result") and not any(
+        "[Output truncated:" in result for result in results
+    ):
+        failures.append("no tool result crossed the output gate")
+    validation_command = case.get("validation_command")
+    if validation_command:
+        completed = subprocess.run(
+            validation_command,
+            cwd=workspace,
+            shell=True,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        if completed.returncode != 0:
+            output = (completed.stdout + completed.stderr).strip()[-500:]
+            failures.append(f"validation command failed: {output}")
+    return failures
+
+
+def run_agent_case(
+    case: dict[str, Any],
+    api_url: str,
+    model: str,
+    pricing: dict[str, float],
+) -> dict[str, Any]:
+    started = time.perf_counter()
+    with tempfile.TemporaryDirectory(prefix=f"alpaca-regression-{case['id']}-") as tmp:
+        workspace = Path(tmp)
+        _prepare_workspace(case, workspace)
+        previous_workspace = os.environ.get("ALPACA_WORKSPACE")
+        os.environ["ALPACA_WORKSPACE"] = str(workspace)
+        app_core = _RegressionAppCore(api_url, model)
+        chat = ChatTab(f"regression-{case['id']}", case["id"], app_core, 1)
+        chat.workspace_path = str(workspace)
+        # A title-generation request is UI behavior, not part of the agent turn.
+        chat._summary_handler._generated = True
+        try:
+            with contextlib.redirect_stdout(io.StringIO()):
+                chat.handle_user_message(case["prompt"], [])
+                deadline = time.monotonic() + float(case.get("timeout_seconds", 300))
+                while (
+                    chat.current_turn_timing is not None and time.monotonic() < deadline
+                ):
+                    time.sleep(0.05)
+            timed_out = chat.current_turn_timing is not None
+            if timed_out:
+                chat.stop_streaming()
+                chat.finalize_turn_timing(0)
+
+            full_answer = chat.chat_state.answers[0]
+            calls = [c for c in full_answer.components if isinstance(c, ToolCall)]
+            tool_results = [
+                c.content for c in full_answer.components if isinstance(c, ToolResult)
+            ]
+            tools = [_tool_name(call) for call in calls]
+            gated_calls = sum("[Output truncated:" in call.content for call in calls)
+            answer = full_answer.get_text_only_content().strip()
+            failures = _validate_agent_case(
+                case,
+                workspace,
+                answer,
+                tools,
+                tool_results,
+            )
+            if case.get("requires_gated_call") and not gated_calls:
+                failures.append("no tool-call argument crossed the call gate")
+            if timed_out:
+                failures.append("turn timed out")
+            failures.extend(app_core.api.errors)
+
+            timing = chat.chat_state.turn_timings[0] or {}
+            usage = Usage(
+                input_tokens=chat.session_input_tokens,
+                cached_input_tokens=chat.session_cached_input_tokens,
+                output_tokens=chat.session_output_tokens,
+            )
+            wall_seconds = float(timing.get("wall_ms", 0)) / 1000
+            if wall_seconds <= 0:
+                wall_seconds = time.perf_counter() - started
+            result = {
+                "id": case["id"],
+                "passed": not failures,
+                "failures": failures,
+                "wall_seconds": round(wall_seconds, 3),
+                **asdict(usage),
+                "total_tokens": usage.total_tokens,
+                "cost_usd": round(calculate_cost(usage, pricing), 8),
+                "invocations": int(timing.get("invocations", 0)),
+                "tool_calls": len(calls),
+                "tools_used": tools,
+                "gated_calls": gated_calls,
+                "gated_results": sum(
+                    "[Output truncated:" in result for result in tool_results
+                ),
+                "response_chars": len(answer),
+            }
+        finally:
+            chat.cleanup_resources()
+            if previous_workspace is None:
+                os.environ.pop("ALPACA_WORKSPACE", None)
+            else:
+                os.environ["ALPACA_WORKSPACE"] = previous_workspace
+    print(
+        f"{result['id']}: {'PASS' if result['passed'] else 'FAIL'}, "
+        f"{result['wall_seconds']:.3f}s, {result['invocations']} invocations, "
+        f"{result['tool_calls']} tools, {result['total_tokens']} tokens, "
+        f"${result['cost_usd']:.6f}",
+    )
+    return result
+
+
+def summarize(results: list[dict[str, Any]]) -> dict[str, Any]:
+    wall_times = [float(result["wall_seconds"]) for result in results]
+    summary = {
+        "case_count": len(results),
+        "wall_seconds": round(sum(wall_times), 3),
+        "mean_wall_seconds": round(statistics.mean(wall_times), 3),
+        "p50_wall_seconds": round(statistics.median(wall_times), 3),
+        "p95_wall_seconds": round(
+            sorted(wall_times)[max(0, math.ceil(len(wall_times) * 0.95) - 1)],
+            3,
+        ),
+        "input_tokens": sum(int(result["input_tokens"]) for result in results),
+        "cached_input_tokens": sum(
+            int(result["cached_input_tokens"]) for result in results
+        ),
+        "output_tokens": sum(int(result["output_tokens"]) for result in results),
+        "total_tokens": sum(int(result["total_tokens"]) for result in results),
+        "cost_usd": round(sum(float(result["cost_usd"]) for result in results), 8),
+    }
+    if any("passed" in result for result in results):
+        summary.update(
+            {
+                "passed": sum(bool(result.get("passed")) for result in results),
+                "failed": sum(not bool(result.get("passed")) for result in results),
+                "invocations": sum(
+                    int(result.get("invocations", 0)) for result in results
+                ),
+                "tool_calls": sum(
+                    int(result.get("tool_calls", 0)) for result in results
+                ),
+                "gated_calls": sum(
+                    int(result.get("gated_calls", 0)) for result in results
+                ),
+                "gated_results": sum(
+                    int(result.get("gated_results", 0)) for result in results
+                ),
+            },
+        )
+    return summary
+
+
+def compare_baseline(
+    summary: dict[str, Any],
+    baseline: dict[str, Any],
+    threshold_percent: float,
+) -> list[str]:
+    regressions: list[str] = []
+    baseline_summary = baseline["summary"]
+    for metric in ("wall_seconds", "total_tokens", "cost_usd"):
+        old = float(baseline_summary[metric])
+        new = float(summary[metric])
+        if old <= 0:
+            continue
+        change = (new - old) / old * 100
+        if change > threshold_percent:
+            regressions.append(
+                f"{metric} increased {change:.1f}% ({old:g} -> {new:g})",
+            )
+    return regressions
+
+
+def _parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--cases", type=Path, default=DEFAULT_CASES)
+    parser.add_argument("--model", default=DEFAULT_MODEL)
+    parser.add_argument(
+        "--api-url",
+        help="Existing Ollama-compatible proxy URL; required for non-Fireworks backends",
+    )
+    parser.add_argument("--input-cost-per-million", type=float)
+    parser.add_argument("--cached-input-cost-per-million", type=float)
+    parser.add_argument("--output-cost-per-million", type=float)
+    parser.add_argument("--output", type=Path)
+    parser.add_argument("--baseline", type=Path)
+    parser.add_argument(
+        "--regression-threshold-percent",
+        type=float,
+        default=10.0,
+        help="Fail when aggregate wall time, tokens, or cost exceeds the baseline by this percentage",
+    )
+    return parser.parse_args()
+
+
+def _resolve_pricing(args: argparse.Namespace) -> dict[str, float]:
+    overrides = (
+        args.input_cost_per_million,
+        args.cached_input_cost_per_million,
+        args.output_cost_per_million,
+    )
+    if any(value is not None for value in overrides):
+        if not all(value is not None for value in overrides):
+            raise SystemExit(
+                "Specify input, cached-input, and output costs together",
+            )
+        if any(float(value) < 0 for value in overrides):
+            raise SystemExit("Token costs cannot be negative")
+        return {
+            "input": float(overrides[0]),
+            "cached_input": float(overrides[1]),
+            "output": float(overrides[2]),
+        }
+    pricing = MODEL_PRICING.get(args.model)
+    if pricing is None:
+        raise SystemExit(
+            f"No verified pricing configured for {args.model!r}; provide "
+            "--input-cost-per-million, --cached-input-cost-per-million, "
+            "and --output-cost-per-million",
+        )
+    return pricing
+
+
+def main() -> int:
+    args = _parse_args()
+    cases = json.loads(args.cases.read_text(encoding="utf-8"))
+    if not isinstance(cases, list) or not 5 <= len(cases) <= 10:
+        raise SystemExit("The regression suite must contain between 5 and 10 cases")
+
+    pricing = _resolve_pricing(args)
+    model_id = map_ollama_to_model(args.model)
+    provider_model = args.model if args.api_url else model_id
+    is_agent_suite = any(case.get("files") or case.get("large_file") for case in cases)
+    if args.api_url and is_agent_suite:
+        results = [
+            run_agent_case(case, args.api_url, args.model, pricing) for case in cases
+        ]
+    elif is_agent_suite:
+        if not model_id.startswith("accounts/fireworks/"):
+            raise SystemExit(
+                "Running this backend requires its configured Ollama-compatible "
+                "proxy via --api-url",
+            )
+        client = FireworksClient()
+        with _ollama_harness_server(client) as api_url:
+            results = [
+                run_agent_case(case, api_url, args.model, pricing) for case in cases
+            ]
+    else:
+        if args.api_url:
+            raise SystemExit("--api-url is currently supported by agent suites only")
+        client = FireworksClient()
+        results = [
+            run_case(client, case, model_id, pricing, SYSTEM_PROMPT) for case in cases
+        ]
+    summary = summarize(results)
+    report = {
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "model": args.model,
+        "provider_model": provider_model,
+        "pricing_usd_per_million_tokens": pricing,
+        "cases": results,
+        "summary": summary,
+    }
+    rendered = json.dumps(report, indent=2) + "\n"
+    if args.output:
+        args.output.parent.mkdir(parents=True, exist_ok=True)
+        args.output.write_text(rendered, encoding="utf-8")
+    print("\nAggregate:")
+    print(json.dumps(summary, indent=2))
+
+    if args.baseline:
+        baseline = json.loads(args.baseline.read_text(encoding="utf-8"))
+        regressions = compare_baseline(
+            summary,
+            baseline,
+            args.regression_threshold_percent,
+        )
+        if regressions:
+            print("\nRegressions:")
+            for regression in regressions:
+                print(f"- {regression}")
+            return 1
+    if any(not result.get("passed", True) for result in results):
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
