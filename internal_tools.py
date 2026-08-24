@@ -1161,7 +1161,11 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "internal_list_files",
-            "description": "List files in a directory. Supports both local paths and TRAMP filenames (e.g., /ssh:user@host:/path)",
+            "description": (
+                "List files in a directory when filenames are unknown. If the user "
+                "already named a file, read it directly instead of listing first. "
+                "Supports local and TRAMP paths (e.g., /ssh:user@host:/path)."
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -1274,7 +1278,11 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "internal_write_file",
-            "description": "Write text content to a file. Supports both local paths and TRAMP filenames (e.g., /ssh:user@host:/path/file)",
+            "description": (
+                "Write text content to a file and return its verified content hash. "
+                "A successful result does not need a follow-up read unless you need "
+                "to inspect the content. Supports local and TRAMP paths."
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -1295,7 +1303,12 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "internal_modify_file",
-            "description": "Performs exact string replacements in files. Supports both local paths and TRAMP filenames.",
+            "description": (
+                "Perform exact string replacements and return the modified file's "
+                "verified content hash. A successful result does not need a follow-up "
+                "read unless you need to inspect the content. Supports local and "
+                "TRAMP paths."
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {

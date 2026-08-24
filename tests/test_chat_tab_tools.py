@@ -874,6 +874,34 @@ class TestToolHandlerPrepareContinuationMessages:
         assert tool_messages[0]["role"] == "tool_use_call"
         assert tool_messages[1]["role"] == "tool_result"
 
+    def test_prepare_strips_mcp_envelope_from_tool_result(self) -> None:
+        """The model needs result text, not the internal transport wrapper."""
+        from chat_state import ToolCall
+        from chat_state import ToolResult
+
+        mock_chat = Mock()
+        mock_chat.chat_state.questions = ["Question?"]
+        mock_answer = Mock()
+        mock_answer.components = [
+            ToolCall('{"tool_call": {"name": "internal_read_file"}}', "tool-123"),
+            ToolResult(
+                json.dumps(
+                    {
+                        "content": [{"type": "text", "text": "file contents"}],
+                        "isError": False,
+                    },
+                ),
+                "tool-123",
+            ),
+        ]
+        mock_chat.chat_state.answers = [mock_answer]
+
+        handler = ToolHandler(mock_chat, Mock())
+        messages = handler.prepare_continuation_messages(0)
+
+        tool_result = next(m for m in messages if m["role"] == "tool_result")
+        assert tool_result["content"] == "Tool execution result:\nfile contents"
+
     def test_prepare_matches_tc_tr_by_id(self) -> None:
         """Test that TC and TR are matched by ID."""
         from chat_state import ToolCall

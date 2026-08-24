@@ -170,3 +170,78 @@ Every run used exactly three invocations and two tool calls; mean wall time was
 7.439 seconds, mean usage was 11,031 tokens, and total validation cost was
 $0.094251. The targeted `--case` selector avoided rerunning the other eight
 cases solely to probe this failure mode.
+
+## Tool-contract and continuation tuning
+
+Date: 2026-08-24
+Measurement model: GLM 5.2
+Suite: 19 non-UI software-engineering cases
+
+Two model-agnostic production changes were retained:
+
+- Tool descriptions now reserve `internal_list_files` for actual discovery and
+  tell the model to read user-named files directly. The write and modify tools
+  also state that their successful responses include a verified content hash,
+  so a follow-up read is unnecessary unless content inspection is needed.
+- Model-facing continuations unwrap persisted MCP result envelopes to their
+  text. Persistence and UI folds retain the original transport object. The
+  context-retention byte budget now measures the same plain text sent to the
+  model instead of counting JSON syntax that is no longer replayed.
+
+The baseline combines the existing 14-case and additional 5-case GLM reports,
+which have the same production configuration. The optimized row is one full
+acceptance run, so it establishes a candidate rather than a stochastic
+confidence interval.
+
+| Configuration | Passed | Wall | P50 | P95/max | Tokens | Cost | Invocations | Tools |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| Existing harness | 19/19 | 590.450 s | 25.502 s | 87.904 s | 345,645 | $0.289102 | 82 | 100 |
+| Tool contracts + plain continuation results | 19/19 | 531.702 s | 22.376 s | 94.729 s | 329,756 | $0.248715 | 80 | 97 |
+| Change | unchanged | **-9.9%** | **-12.3%** | +7.8% | **-4.6%** | **-14.0%** | **-2.4%** | **-3.0%** |
+
+An 11-case targeted run after the tool-description change, before result
+unwrapping, reduced unnecessary directory listings from 10 to 6, tool calls by
+7.9%, and invocations by 5.8%, with 11/11 cases passing. This supports the
+intended mechanism even though stochastic output length made that run's wall
+time 2.7% and cost 4.1% worse.
+
+Two configurations were rejected:
+
+- Limiting the catalog to the six tools named by this suite cut tokens 17.0%
+  but passed only 17/19 and increased wall time 19.9% and cost 10.7%. Static
+  benchmark-aware tool removal is not a safe substitute for general tool
+  selection.
+- Temperature 0 passed a targeted five-case hard set but was neutral to worse
+  against the matching baseline: wall time +3.3%, tokens +1.1%, and cost +3.0%.
+
+The optimized GLM run improved aggregate and median metrics but not the tail.
+
+### Kimi K3 confirmation
+
+A contemporaneous full-suite Kimi K3 A/B compared unchanged commit `f1a485b`
+with the optimized working tree. Both used temperature 0.7, the full 14-tool
+catalog, an 8,000-token invocation limit, and the same case circuit breakers.
+
+| Configuration | Passed | Wall | P50 | P95/max | Tokens | Cost | Invocations | Tools |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| Existing harness | 18/19 | 310.190 s | 15.583 s | 34.471 s | 318,199 | $0.563977 | 84 | 97 |
+| Tool contracts + plain continuation results | 19/19 | 296.935 s | 14.557 s | 30.400 s | 317,754 | $0.511552 | 86 | 98 |
+| Change | +1 pass | **-4.3%** | **-6.6%** | **-11.8%** | **-0.1%** | **-9.3%** | +2.4% | +1.0% |
+
+Cross-model change from the existing harness:
+
+| Model | Correctness | Wall | P50 | P95/max | Tokens | Cost | Invocations | Tools |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| GLM 5.2 | 19/19 → 19/19 | **-9.9%** | **-12.3%** | +7.8% | **-4.6%** | **-14.0%** | **-2.4%** | **-3.0%** |
+| Kimi K3 | 18/19 → 19/19 | **-4.3%** | **-6.6%** | **-11.8%** | **-0.1%** | **-9.3%** | +2.4% | +1.0% |
+
+The baseline stopped after reading the three supplied files in
+`mocked_http_integration`; it neither edited nor tested the implementation.
+Two targeted reruns passed, making baseline 2/3 and optimized 3/3 for that case
+across the full run plus reruns. The full-run correctness difference therefore
+must not be presented as deterministic. It does confirm that the optimized
+harness is compatible with Kimi and can complete all 19 cases. The paired
+aggregate improved latency and cost even though optimized Kimi completed the
+case that baseline abandoned. Repeated full-suite runs are still required for
+a confidence interval, especially because the GLM and Kimi token and tail
+effects differ.

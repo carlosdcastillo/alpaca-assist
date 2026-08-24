@@ -483,6 +483,16 @@ class ToolHandler:
         # Default: JSON representation
         return json.dumps(result, indent=2) if isinstance(result, dict) else str(result)
 
+    def _format_stored_result(self, content: str) -> str:
+        """Remove an MCP transport envelope from a persisted text result."""
+        try:
+            parsed = json.loads(content)
+        except (json.JSONDecodeError, TypeError):
+            return content
+        if isinstance(parsed, dict) and isinstance(parsed.get("content"), list):
+            return self._format_result(parsed)
+        return content
+
     def _put_content_update(self, update: Any) -> None:
         """Put a content update on the queue with retry logic.
 
@@ -644,8 +654,9 @@ class ToolHandler:
                 continue
             is_newest_text = not newest_text_seen
             newest_text_seen = True
+            model_result = self._format_stored_result(tr.content)
             pair_bytes = len(tc.content.encode("utf-8")) + len(
-                tr.content.encode("utf-8"),
+                model_result.encode("utf-8"),
             )
             if not is_newest_text and pair_bytes > budget:
                 break
@@ -748,7 +759,8 @@ class ToolHandler:
                         },
                     )
                     if tc.id in keep_full_ids:
-                        result_content = f"Tool execution result:\n{tr.content}"
+                        model_result = self._format_stored_result(tr.content)
+                        result_content = f"Tool execution result:\n{model_result}"
                     else:
                         result_content = self.CLEARED_TOOL_RESULT_STUB
                     result_msg: dict[str, Any] = {
