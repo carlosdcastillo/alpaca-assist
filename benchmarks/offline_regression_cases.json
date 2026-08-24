@@ -108,5 +108,148 @@
     },
     "required_tools": ["internal_read_file", "internal_run_shell_command"],
     "answer_contains": ["CLOSED -> READY", "STATE_OK"]
+  },
+  {
+    "id": "pagination_boundaries",
+    "prompt": "Work only in the provided workspace. Read PAGINATION.md, pagination.py, and test_pagination.py. Debug and repair paginate without changing its public signature, specification, or tests. Run `python -m unittest -q` with internal_run_shell_command and finish with PAGE_OK only if the tests pass.",
+    "files": {
+      "PAGINATION.md": "paginate(items, offset, limit) returns (page, next_offset). offset must be non-negative and limit positive. The page contains at most limit items beginning at offset. next_offset is the index after the page, or None when there are no more items. An offset at or beyond the input length returns ([], None).\n",
+      "pagination.py": "def paginate(items, offset, limit):\n    if offset < 0 or limit < 0:\n        raise ValueError('invalid pagination')\n    end = offset + limit - 1\n    page = items[offset:end]\n    next_offset = end if end < len(items) else None\n    return page, next_offset\n",
+      "test_pagination.py": "import unittest\nfrom pagination import paginate\n\nclass Tests(unittest.TestCase):\n    def test_full_page_has_next_offset(self):\n        self.assertEqual(paginate(list('abcde'), 0, 2), (['a', 'b'], 2))\n    def test_partial_final_page(self):\n        self.assertEqual(paginate(list('abcde'), 4, 3), (['e'], None))\n    def test_exact_end_and_past_end(self):\n        self.assertEqual(paginate([1, 2], 2, 1), ([], None))\n        self.assertEqual(paginate([1, 2], 9, 1), ([], None))\n    def test_rejects_invalid_arguments(self):\n        for offset, limit in ((-1, 1), (0, 0), (0, -1)):\n            with self.subTest(offset=offset, limit=limit):\n                with self.assertRaises(ValueError):\n                    paginate([], offset, limit)\n"
+    },
+    "required_tools": ["internal_read_file", "internal_run_shell_command"],
+    "required_tool_groups": [["internal_modify_file", "internal_write_file"]],
+    "answer_contains": ["PAGE_OK"],
+    "unchanged_files": ["PAGINATION.md", "test_pagination.py"],
+    "validation_command": "python -m unittest -q"
+  },
+  {
+    "id": "ttl_cache_debugging",
+    "prompt": "Work only in the provided workspace. Read CACHE.md, ttl_cache.py, and test_ttl_cache.py. Fix the cache expiry and falsey-value bugs while preserving the public API. Do not modify the contract or tests. Run `python -m unittest -q` with internal_run_shell_command and finish with CACHE_OK only after they pass.",
+    "files": {
+      "CACHE.md": "TTLCache(loader, ttl, clock). get(key) caches every loaded value, including None and falsey values. An entry is valid strictly before loaded_at + ttl and expired at that instant. invalidate(key) removes that key if present and is otherwise a no-op.\n",
+      "ttl_cache.py": "import time\n\nclass TTLCache:\n    def __init__(self, loader, ttl, clock=time.monotonic):\n        self.loader = loader\n        self.ttl = ttl\n        self.clock = clock\n        self.entries = {}\n\n    def get(self, key):\n        value, loaded_at = self.entries.get(key, (None, 0))\n        if not value or self.clock() - loaded_at > self.ttl:\n            value = self.loader(key)\n            self.entries[key] = (value, self.clock())\n        return value\n\n    def invalidate(self, key):\n        del self.entries[key]\n",
+      "test_ttl_cache.py": "import unittest\nfrom ttl_cache import TTLCache\n\nclass Tests(unittest.TestCase):\n    def test_caches_falsey_values(self):\n        calls = []\n        cache = TTLCache(lambda key: calls.append(key) or None, 10, lambda: 1)\n        self.assertIsNone(cache.get('x'))\n        self.assertIsNone(cache.get('x'))\n        self.assertEqual(calls, ['x'])\n    def test_expires_at_boundary(self):\n        now = [5.0]\n        calls = []\n        cache = TTLCache(lambda key: calls.append(key) or len(calls), 2, lambda: now[0])\n        self.assertEqual(cache.get('x'), 1)\n        now[0] = 6.999\n        self.assertEqual(cache.get('x'), 1)\n        now[0] = 7.0\n        self.assertEqual(cache.get('x'), 2)\n    def test_invalidate_is_idempotent(self):\n        cache = TTLCache(lambda key: key, 1, lambda: 0)\n        cache.invalidate('missing')\n        cache.get('x')\n        cache.invalidate('x')\n        cache.invalidate('x')\n"
+    },
+    "required_tools": ["internal_read_file", "internal_run_shell_command"],
+    "required_tool_groups": [["internal_modify_file", "internal_write_file"]],
+    "answer_contains": ["CACHE_OK"],
+    "unchanged_files": ["CACHE.md", "test_ttl_cache.py"],
+    "validation_command": "python -m unittest -q"
+  },
+  {
+    "id": "utf8_stream_decoder",
+    "prompt": "Work only in the provided workspace. Read STREAM.md and test_stream_decoder.py. Implement stream_decoder.py with internal_write_file according to the contract. Do not alter the specification or tests. Run `python -m unittest -q` with internal_run_shell_command and finish with UTF8_OK only if all tests pass.",
+    "files": {
+      "STREAM.md": "Implement decode_chunks(chunks), where chunks is an iterable of byte strings from a network stream. Return the decoded UTF-8 text. A multibyte character may span chunks, including empty chunks. Decode incrementally rather than joining all bytes first. Raise UnicodeDecodeError for malformed or incomplete final input.\n",
+      "test_stream_decoder.py": "import unittest\nfrom stream_decoder import decode_chunks\n\nclass Tests(unittest.TestCase):\n    def test_split_multibyte_characters(self):\n        raw = 'A€雪B'.encode('utf-8')\n        chunks = [raw[:2], b'', raw[2:4], raw[4:6], raw[6:]]\n        self.assertEqual(decode_chunks(iter(chunks)), 'A€雪B')\n    def test_accepts_ascii(self):\n        self.assertEqual(decode_chunks([b'hello', b' ', b'world']), 'hello world')\n    def test_rejects_malformed_input(self):\n        with self.assertRaises(UnicodeDecodeError):\n            decode_chunks([b'ok', b'\\xff'])\n    def test_rejects_incomplete_final_character(self):\n        with self.assertRaises(UnicodeDecodeError):\n            decode_chunks([b'prefix', b'\\xe2\\x82'])\n"
+    },
+    "required_tools": ["internal_read_file", "internal_write_file", "internal_run_shell_command"],
+    "answer_contains": ["UTF8_OK"],
+    "file_contains": {"stream_decoder.py": "def decode_chunks"},
+    "unchanged_files": ["STREAM.md", "test_stream_decoder.py"],
+    "validation_command": "python -m unittest -q"
+  },
+  {
+    "id": "dependency_build_order",
+    "prompt": "Work only in the provided workspace. Read BUILD_ORDER.md and test_build_order.py. Create build_order.py using internal_write_file. Implement the contract without changing the supplied files, run `python -m unittest -q` with internal_run_shell_command, and finish with BUILD_OK only if tests pass.",
+    "files": {
+      "BUILD_ORDER.md": "Implement build_order(graph), where graph maps each target to its direct dependencies. Return every target once with dependencies before dependents. When several targets are ready, preserve their insertion order from graph. Raise ValueError if a dependency is not a graph key or if the graph contains a cycle. Do not mutate graph.\n",
+      "test_build_order.py": "import unittest\nfrom build_order import build_order\n\nclass Tests(unittest.TestCase):\n    def test_dependencies_precede_dependents(self):\n        graph = {'app': ['core', 'ui'], 'core': ['util'], 'ui': ['util'], 'util': []}\n        original = {key: list(value) for key, value in graph.items()}\n        order = build_order(graph)\n        self.assertEqual(order, ['util', 'core', 'ui', 'app'])\n        self.assertEqual(graph, original)\n    def test_preserves_ready_insertion_order(self):\n        self.assertEqual(build_order({'b': [], 'a': [], 'root': ['a', 'b']}), ['b', 'a', 'root'])\n    def test_rejects_unknown_dependency(self):\n        with self.assertRaises(ValueError):\n            build_order({'app': ['missing']})\n    def test_rejects_cycle(self):\n        with self.assertRaises(ValueError):\n            build_order({'a': ['b'], 'b': ['c'], 'c': ['a']})\n"
+    },
+    "required_tools": ["internal_read_file", "internal_write_file", "internal_run_shell_command"],
+    "answer_contains": ["BUILD_OK"],
+    "file_contains": {"build_order.py": "def build_order"},
+    "unchanged_files": ["BUILD_ORDER.md", "test_build_order.py"],
+    "validation_command": "python -m unittest -q"
+  },
+  {
+    "id": "transactional_batch_update",
+    "prompt": "Work only in the provided workspace. Read STORE.md, store.py, and test_store.py. Debug apply_batch so it satisfies the transactional contract while preserving the public API. Do not modify STORE.md or the tests. Run `python -m unittest -q` with internal_run_shell_command and finish with TXN_OK only when they pass.",
+    "files": {
+      "STORE.md": "apply_batch(state, operations) applies ('set', key, value) and ('delete', key) operations to the supplied dict in order and returns that same dict. If any operation has an unknown name, wrong arity, or deletes a missing key, raise ValueError and leave state exactly as it was before the call. Values may be arbitrary objects.\n",
+      "store.py": "def apply_batch(state, operations):\n    for operation in operations:\n        action, key, *rest = operation\n        if action == 'set':\n            state[key] = rest[0]\n        elif action == 'delete':\n            del state[key]\n        else:\n            raise ValueError('unknown operation')\n    return dict(state)\n",
+      "test_store.py": "import unittest\nfrom store import apply_batch\n\nclass Tests(unittest.TestCase):\n    def test_applies_in_order_and_returns_same_dict(self):\n        state = {'a': 1, 'b': 2}\n        result = apply_batch(state, [('set', 'a', 3), ('delete', 'b'), ('set', 'c', 4)])\n        self.assertIs(result, state)\n        self.assertEqual(state, {'a': 3, 'c': 4})\n    def test_rolls_back_after_late_failure(self):\n        marker = object()\n        state = {'a': marker}\n        with self.assertRaises(ValueError):\n            apply_batch(state, [('set', 'a', 2), ('delete', 'missing')])\n        self.assertEqual(state, {'a': marker})\n    def test_rejects_bad_name_and_arity_transactionally(self):\n        for operations in ([('move', 'a')], [('set', 'a')], [('set', 'a', 1, 2)], [('delete', 'a', 1)]):\n            state = {'a': 0}\n            with self.subTest(operations=operations):\n                with self.assertRaises(ValueError):\n                    apply_batch(state, operations)\n                self.assertEqual(state, {'a': 0})\n"
+    },
+    "required_tools": ["internal_read_file", "internal_run_shell_command"],
+    "required_tool_groups": [["internal_modify_file", "internal_write_file"]],
+    "answer_contains": ["TXN_OK"],
+    "unchanged_files": ["STORE.md", "test_store.py"],
+    "validation_command": "python -m unittest -q"
+  },
+  {
+    "id": "test_first_regression",
+    "prompt": "Work only in the provided workspace. Read ISSUE.md and email_utils.py. Reproduce the reported bug by creating test_email_utils.py with a focused regression test before fixing email_utils.py. Preserve normalize_email's signature. Run `python -m unittest -q` with internal_run_shell_command and finish with TEST_FIRST_OK only after the regression test and implementation pass.",
+    "files": {
+      "ISSUE.md": "Regression: normalize_email currently lowercases the entire address. The local part is case-sensitive in our system and must retain its original case; only the domain is case-insensitive and should be lowercased. Leading and trailing whitespace around the complete address is ignored. Malformed values without exactly one @ raise ValueError. Examples: ` Alice.Tag@EXAMPLE.COM ` becomes `Alice.Tag@example.com`; `missing-domain@` is invalid.\n",
+      "email_utils.py": "def normalize_email(value):\n    value = value.strip().lower()\n    if '@' not in value:\n        raise ValueError('invalid email')\n    return value\n"
+    },
+    "required_tools": ["internal_read_file", "internal_write_file", "internal_run_shell_command"],
+    "required_tool_groups": [["internal_modify_file", "internal_write_file"]],
+    "answer_contains": ["TEST_FIRST_OK"],
+    "file_contains": {
+      "email_utils.py": "def normalize_email",
+      "test_email_utils.py": "Alice.Tag@example.com"
+    },
+    "unchanged_files": ["ISSUE.md"],
+    "validation_command": "python -m unittest -q"
+  },
+  {
+    "id": "multi_file_refactor",
+    "prompt": "Work only in the provided workspace. Read REFACTOR.md, email_notice.py, sms_notice.py, and test_notices.py. Refactor the duplicated formatting into a new notice_format.py module while preserving both public functions and behavior. Do not change the contract or tests. Run `python -m unittest -q` with internal_run_shell_command and finish with REFACTOR_OK only if tests pass.",
+    "files": {
+      "REFACTOR.md": "Extract the duplicated subject/body normalization from email_notice.py and sms_notice.py into notice_format.py. Both existing public render_notice functions and their output must remain unchanged. The shared formatter must strip surrounding whitespace from subject and body, uppercase the subject, and return `SUBJECT: body`. Each existing module must import and use the shared formatter rather than retaining a private copy.\n",
+      "email_notice.py": "def _format(subject, body):\n    return f'{subject.strip().upper()}: {body.strip()}'\n\ndef render_notice(subject, body):\n    return '[email] ' + _format(subject, body)\n",
+      "sms_notice.py": "def _format(subject, body):\n    return f'{subject.strip().upper()}: {body.strip()}'\n\ndef render_notice(subject, body):\n    return '[sms] ' + _format(subject, body)\n",
+      "test_notices.py": "import unittest\nfrom email_notice import render_notice as render_email\nfrom sms_notice import render_notice as render_sms\n\nclass Tests(unittest.TestCase):\n    def test_email_contract(self):\n        self.assertEqual(render_email(' alert ', ' disk full '), '[email] ALERT: disk full')\n    def test_sms_contract(self):\n        self.assertEqual(render_sms(' alert ', ' disk full '), '[sms] ALERT: disk full')\n    def test_modules_share_formatter(self):\n        import email_notice, notice_format, sms_notice\n        self.assertIs(email_notice.format_notice, notice_format.format_notice)\n        self.assertIs(sms_notice.format_notice, notice_format.format_notice)\n"
+    },
+    "required_tools": ["internal_read_file", "internal_write_file", "internal_run_shell_command"],
+    "answer_contains": ["REFACTOR_OK"],
+    "file_contains": {"notice_format.py": "def format_notice"},
+    "unchanged_files": ["REFACTOR.md", "test_notices.py"],
+    "validation_command": "python -m unittest -q"
+  },
+  {
+    "id": "mocked_http_integration",
+    "prompt": "Work only in the provided workspace. Read API.md, api_client.py, and test_api_client.py. Diagnose and repair fetch_user without changing its signature, transport interface, contract, or tests. No real network calls are needed. Run `python -m unittest -q` with internal_run_shell_command and finish with HTTP_OK only when all mocked integration tests pass.",
+    "files": {
+      "API.md": "fetch_user(user_id, transport) calls transport.get('/users/{user_id}'). A 200 response returns the decoded JSON object. A 404 response returns None without decoding JSON. Every other status raises APIError containing the status code. Invalid JSON from a 200 response propagates the decoder exception. Exactly one request is made.\n",
+      "api_client.py": "class APIError(Exception):\n    pass\n\ndef fetch_user(user_id, transport):\n    response = transport.get('/user/' + str(user_id))\n    if response.status >= 400:\n        return None\n    try:\n        return response.json()\n    except Exception:\n        return {}\n",
+      "test_api_client.py": "import unittest\nfrom unittest.mock import Mock\nfrom api_client import APIError, fetch_user\n\nclass Tests(unittest.TestCase):\n    def response(self, status, payload=None, error=None):\n        response = Mock(status=status)\n        if error:\n            response.json.side_effect = error\n        else:\n            response.json.return_value = payload\n        return response\n    def test_success(self):\n        transport = Mock()\n        transport.get.return_value = self.response(200, {'id': 7})\n        self.assertEqual(fetch_user(7, transport), {'id': 7})\n        transport.get.assert_called_once_with('/users/7')\n    def test_not_found_does_not_decode(self):\n        transport = Mock()\n        response = self.response(404)\n        transport.get.return_value = response\n        self.assertIsNone(fetch_user(9, transport))\n        response.json.assert_not_called()\n    def test_other_status_raises(self):\n        transport = Mock()\n        transport.get.return_value = self.response(503)\n        with self.assertRaisesRegex(APIError, '503'):\n            fetch_user(1, transport)\n    def test_bad_success_payload_propagates(self):\n        transport = Mock()\n        transport.get.return_value = self.response(200, error=ValueError('bad json'))\n        with self.assertRaisesRegex(ValueError, 'bad json'):\n            fetch_user(1, transport)\n"
+    },
+    "required_tools": ["internal_read_file", "internal_run_shell_command"],
+    "required_tool_groups": [["internal_modify_file", "internal_write_file"]],
+    "answer_contains": ["HTTP_OK"],
+    "unchanged_files": ["API.md", "test_api_client.py"],
+    "validation_command": "python -m unittest -q"
+  },
+  {
+    "id": "javascript_state_debugging",
+    "prompt": "Work only in the provided workspace. Read UI_STATE.md, tabState.js, and tabState.test.js. Debug the JavaScript tab reducer without changing its exported API, contract, or tests. Run `node --test` with internal_run_shell_command and finish with UI_OK only after the tests pass.",
+    "files": {
+      "UI_STATE.md": "reduceTabs(state, action) is immutable: it must not mutate state or its tabs array. `close` removes action.id. If the closed tab was active, select the next tab at the same index, or the preceding tab when the closed tab was last. Closing a non-active or unknown tab preserves activeId. Closing the only active tab sets activeId to null. Unknown action types return the original state object.\n",
+      "package.json": "{\"type\":\"module\",\"scripts\":{\"test\":\"node --test\"}}\n",
+      "tabState.js": "export function reduceTabs(state, action) {\n  if (action.type !== 'close') return { ...state };\n  const index = state.tabs.findIndex(tab => tab.id === action.id);\n  state.tabs.splice(index, 1);\n  return { ...state, activeId: state.tabs[index - 1]?.id ?? null };\n}\n",
+      "tabState.test.js": "import test from 'node:test';\nimport assert from 'node:assert/strict';\nimport { reduceTabs } from './tabState.js';\n\nconst state = () => ({ tabs: [{id:'a'}, {id:'b'}, {id:'c'}], activeId: 'b' });\n\ntest('closes active middle tab and selects next immutably', () => {\n  const input = state(); const tabs = input.tabs;\n  const result = reduceTabs(input, {type:'close', id:'b'});\n  assert.deepEqual(result, {tabs:[{id:'a'}, {id:'c'}], activeId:'c'});\n  assert.deepEqual(input, state());\n  assert.equal(input.tabs, tabs);\n});\ntest('closing inactive and unknown tabs preserves active tab', () => {\n  assert.equal(reduceTabs(state(), {type:'close', id:'a'}).activeId, 'b');\n  assert.deepEqual(reduceTabs(state(), {type:'close', id:'missing'}), state());\n});\ntest('closing final active tab yields null', () => {\n  assert.deepEqual(reduceTabs({tabs:[{id:'a'}], activeId:'a'}, {type:'close', id:'a'}), {tabs:[], activeId:null});\n});\ntest('unknown action returns same state object', () => {\n  const input = state();\n  assert.equal(reduceTabs(input, {type:'noop'}), input);\n});\n"
+    },
+    "required_tools": ["internal_read_file", "internal_run_shell_command"],
+    "required_tool_groups": [["internal_modify_file", "internal_write_file"]],
+    "answer_contains": ["UI_OK"],
+    "unchanged_files": ["UI_STATE.md", "tabState.test.js"],
+    "validation_command": "node --test"
+  },
+  {
+    "id": "performance_hot_path",
+    "prompt": "Work only in the provided workspace. Read PERFORMANCE.md, totals.py, and test_totals.py. Diagnose the algorithmic hot path and optimize totals_by_user while preserving its signature and behavior. Do not change the benchmark contract or tests, and do not special-case the test data. Run `python -m unittest -q` with internal_run_shell_command and finish with PERF_OK only if correctness and the deterministic operation budget pass.",
+    "files": {
+      "PERFORMANCE.md": "totals_by_user(users, orders) returns a dict in user input order mapping each user id to the sum of matching order amounts. Ignore orders for unknown users and do not mutate inputs. The production hot path has many users and orders, so index users once rather than scanning all orders separately for every user.\n",
+      "totals.py": "def totals_by_user(users, orders):\n    totals = {}\n    for user in users:\n        total = 0\n        for order in orders:\n            if order['user_id'] == user['id']:\n                total += order['amount']\n        totals[user['id']] = total\n    return totals\n",
+      "test_totals.py": "import unittest\nfrom totals import totals_by_user\n\nclass Probe:\n    comparisons = 0\n    def __init__(self, value): self.value = value\n    def __hash__(self): return hash(self.value)\n    def __eq__(self, other):\n        Probe.comparisons += 1\n        return isinstance(other, Probe) and self.value == other.value\n\nclass Tests(unittest.TestCase):\n    def test_correctness_order_and_unknown_users(self):\n        users = [{'id':'b'}, {'id':'a'}, {'id':'c'}]\n        orders = [{'user_id':'a','amount':2}, {'user_id':'a','amount':3}, {'user_id':'b','amount':4}, {'user_id':'x','amount':99}]\n        result = totals_by_user(users, orders)\n        self.assertEqual(result, {'b':4, 'a':5, 'c':0})\n        self.assertEqual(list(result), ['b', 'a', 'c'])\n    def test_indexes_instead_of_nested_scan(self):\n        Probe.comparisons = 0\n        users = [{'id': Probe(i)} for i in range(300)]\n        orders = [{'user_id': Probe(i), 'amount': 1} for i in range(300)]\n        result = totals_by_user(users, orders)\n        self.assertEqual(sum(result.values()), 300)\n        self.assertLess(Probe.comparisons, 2000)\n"
+    },
+    "required_tools": ["internal_read_file", "internal_run_shell_command"],
+    "required_tool_groups": [["internal_modify_file", "internal_write_file"]],
+    "answer_contains": ["PERF_OK"],
+    "unchanged_files": ["PERFORMANCE.md", "test_totals.py"],
+    "validation_command": "python -m unittest -q"
   }
 ]

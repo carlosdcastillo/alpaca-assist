@@ -1,0 +1,167 @@
+{
+  "generated_at": "2026-08-24T00:28:38.647088+00:00",
+  "model": "glm-5p2",
+  "provider_model": "accounts/fireworks/models/glm-5p2",
+  "pricing_usd_per_million_tokens": {
+    "input": 1.4,
+    "cached_input": 0.14,
+    "output": 4.4
+  },
+  "configuration": {
+    "tool_profile": "all",
+    "tool_count": 14,
+    "temperature": 0.7,
+    "max_tokens": 8000,
+    "case_limits": {
+      "max_invocations": 20,
+      "max_tool_calls": 20,
+      "max_identical_tool_calls": 3,
+      "max_tokens": 250000,
+      "max_cost_usd": 0.25
+    },
+    "execution_policy": "efficient"
+  },
+  "cases": [
+    {
+      "id": "test_first_regression",
+      "passed": true,
+      "failures": [],
+      "wall_seconds": 23.836,
+      "input_tokens": 23610,
+      "cached_input_tokens": 15195,
+      "output_tokens": 1705,
+      "total_tokens": 25315,
+      "cost_usd": 0.0214103,
+      "invocations": 6,
+      "tool_calls": 6,
+      "tools_used": [
+        "internal_read_file",
+        "internal_read_file",
+        "internal_write_file",
+        "internal_run_shell_command",
+        "internal_write_file",
+        "internal_run_shell_command"
+      ],
+      "gated_calls": 0,
+      "gated_results": 0,
+      "response_chars": 2665
+    },
+    {
+      "id": "multi_file_refactor",
+      "passed": true,
+      "failures": [],
+      "wall_seconds": 11.368,
+      "input_tokens": 15293,
+      "cached_input_tokens": 13828,
+      "output_tokens": 843,
+      "total_tokens": 16136,
+      "cost_usd": 0.00769612,
+      "invocations": 4,
+      "tool_calls": 8,
+      "tools_used": [
+        "internal_read_file",
+        "internal_read_file",
+        "internal_read_file",
+        "internal_read_file",
+        "internal_write_file",
+        "internal_write_file",
+        "internal_write_file",
+        "internal_run_shell_command"
+      ],
+      "gated_calls": 0,
+      "gated_results": 0,
+      "response_chars": 961
+    },
+    {
+      "id": "mocked_http_integration",
+      "passed": true,
+      "failures": [],
+      "wall_seconds": 27.663,
+      "input_tokens": 18892,
+      "cached_input_tokens": 17441,
+      "output_tokens": 2003,
+      "total_tokens": 20895,
+      "cost_usd": 0.01328634,
+      "invocations": 5,
+      "tool_calls": 7,
+      "tools_used": [
+        "internal_list_files",
+        "internal_search_files_for_text",
+        "internal_read_file",
+        "internal_read_file",
+        "internal_read_file",
+        "internal_modify_file",
+        "internal_run_shell_command"
+      ],
+      "gated_calls": 0,
+      "gated_results": 0,
+      "response_chars": 2618
+    },
+    {
+      "id": "javascript_state_debugging",
+      "passed": true,
+      "failures": [],
+      "wall_seconds": 27.655,
+      "input_tokens": 15320,
+      "cached_input_tokens": 12957,
+      "output_tokens": 1982,
+      "total_tokens": 17302,
+      "cost_usd": 0.01384298,
+      "invocations": 4,
+      "tool_calls": 5,
+      "tools_used": [
+        "internal_read_file",
+        "internal_read_file",
+        "internal_read_file",
+        "internal_modify_file",
+        "internal_run_shell_command"
+      ],
+      "gated_calls": 0,
+      "gated_results": 0,
+      "response_chars": 1869
+    },
+    {
+      "id": "performance_hot_path",
+      "passed": true,
+      "failures": [],
+      "wall_seconds": 87.904,
+      "input_tokens": 15357,
+      "cached_input_tokens": 12987,
+      "output_tokens": 6521,
+      "total_tokens": 21878,
+      "cost_usd": 0.03382858,
+      "invocations": 4,
+      "tool_calls": 6,
+      "tools_used": [
+        "internal_list_files",
+        "internal_read_file",
+        "internal_read_file",
+        "internal_read_file",
+        "internal_modify_file",
+        "internal_run_shell_command"
+      ],
+      "gated_calls": 0,
+      "gated_results": 0,
+      "response_chars": 1130
+    }
+  ],
+  "summary": {
+    "case_count": 5,
+    "wall_seconds": 178.426,
+    "mean_wall_seconds": 35.685,
+    "p50_wall_seconds": 27.655,
+    "p95_wall_seconds": 87.904,
+    "input_tokens": 88472,
+    "cached_input_tokens": 72408,
+    "output_tokens": 13054,
+    "total_tokens": 101526,
+    "cost_usd": 0.09006432,
+    "passed": 5,
+    "failed": 0,
+    "invocations": 23,
+    "tool_calls": 32,
+    "gated_calls": 0,
+    "gated_results": 0,
+    "elapsed_seconds": 179.213
+  }
+}

@@ -741,8 +741,8 @@ def main() -> int:
             "Generation settings are only supported by the built-in Fireworks proxy",
         )
     cases = json.loads(args.cases.read_text(encoding="utf-8"))
-    if not isinstance(cases, list) or not 5 <= len(cases) <= 10:
-        raise SystemExit("The regression suite must contain between 5 and 10 cases")
+    if not isinstance(cases, list) or not 5 <= len(cases) <= 20:
+        raise SystemExit("The regression suite must contain between 5 and 20 cases")
     cases = _select_cases(cases, args.case_ids)
 
     pricing = _resolve_pricing(args)

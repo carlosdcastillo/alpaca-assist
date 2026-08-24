@@ -170,7 +170,7 @@ API bridge, session restore, streaming, tools, and conversation model).
 
 ### Offline LLM regression
 
-Run the eight non-UI agent regression cases using the default model and save a
+Run the 19 non-UI agent regression cases using the default model and save a
 metrics report:
 
 ```bash
@@ -181,7 +181,11 @@ Each case gets an isolated temporary workspace and uses the production
 `ChatTab` streaming, text-embedded tool-call detection, internal tool dispatch,
 continuation, and tool-output gating paths. The suite covers reading, searching,
 writing, modifying, shell validation, gated large results, secure archive
-handling, retry semantics, cross-file debugging, and state-machine reasoning.
+handling, retry semantics, cross-file debugging, state-machine reasoning,
+pagination boundaries, TTL caching, UTF-8 streaming, dependency ordering, and
+transactional batch updates. Additional cases exercise test-first regression
+repair, multi-file refactoring, mocked HTTP integration, JavaScript behavior,
+and deterministic performance debugging.
 The report contains correctness, tool and invocation counts, wall time, provider-reported
 input/cached/output tokens, and estimated cost. Any model supported by the
 configured proxy can be selected. Models listed in `MODEL_PRICING` use their
