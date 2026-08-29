@@ -25,6 +25,9 @@ class TestModelsJson:
     def test_includes_kimi_k3(self) -> None:
         assert "kimi-k3" in _model_names()
 
+    def test_includes_glm_5p3(self) -> None:
+        assert "glm-5p3" in _model_names()
+
     def test_every_fireworks_kimi_or_glm_model_has_a_mapping(self) -> None:
         """Every kimi-/glm- entry in the served list must route somewhere
 
@@ -39,6 +42,9 @@ class TestModelsJson:
 class TestMapOllamaToModel:
     def test_kimi_k3_maps_to_the_fireworks_model_id(self) -> None:
         assert map_ollama_to_model("kimi-k3") == "accounts/fireworks/models/kimi-k3"
+
+    def test_glm_5p3_maps_to_the_fireworks_model_id(self) -> None:
+        assert map_ollama_to_model("glm-5p3") == "accounts/fireworks/models/glm-5p3"
 
     def test_unknown_model_falls_back_to_default(self) -> None:
         from anthropic_ollama_server import DEFAULT_MODEL

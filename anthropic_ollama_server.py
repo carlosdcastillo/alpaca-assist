@@ -377,6 +377,19 @@ MODELS_JSON: str = """
       }
     },
     {
+      "name": "glm-5p3",
+      "modified_at": "2026-08-28T00:00:00.000000000+00:00",
+      "size": 0,
+      "digest": "0000000000000000000000000000000000000000000000000000000000000000",
+      "details": {
+        "format": "gguf",
+        "family": "glm",
+        "families": null,
+        "parameter_size": "743B",
+        "quantization_level": "none"
+      }
+    },
+    {
       "name": "qwen3.6:27b",
       "modified_at": "2026-01-01T00:00:00.000000000+00:00",
       "size": 0,
@@ -571,6 +584,7 @@ def map_ollama_to_model(ollama_model: str) -> str:
         "kimi-k3": "accounts/fireworks/models/kimi-k3",
         "glm-5p1": "accounts/fireworks/models/glm-5p1",
         "glm-5p2": "accounts/fireworks/models/glm-5p2",
+        "glm-5p3": "accounts/fireworks/models/glm-5p3",
         # Claude Code / Codex CLI backends (subscription usage, not API-key
         # billed — see ClaudeCodeCLIClient/CodexCLIClient)
         "claude-code/opus": "claude-code/opus",
