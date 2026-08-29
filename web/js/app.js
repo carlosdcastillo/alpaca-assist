@@ -2112,6 +2112,10 @@ class AlpacaApp {
    */
   async _onTabSwitched(tabId) {
     this.currentTabId = tabId;
+    // The pause anchor belongs to the conversation being shown, not the app.
+    // Clear the previous tab's value immediately; rendering a non-empty state
+    // replaces it below, while a brand-new empty state correctly keeps null.
+    this._lastTurnEnd = null;
     this._updateWorkspaceHeader(null);
     this._tabSwitchSeq = (this._tabSwitchSeq || 0) + 1;
     const mySeq = this._tabSwitchSeq;

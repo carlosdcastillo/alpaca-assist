@@ -21,8 +21,34 @@ describe("AlpacaApp conversation display loading", () => {
     app._renderConversationState = jest.fn();
     app._updateStatusBar = jest.fn();
     app._updateWorkspaceHeader = jest.fn();
-    app.tabManager = { setTabOffline: jest.fn() };
+    app.tabManager = {
+      setTabOffline: jest.fn(),
+      getTab: jest.fn(() => ({ title: "New Task" })),
+      isTabStreaming: jest.fn(() => false),
+    };
+    app.inputArea = { setStreaming: jest.fn() };
   });
+
+  it.each(["local-new", "pack-new"])(
+    "clears the previous conversation gap anchor for an empty %s tab",
+    async (tabId) => {
+      app.currentTabId = tabId;
+      app._lastTurnEnd = Date.now() / 1000 - 3 * 86400;
+
+      const load = app._onTabSwitched(tabId);
+      expect(app._lastTurnEnd).toBeNull();
+
+      pending.shift()({
+        success: true,
+        state: {
+          chat_state: { graph: { nodes: {}, active_node_id: null } },
+        },
+      });
+      await load;
+
+      expect(app._lastTurnEnd).toBeNull();
+    },
+  );
 
   it("lets a Pack sync supersede the initial tab-switch render", async () => {
     const initialLoad = app._onTabSwitched("pack-1");
