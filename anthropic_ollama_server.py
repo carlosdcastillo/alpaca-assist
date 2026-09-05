@@ -3,6 +3,7 @@ Ollama API server emulator that routes requests to Claude via the Anthropic API.
 This server mimics the Ollama API endpoints but uses Claude for inference.
 """
 
+import atexit
 import base64
 import datetime
 import json
@@ -68,6 +69,25 @@ class _TeeStream:
     with no surviving evidence anywhere to diagnose it from.
     """
 
+    # Re-entrancy guard, thread-local because request threads write
+    # concurrently. When a logging handler's emit() fails, logging calls
+    # Handler.handleError(), which writes "--- Logging error ---" and the
+    # traceback to sys.stderr -- which is this tee -- which feeds it straight
+    # back into the same broken handler, which fails again. The traceback
+    # never survives that loop; what you get instead is a bare
+    #
+    #     --- Logging error ---
+    #     Traceback (most recent call last):
+    #     --- Logging error ---
+    #
+    # with the body missing, which is exactly the case that is impossible to
+    # diagnose. The try/except below does not help, because the recursion
+    # happens *inside* self._logger.info(), not around it.
+    #
+    # With this guard, logging's error output still reaches the real stream;
+    # it just is not mirrored into the logger that is already failing.
+    _reentry = threading.local()
+
     def __init__(self, real: Any, file_logger: logging.Logger) -> None:
         self._real = real
         self._logger = file_logger
@@ -76,15 +96,20 @@ class _TeeStream:
 
     def write(self, text: str) -> int:
         result: int = self._real.write(text)
+        if getattr(_TeeStream._reentry, "active", False):
+            return result
         with self._lock:
             self._buffer += text
             while "\n" in self._buffer:
                 line, self._buffer = self._buffer.split("\n", 1)
                 if line:
+                    _TeeStream._reentry.active = True
                     try:
                         self._logger.info(line)
                     except Exception:
                         pass
+                    finally:
+                        _TeeStream._reentry.active = False
         return result
 
     def flush(self) -> None:
@@ -101,8 +126,14 @@ try:
     _console_logger.setLevel(logging.INFO)
     _console_logger.propagate = False
     if not _console_logger.handlers:
+        # One file per process. This script runs as a parent/child pair, and a
+        # RotatingFileHandler rolls over by *renaming* the file -- which on
+        # Windows fails with PermissionError while the other process still
+        # holds it open. That failure is what trips the logging-error path in
+        # the first place, so two processes sharing one file is not a tidiness
+        # question, it is the bug.
         _file_handler = logging.handlers.RotatingFileHandler(
-            os.path.join(_log_dir, "anthropic_ollama_server.log"),
+            os.path.join(_log_dir, f"anthropic_ollama_server.{os.getpid()}.log"),
             maxBytes=10 * 1024 * 1024,
             backupCount=5,
             encoding="utf-8",
@@ -111,8 +142,22 @@ try:
             logging.Formatter("%(asctime)s %(message)s"),
         )
         _console_logger.addHandler(_file_handler)
+
+    _real_stdout, _real_stderr = sys.stdout, sys.stderr
     for _name in ("stdout", "stderr"):
         setattr(sys, _name, _TeeStream(getattr(sys, _name), _console_logger))
+
+    def _restore_streams() -> None:
+        """Put the real streams back before logging tears its handlers down.
+
+        `logging.shutdown()` runs at interpreter exit and closes every handler.
+        Anything printed after that -- a shutdown message, a traceback from a
+        dying thread -- would otherwise emit into a closed file and land back
+        in the logging-error loop, on the way out, where it is least readable.
+        """
+        sys.stdout, sys.stderr = _real_stdout, _real_stderr
+
+    atexit.register(_restore_streams)
 except OSError:
     # A read-only install directory or similarly locked-down environment
     # must not prevent the server from starting at all -- console output
@@ -2322,6 +2367,9 @@ def run_server(port: int = 11434) -> None:
         httpd.serve_forever()
     except KeyboardInterrupt:
         print("\nShutting down server...")
+    finally:
+        # Also runs when serve_forever() raises anything else, so the listening
+        # socket is released rather than lingering until the process dies.
         httpd.server_close()
 
 
