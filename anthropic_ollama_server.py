@@ -538,6 +538,13 @@ MODELS_SHOW: dict[str, Any] = {
 }
 
 
+def model_supports_images(model: str) -> bool:
+    """Return whether the selected model accepts image content blocks."""
+    return not (
+        model.startswith("glm-") or model.startswith("accounts/fireworks/models/glm-")
+    )
+
+
 # Default model to use when an unknown model is requested
 DEFAULT_MODEL = "claude-sonnet-4-6"
 
@@ -624,6 +631,7 @@ def _detect_image_format(b64_data: str) -> str | None:
 
 def _build_anthropic_messages(
     messages: list[dict[str, Any]],
+    supports_images: bool = True,
 ) -> tuple[list[dict[str, Any]], list[str]]:
     """Transform an Ollama-style message list into Anthropic API format.
 
@@ -656,7 +664,7 @@ def _build_anthropic_messages(
         elif role == "tool_result":
             result_text = item.get("content", "")
             image_result = image_tool_result.parse_image_result(result_text)
-            if image_result is not None:
+            if image_result is not None and supports_images:
                 mime_type, img_b64, description = image_result
                 result_content: list[dict[str, Any]] = [
                     {
@@ -669,6 +677,9 @@ def _build_anthropic_messages(
                     },
                     {"type": "text", "text": description},
                 ]
+            elif image_result is not None:
+                _mime_type, _img_b64, description = image_result
+                result_content = [{"type": "text", "text": description}]
             else:
                 video_result = video_tool_result.parse_video_result(result_text)
                 if video_result is not None:
@@ -693,7 +704,7 @@ def _build_anthropic_messages(
             # Transform Ollama-style images into Claude multimodal content blocks.
             raw_images = item["images"]
             image_blocks: list[dict[str, Any]] = []
-            for idx, img_b64 in enumerate(raw_images):
+            for idx, img_b64 in enumerate(raw_images if supports_images else []):
                 mime = _detect_image_format(img_b64)
                 if mime is None:
                     try:
@@ -1102,7 +1113,11 @@ class OllamaRequestHandler(BaseHTTPRequestHandler):
             post_data = self.rfile.read(content_length)
             request_data = json.loads(post_data.decode("utf-8"))
             print(f"Show request: {request_data}")
-            v = json.dumps(MODELS_SHOW)
+            model_show = dict(MODELS_SHOW)
+            requested_model = request_data.get("name", request_data.get("model", ""))
+            if not model_supports_images(requested_model):
+                model_show["capabilities"] = ["completion"]
+            v = json.dumps(model_show)
             self.wfile.write(v.encode())
             self.wfile.write(b"\n")
             self.wfile.flush()
@@ -1439,7 +1454,10 @@ class FireworksClient:
     ) -> Generator[dict[str, Any], None, None]:
         url = f"{self.base_url}/messages"
 
-        anthropic_messages, pre_stream_errors = _build_anthropic_messages(messages)
+        anthropic_messages, pre_stream_errors = _build_anthropic_messages(
+            messages,
+            supports_images=model_supports_images(model),
+        )
 
         if pre_stream_errors:
             error_text = "\n".join(pre_stream_errors) + "\n\n"

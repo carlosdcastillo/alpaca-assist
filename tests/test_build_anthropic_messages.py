@@ -13,7 +13,11 @@ from __future__ import annotations
 
 import base64
 import json
+from typing import Any
+from unittest.mock import Mock
+from unittest.mock import patch
 
+from anthropic_ollama_server import FireworksClient
 from anthropic_ollama_server import _build_anthropic_messages
 from image_tool_result import encode_image_result
 from video_tool_result import encode_video_result
@@ -128,6 +132,17 @@ class TestToolResultWithImage:
         result, _errors = _build_anthropic_messages(messages)
         assert result[0]["content"][0]["cache_control"] == {"type": "ephemeral"}
 
+    def test_text_only_model_receives_description_without_image(self) -> None:
+        encoded = encode_image_result("image/png", "QUJDRA==", "a screenshot")
+        messages = [{"role": "tool_result", "id": "t1", "content": encoded}]
+
+        result, errors = _build_anthropic_messages(messages, supports_images=False)
+
+        assert errors == []
+        assert result[0]["content"][0]["content"] == [
+            {"type": "text", "text": "a screenshot"},
+        ]
+
 
 class TestToolResultWithVideo:
     def test_sends_description_not_locator_or_video_bytes_to_model(self) -> None:
@@ -169,6 +184,25 @@ class TestUserWithImages:
         # No image block was added for the unrecognized one.
         assert all(b["type"] != "image" for b in result[0]["content"])
 
+    def test_text_only_model_omits_images_but_keeps_user_text(self) -> None:
+        messages = [
+            {
+                "role": "user",
+                "content": "continue without the image",
+                "images": ["bad"],
+            },
+        ]
+
+        result, errors = _build_anthropic_messages(messages, supports_images=False)
+
+        assert errors == []
+        assert result == [
+            {
+                "role": "user",
+                "content": [{"type": "text", "text": "continue without the image"}],
+            },
+        ]
+
 
 class TestPlainMessages:
     def test_plain_user_message_passes_through(self) -> None:
@@ -181,3 +215,34 @@ class TestPlainMessages:
         snapshot = [dict(m) for m in original]
         _build_anthropic_messages(original)
         assert original == snapshot
+
+
+class TestFireworksImageSupport:
+    def test_glm_payload_does_not_contain_image_blocks(self) -> None:
+        png_bytes = b"\x89PNG\r\n\x1a\n" + b"\x00" * 20
+        messages: list[dict[str, Any]] = [
+            {
+                "role": "user",
+                "content": "continue",
+                "images": [base64.b64encode(png_bytes).decode("ascii")],
+            },
+        ]
+        response = Mock(status_code=200)
+        response.iter_lines.return_value = []
+        client = FireworksClient(api_key="fake-key")
+
+        with patch(
+            "anthropic_ollama_server.requests.post",
+            return_value=response,
+        ) as post:
+            list(
+                client.stream_complete(
+                    messages=messages,
+                    model="accounts/fireworks/models/glm-5p2",
+                ),
+            )
+
+        payload = post.call_args.kwargs["json"]
+        assert payload["messages"] == [
+            {"role": "user", "content": [{"type": "text", "text": "continue"}]},
+        ]

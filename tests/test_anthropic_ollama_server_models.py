@@ -12,6 +12,7 @@ import json
 
 from anthropic_ollama_server import MODELS_JSON
 from anthropic_ollama_server import map_ollama_to_model
+from anthropic_ollama_server import model_supports_images
 
 
 def _model_names() -> set[str]:
@@ -50,3 +51,13 @@ class TestMapOllamaToModel:
         from anthropic_ollama_server import DEFAULT_MODEL
 
         assert map_ollama_to_model("not-a-real-model") == DEFAULT_MODEL
+
+
+class TestModelSupportsImages:
+    def test_glm_aliases_and_fireworks_ids_are_text_only(self) -> None:
+        assert not model_supports_images("glm-5p2")
+        assert not model_supports_images("accounts/fireworks/models/glm-5p2")
+
+    def test_other_models_keep_image_support(self) -> None:
+        assert model_supports_images("claude-sonnet-4-6")
+        assert model_supports_images("accounts/fireworks/models/kimi-k2p5")
