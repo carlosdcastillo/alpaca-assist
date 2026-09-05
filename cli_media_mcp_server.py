@@ -26,9 +26,10 @@ import video_tool_result
 server = Server(
     "alpaca-media",
     instructions=(
-        "Use view_image to inspect image files and view_video to expose a video "
-        "to the user. Each result supplies an exact alpaca:// reference; include "
-        "that reference in the answer when the media supports the response."
+        "Use view_image to inspect image files or PDF pages and view_video to "
+        "expose a video to the user. Each result supplies an exact alpaca:// "
+        "reference; include that reference in the answer when the media supports "
+        "the response."
     ),
 )
 
@@ -52,14 +53,20 @@ def _record_event(name: str, arguments: dict[str, Any], result: str) -> str:
 
 @server.list_tools()
 async def list_tools() -> list[Tool]:
-    path_schema = {
+    image_path_schema = {
         "type": "object",
         "properties": {
             "file_path": {
                 "type": "string",
                 "description": (
-                    "Image/video path, relative to the active workspace or absolute"
+                    "Image or PDF path, relative to the active workspace or absolute"
                 ),
+            },
+            "page": {
+                "type": "integer",
+                "minimum": 1,
+                "description": "PDF page number, 1-indexed (default: 1)",
+                "default": 1,
             },
         },
         "required": ["file_path"],
@@ -68,10 +75,11 @@ async def list_tools() -> list[Tool]:
         Tool(
             name="view_image",
             description=(
-                "Inspect an image file visually. Returns native image content to the "
-                "model and an Alpaca inline-image reference for the final answer."
+                "Inspect an image file or one page of a PDF visually. PDF pages "
+                "default to page 1. Returns native image content to the model and "
+                "an Alpaca inline-image reference for the final answer."
             ),
-            inputSchema=path_schema,
+            inputSchema=image_path_schema,
         ),
         Tool(
             name="view_video",
@@ -79,7 +87,18 @@ async def list_tools() -> list[Tool]:
                 "Expose an MP4, WebM, or Ogg file in Alpaca's video player. Video "
                 "content is for user playback and is not added to model context."
             ),
-            inputSchema=path_schema,
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "file_path": {
+                        "type": "string",
+                        "description": (
+                            "Video path, relative to the active workspace or absolute"
+                        ),
+                    },
+                },
+                "required": ["file_path"],
+            },
         ),
     ]
 

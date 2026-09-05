@@ -406,6 +406,59 @@ class TestViewImage:
         assert result["isError"] is True
         assert "could not be read as an image" in _text(result)
 
+    def test_renders_requested_pdf_page(self, tmp_path: Path) -> None:
+        import base64
+        import io
+
+        from PIL import Image
+
+        from internal_tools import view_image
+
+        p = tmp_path / "pages.pdf"
+        first = Image.new("RGB", (120, 80), "red")
+        second = Image.new("RGB", (120, 80), "blue")
+        first.save(p, format="PDF", save_all=True, append_images=[second])
+
+        result = view_image({"file_path": str(p), "page": 2})
+
+        assert _ok(result)
+        parsed = image_tool_result.parse_image_result(_text(result))
+        assert parsed is not None
+        mime_type, b64_data, description = parsed
+        assert mime_type == "image/jpeg"
+        rendered = Image.open(io.BytesIO(base64.b64decode(b64_data)))
+        red, _green, blue = rendered.convert("RGB").getpixel((60, 40))
+        assert blue > red
+        assert "PDF, page 2 of 2" in description
+
+    def test_pdf_defaults_to_first_page(self, tmp_path: Path) -> None:
+        from PIL import Image
+
+        from internal_tools import view_image
+
+        p = tmp_path / "document.pdf"
+        Image.new("RGB", (40, 30), "white").save(p, format="PDF")
+
+        result = view_image({"file_path": str(p)})
+
+        assert _ok(result)
+        parsed = image_tool_result.parse_image_result(_text(result))
+        assert parsed is not None
+        assert "PDF, page 1 of 1" in parsed[2]
+
+    def test_pdf_page_out_of_range_errors_cleanly(self, tmp_path: Path) -> None:
+        from PIL import Image
+
+        from internal_tools import view_image
+
+        p = tmp_path / "document.pdf"
+        Image.new("RGB", (40, 30), "white").save(p, format="PDF")
+
+        result = view_image({"file_path": str(p), "page": 2})
+
+        assert result["isError"] is True
+        assert "exceeds the 1-page document" in _text(result)
+
     def test_tramp_path_rejected(self, tmp_path: Path) -> None:
         from internal_tools import view_image
 

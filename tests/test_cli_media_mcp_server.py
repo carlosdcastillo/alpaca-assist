@@ -11,6 +11,15 @@ import cli_media_mcp_server
 
 
 @pytest.mark.asyncio
+async def test_view_image_schema_accepts_pdf_page_without_changing_video() -> None:
+    tools = {tool.name: tool for tool in await cli_media_mcp_server.list_tools()}
+
+    assert tools["view_image"].inputSchema["required"] == ["file_path"]
+    assert tools["view_image"].inputSchema["properties"]["page"]["minimum"] == 1
+    assert "page" not in tools["view_video"].inputSchema["properties"]
+
+
+@pytest.mark.asyncio
 async def test_view_image_returns_native_content_and_records_mirror_event(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

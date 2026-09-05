@@ -350,7 +350,7 @@ def _encode_image_under_limit(
 
 
 def view_image(arguments: dict[str, Any]) -> dict[str, Any]:
-    """Load an image file and return it for the model to actually see.
+    """Load an image or PDF page and return it for the model to actually see.
 
     Unlike read_file, this doesn't just report bytes on disk exist — it
     decodes the image, downscales it if needed, and returns it in a form
@@ -382,15 +382,58 @@ def view_image(arguments: dict[str, Any]) -> dict[str, Any]:
         with open(filepath, "rb") as f:
             raw_bytes = f.read()
 
-        try:
-            import io
+        is_pdf = filepath.lower().endswith(".pdf") or raw_bytes.lstrip().startswith(
+            b"%PDF-",
+        )
+        pdf_note = ""
+        if is_pdf:
+            page_number = arguments.get("page", 1)
+            if (
+                isinstance(page_number, bool)
+                or not isinstance(page_number, int)
+                or page_number < 1
+            ):
+                return _err("Error: PDF page must be a positive integer")
+            try:
+                import pypdfium2 as pdfium
 
-            img = Image.open(io.BytesIO(raw_bytes))
-            img.load()
-        except Exception as e:
-            return _err(f"Error: '{filepath}' could not be read as an image: {e}")
+                pdf = pdfium.PdfDocument(raw_bytes)
+                try:
+                    page_count = len(pdf)
+                    if page_number > page_count:
+                        return _err(
+                            f"Error: PDF page {page_number} exceeds the "
+                            f"{page_count}-page document '{filepath}'",
+                        )
+                    page = pdf[page_number - 1]
+                    try:
+                        width, height = page.get_size()
+                        scale = min(
+                            2.0,
+                            VIEW_IMAGE_DIMENSION_STEPS[0] / max(width, height),
+                        )
+                        bitmap = page.render(scale=scale)
+                        try:
+                            img = bitmap.to_pil().copy()
+                        finally:
+                            bitmap.close()
+                    finally:
+                        page.close()
+                finally:
+                    pdf.close()
+            except Exception as e:
+                return _err(f"Error: '{filepath}' could not be read as a PDF: {e}")
+            orig_format = "PDF"
+            pdf_note = f", page {page_number} of {page_count}"
+        else:
+            try:
+                import io
 
-        orig_format = img.format or "?"
+                img = Image.open(io.BytesIO(raw_bytes))
+                img.load()
+            except Exception as e:
+                return _err(f"Error: '{filepath}' could not be read as an image: {e}")
+            orig_format = img.format or "?"
         orig_size = img.size
 
         fitted = _encode_image_under_limit(img, VIEW_IMAGE_MAX_ENCODED_BYTES)
@@ -415,7 +458,7 @@ def view_image(arguments: dict[str, Any]) -> dict[str, Any]:
             else ""
         )
         description = (
-            f"Loaded '{filepath}' ({orig_size[0]}x{orig_size[1]} {orig_format}"
+            f"Loaded '{filepath}' ({orig_size[0]}x{orig_size[1]} {orig_format}{pdf_note}"
             f"{resized_note}, {len(encoded_bytes)} bytes as {mime_type})."
         )
         return _ok(
@@ -1235,17 +1278,23 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
         "function": {
             "name": "internal_view_image",
             "description": (
-                "Load an image file (e.g. a screenshot you just took) so you can "
-                "actually see it, not just confirm it exists on disk. Downscales "
-                "large images automatically. Local paths only, no TRAMP/remote "
-                "support."
+                "Load an image file or one page of a PDF so you can actually see "
+                "it, not just confirm it exists on disk. PDF pages are 1-indexed "
+                "and default to page 1. Downscales large images automatically. "
+                "Local paths only, no TRAMP/remote support."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
                     "file_path": {
                         "type": "string",
-                        "description": "Local path to the image file",
+                        "description": "Local path to the image or PDF file",
+                    },
+                    "page": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "description": "PDF page number, 1-indexed (default: 1)",
+                        "default": 1,
                     },
                 },
                 "required": ["file_path"],
