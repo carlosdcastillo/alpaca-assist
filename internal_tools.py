@@ -1432,7 +1432,7 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "internal_run_shell_command",
-            "description": "Execute a command. No shell interpretation — argv passed directly to the process, so pipes, redirects, &&/;, and backticks are literal characters, not operators, and 'grep foo | wc -l' will not work as written. For pipes, redirects, or chaining multiple commands, wrap the whole sequence in bash -c, e.g. command='bash -c \"grep foo file | wc -l\"' — bash itself does the shell parsing, so this works normally.",
+            "description": "Execute a command. On Windows, commands run in non-interactive PowerShell, so cmdlets, pipes, redirects, and chaining work normally. On other platforms argv is passed directly to the process; wrap pipelines or compound commands in a shell such as bash -c.",
             "parameters": {
                 "type": "object",
                 "properties": {

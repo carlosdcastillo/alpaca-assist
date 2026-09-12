@@ -1,10 +1,8 @@
-"""
-Cross-platform shell command executor.
+"""Cross-platform command executor.
 
-No shell interpretation (subprocess runs with shell=False, argv passed
-directly), so ;/&&/backticks/etc. in a command string are literal
-arguments rather than operators — that is the actual injection boundary
-here, not a command allowlist.
+POSIX commands are passed directly to the requested executable. Windows
+commands run through PowerShell so built-ins, pipelines, environment variables,
+and the ``.cmd`` wrappers commonly installed by developer tools all work.
 """
 
 import os
@@ -76,79 +74,37 @@ class ExecutionResult:
 
 
 class ShellExecutor:
-    def _parse_command(self, command: str) -> list[str]:
-        if platform.system() == "Windows":
-            return self._split_windows_command(command)
-        else:
-            return shlex.split(command)
-
     @staticmethod
-    def _split_windows_command(command: str) -> list[str]:
-        """Split a command string into argv-style tokens on Windows.
+    def _windows_powershell_command(command: str) -> list[str] | None:
+        """Build a non-interactive PowerShell invocation for a Windows command."""
+        powershell = shutil.which("pwsh.exe") or shutil.which("powershell.exe")
+        if not powershell:
+            return None
 
-        Neither shlex mode is correct here on its own:
-          - posix=False preserves backslashes everywhere (good for Windows
-            paths) but doesn't strip quote characters and doesn't understand
-            a backslash-escaped quote (`\\"`) inside a double-quoted span —
-            it ends the span right there, mis-splitting anything like
-            `python -c "...strftime(\\"%H:%M\\")..."`
-          - posix=True handles escaped quotes correctly inside quotes, but
-            also treats backslash as an escape character in *unquoted* text,
-            mangling bare Windows paths (`C:\\Users\\x` -> `C:Usersx`).
+        # PowerShell itself commonly exits 0 after a failed native command unless
+        # the script explicitly forwards that command's status. Capture `$?`
+        # immediately so the bookkeeping below cannot overwrite it.
+        script = (
+            "[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false); "
+            "$OutputEncoding = [Console]::OutputEncoding; "
+            f"& {{ {command} }}; "
+            "$alpacaSuccess = $?; $alpacaExitCode = $LASTEXITCODE; "
+            "if ($alpacaSuccess) { exit 0 }; "
+            "if ($null -ne $alpacaExitCode) { exit $alpacaExitCode }; exit 1"
+        )
+        return [
+            powershell,
+            "-NoLogo",
+            "-NoProfile",
+            "-NonInteractive",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-Command",
+            script,
+        ]
 
-        So: quoted spans follow POSIX rules (single-quoted = fully literal;
-        double-quoted = backslash only escapes `"` or `\\`), while unquoted
-        text is left untouched — backslashes there are Windows path
-        separators, not shell escapes.
-        """
-        tokens: list[str] = []
-        current: list[str] = []
-        in_token = False
-        i = 0
-        n = len(command)
-        while i < n:
-            ch = command[i]
-            if ch.isspace():
-                if in_token:
-                    tokens.append("".join(current))
-                    current = []
-                    in_token = False
-                i += 1
-                continue
-            in_token = True
-            if ch == "'":
-                end = command.find("'", i + 1)
-                if end == -1:
-                    current.append(command[i + 1 :])
-                    i = n
-                else:
-                    current.append(command[i + 1 : end])
-                    i = end + 1
-                continue
-            if ch == '"':
-                i += 1
-                while i < n and command[i] != '"':
-                    if (
-                        command[i] == "\\"
-                        and i + 1 < n
-                        and command[i + 1]
-                        in (
-                            '"',
-                            "\\",
-                        )
-                    ):
-                        current.append(command[i + 1])
-                        i += 2
-                    else:
-                        current.append(command[i])
-                        i += 1
-                i += 1  # skip closing quote (no-op if the span was unterminated)
-                continue
-            current.append(ch)
-            i += 1
-        if in_token:
-            tokens.append("".join(current))
-        return tokens
+    def _parse_command(self, command: str) -> list[str]:
+        return shlex.split(command)
 
     def _resolve_executable(self, cmd: str) -> str | None:
         return shutil.which(cmd)
@@ -177,10 +133,7 @@ class ShellExecutor:
                 error_message=f"Working directory does not exist: {cwd}",
             )
 
-        # Parse command
-        try:
-            args = self._parse_command(command)
-        except ValueError as e:
+        if not command.strip():
             return ExecutionResult(
                 command=command,
                 cwd=cwd,
@@ -188,8 +141,39 @@ class ShellExecutor:
                 stdout="",
                 stderr="",
                 duration=time.time() - start_time,
-                error_message=f"Failed to parse command: {e}",
+                error_message="Empty command",
             )
+
+        is_windows = platform.system() == "Windows"
+
+        # Windows needs a real command language: many routine commands are
+        # PowerShell cmdlets or cmd.exe built-ins rather than executables, and
+        # direct argv execution cannot implement pipes, redirects, or chaining.
+        if is_windows:
+            args = self._windows_powershell_command(command)
+            if args is None:
+                return ExecutionResult(
+                    command=command,
+                    cwd=cwd,
+                    exit_code="ERROR",
+                    stdout="",
+                    stderr="",
+                    duration=time.time() - start_time,
+                    error_message="PowerShell was not found in PATH",
+                )
+        else:
+            try:
+                args = self._parse_command(command)
+            except ValueError as e:
+                return ExecutionResult(
+                    command=command,
+                    cwd=cwd,
+                    exit_code="ERROR",
+                    stdout="",
+                    stderr="",
+                    duration=time.time() - start_time,
+                    error_message=f"Failed to parse command: {e}",
+                )
 
         if not args:
             return ExecutionResult(
@@ -202,21 +186,21 @@ class ShellExecutor:
                 error_message="Empty command",
             )
 
-        # Resolve executable path
-        executable = self._resolve_executable(args[0])
-        if not executable:
-            return ExecutionResult(
-                command=command,
-                cwd=cwd,
-                exit_code="ERROR",
-                stdout="",
-                stderr="",
-                duration=time.time() - start_time,
-                error_message=f"Command '{args[0]}' not found in PATH",
-            )
-
-        # Execute
-        args[0] = executable
+        # PowerShell was resolved while building the Windows invocation. On
+        # POSIX, resolve the requested executable before launching it.
+        if not is_windows:
+            executable = self._resolve_executable(args[0])
+            if not executable:
+                return ExecutionResult(
+                    command=command,
+                    cwd=cwd,
+                    exit_code="ERROR",
+                    stdout="",
+                    stderr="",
+                    duration=time.time() - start_time,
+                    error_message=f"Command '{args[0]}' not found in PATH",
+                )
+            args[0] = executable
         timeout = min(timeout, MAX_TIMEOUT)
 
         # Windows-specific subprocess configuration
@@ -229,7 +213,7 @@ class ShellExecutor:
             "shell": False,
         }
 
-        if platform.system() == "Windows":
+        if is_windows:
             # Prevent console window popup and handle process groups
             kwargs["creationflags"] = getattr(subprocess, "CREATE_NO_WINDOW") | getattr(
                 subprocess,

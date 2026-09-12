@@ -1,11 +1,9 @@
 """
 Comprehensive tests for shell_executor.py module.
 
-This module tests shell command execution and parsing. There is no
-command allowlist — the actual injection boundary is shell=False
-(subprocess receives argv directly, so ;/&&/backticks/etc. in a command
-string are literal arguments, never shell operators). See
-test_command_injection_attempts for coverage of that boundary.
+This module tests shell command execution and parsing. POSIX execution passes
+argv directly with shell=False. Windows execution deliberately uses PowerShell
+as its command language, while still launching it with shell=False.
 """
 
 import subprocess
@@ -195,23 +193,6 @@ class TestShellExecutorParseCommand:
 
         assert result == ["python", "-c", 'a\\"b']
 
-    def test_parse_command_unquoted_backslash_path_untouched(
-        self,
-        shell_executor: ShellExecutor,
-    ) -> None:
-        """A bare, unquoted Windows path (no spaces) needs no quoting at all.
-
-        This exercises Windows-only parsing behavior, so `platform.system`
-        is patched — otherwise on non-Windows hosts `_parse_command` falls
-        through to POSIX `shlex.split`, which (unlike `_split_windows_command`)
-        treats backslash as an escape character even outside quotes and
-        strips it from the path.
-        """
-        with patch("shell_executor.platform.system", return_value="Windows"):
-            result = shell_executor._parse_command("dir C:\\Users\\Carlos")
-
-        assert "C:\\Users\\Carlos" in result
-
     def test_parse_command_empty(self, shell_executor: ShellExecutor) -> None:
         """Test parsing empty command."""
         result = shell_executor._parse_command("")
@@ -279,6 +260,92 @@ class TestShellExecutorRun:
             called_args = mock_run.call_args[0][0]
             assert "print(1)" in called_args
             assert '"print(1)"' not in called_args
+
+    def test_windows_runs_complete_command_through_powershell(
+        self,
+        shell_executor: ShellExecutor,
+    ) -> None:
+        """Windows cmdlets and operators must be interpreted by PowerShell."""
+        completed = subprocess.CompletedProcess([], 0, b"2\n", b"")
+        command = "Get-ChildItem *.py | Measure-Object | Select -Expand Count"
+
+        with (
+            patch("shell_executor.platform.system", return_value="Windows"),
+            patch(
+                "shell_executor.shutil.which",
+                side_effect=lambda name: (
+                    r"C:\\Program Files\\PowerShell\\7\\pwsh.exe"
+                    if name == "pwsh.exe"
+                    else None
+                ),
+            ) as mock_which,
+            patch("shell_executor.subprocess.run", return_value=completed) as mock_run,
+            patch("shell_executor.subprocess.CREATE_NO_WINDOW", 1, create=True),
+            patch("shell_executor.subprocess.CREATE_NEW_PROCESS_GROUP", 2, create=True),
+            patch("shell_executor.subprocess.STARTF_USESHOWWINDOW", 4, create=True),
+            patch("shell_executor.subprocess.SW_HIDE", 0, create=True),
+            patch("shell_executor.subprocess.STARTUPINFO", create=True) as startupinfo,
+        ):
+            startupinfo.return_value.dwFlags = 0
+            result = shell_executor.run(command)
+
+        argv = mock_run.call_args.args[0]
+        assert argv[:2] == [
+            r"C:\\Program Files\\PowerShell\\7\\pwsh.exe",
+            "-NoLogo",
+        ]
+        assert argv[-2] == "-Command"
+        assert command in argv[-1]
+        assert "$LASTEXITCODE" in argv[-1]
+        assert "OutputEncoding" in argv[-1]
+        assert mock_run.call_args.kwargs["shell"] is False
+        assert mock_which.call_args_list == [(("pwsh.exe",),)]
+        assert result.exit_code == 0
+        assert result.stdout == "2\n"
+
+    def test_windows_falls_back_to_builtin_windows_powershell(
+        self,
+        shell_executor: ShellExecutor,
+    ) -> None:
+        with patch(
+            "shell_executor.shutil.which",
+            side_effect=[
+                None,
+                r"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
+            ],
+        ):
+            argv = shell_executor._windows_powershell_command("dir")
+
+        assert argv is not None
+        assert argv[0].endswith("powershell.exe")
+        assert "dir" in argv[-1]
+
+    def test_windows_reports_missing_powershell(
+        self,
+        shell_executor: ShellExecutor,
+    ) -> None:
+        with (
+            patch("shell_executor.platform.system", return_value="Windows"),
+            patch("shell_executor.shutil.which", return_value=None),
+        ):
+            result = shell_executor.run("dir")
+
+        assert result.exit_code == "ERROR"
+        assert result.error_message == "PowerShell was not found in PATH"
+
+    def test_windows_rejects_empty_command_before_finding_powershell(
+        self,
+        shell_executor: ShellExecutor,
+    ) -> None:
+        with (
+            patch("shell_executor.platform.system", return_value="Windows"),
+            patch("shell_executor.shutil.which") as mock_which,
+        ):
+            result = shell_executor.run("  ")
+
+        assert result.exit_code == "ERROR"
+        assert result.error_message == "Empty command"
+        mock_which.assert_not_called()
 
     def test_run_command_not_found(self, shell_executor: ShellExecutor) -> None:
         """Test running a command that doesn't exist."""
@@ -434,14 +501,11 @@ class TestShellExecutorIntegration:
 
 
 class TestSecurityFeatures:
-    """Tests for the injection boundary that actually exists: shell=False.
+    """Tests for direct POSIX execution's shell=False boundary.
 
-    There is deliberately no command allowlist — see the module docstring
-    in shell_executor.py. The real protection is that subprocess.run is
-    always called with shell=False, so argv is passed directly to the
-    process and shell metacharacters (;/&&/backticks/$()) are never
-    interpreted — they're just literal argument text to whatever command
-    args[0] resolves to.
+    Windows deliberately interprets commands in PowerShell. On POSIX there is
+    no command allowlist; shell metacharacters stay literal unless the caller
+    explicitly invokes a shell.
     """
 
     def test_command_injection_attempts_are_never_shell_interpreted(
