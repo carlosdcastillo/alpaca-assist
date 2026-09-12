@@ -977,6 +977,16 @@ class OllamaRequestHandler(BaseHTTPRequestHandler):
                         # no-op for every consumer of this stream.
                         self._send_text_chunk("", count)
 
+                    elif val.get("type") == "content_block_delta" and (
+                        "thinking" in val.get("delta", {})
+                    ):
+                        # Fireworks reasoning models can emit thousands of
+                        # thinking deltas before any visible text or tool call.
+                        # We intentionally do not expose private reasoning, but
+                        # dropping those events entirely makes an active model
+                        # indistinguishable from a dead connection downstream.
+                        self._send_text_chunk("", count)
+
                     elif val.get("type") == "cli_usage":
                         # CLI agent backends run their own multi-step tool loops.
                         # Their final usage records already cover the complete
@@ -1445,6 +1455,13 @@ class ClaudeClient:
 class FireworksClient:
     """Client for Fireworks AI via its Anthropic-compatible Messages API."""
 
+    # A read timeout measures silence between bytes, not total generation
+    # time. Active reasoning streams continuously, so two minutes without a
+    # byte indicates a stalled provider connection rather than a long answer.
+    # Without this bound the proxy request can block forever, leaving the app's
+    # own request waiting on a local socket that will never complete.
+    STREAM_TIMEOUT: tuple[int, int] = (10, 120)
+
     def __init__(self, api_key: str | None = None) -> None:
         self.api_key = api_key or os.environ.get("FIREWORKS_API_KEY")
         if not self.api_key:
@@ -1543,6 +1560,7 @@ class FireworksClient:
             headers=request_headers,
             json=payload,
             stream=True,
+            timeout=self.STREAM_TIMEOUT,
         )
         if response.status_code != 200:
             print(f"Error: {response.status_code}")

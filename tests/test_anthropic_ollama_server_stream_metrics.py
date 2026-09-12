@@ -60,6 +60,10 @@ def _text_delta(text: str) -> dict:
     return {"type": "content_block_delta", "delta": {"text": text}}
 
 
+def _thinking_delta(thinking: str) -> dict:
+    return {"type": "content_block_delta", "delta": {"thinking": thinking}}
+
+
 def _message_delta(stop_reason="end_turn", output_tokens=50) -> dict:
     return {
         "type": "message_delta",
@@ -106,6 +110,19 @@ class TestCleanStreamUnaffected:
         assert metrics["input_token_count"] == 1200
         assert metrics["cached_input_token_count"] == 900
         assert metrics["output_token_count"] == 250
+
+    def test_hidden_thinking_is_relayed_as_an_empty_heartbeat(self) -> None:
+        handler = _make_handler()
+
+        handler._process_stream(iter([_thinking_delta("private reasoning")]))
+
+        wfile = handler.wfile
+        assert isinstance(wfile, io.BytesIO)
+        chunks = [json.loads(line) for line in wfile.getvalue().decode().splitlines()]
+        assert chunks[0]["message"]["content"] == ""
+        assert chunks[0]["done"] is False
+        assert "private reasoning" not in wfile.getvalue().decode()
+        assert chunks[-1]["done"] is True
 
 
 class TestMidStreamFailureStillReportsMetrics:
