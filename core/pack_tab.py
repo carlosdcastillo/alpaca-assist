@@ -60,6 +60,13 @@ GATED_OUTPUT_TIMEOUT = 30.0
 STOP_STREAMING_TIMEOUT = 10.0
 WORKSPACE_CHANGES_TIMEOUT = 60.0
 FOLD_RENDER_TIMEOUT = 2.0
+# Session restore creates every saved Pack tab in one tight loop.  Without a
+# shared bound, a large session starts dozens of SSH handshakes at once and
+# trips the remote sshd's MaxStartups protection before those tabs can attach.
+MAX_CONCURRENT_PACK_CONNECTIONS = 4
+_PACK_CONNECT_SEMAPHORE = threading.BoundedSemaphore(
+    MAX_CONCURRENT_PACK_CONNECTIONS,
+)
 # Building a surface means spawning Xvfb, x11vnc and the app itself and
 # waiting for each to become reachable, so it is meaningfully slower than
 # the other RPCs here.
@@ -186,8 +193,9 @@ class PackTab:
             ):
                 return
             try:
-                self._transport.connect(model=model)
-                self._resync(timeout=ATTACH_TIMEOUT)
+                with _PACK_CONNECT_SEMAPHORE:
+                    self._transport.connect(model=model)
+                    self._resync(timeout=ATTACH_TIMEOUT)
                 self._configure_project()
                 self.offline = False
                 self._notify_if_active()
@@ -254,8 +262,9 @@ class PackTab:
                     self.project_setup_state = "setting_up"
                     self._project_ready.clear()
                 try:
-                    self._transport.connect()
-                    self._resync(timeout=timeout)
+                    with _PACK_CONNECT_SEMAPHORE:
+                        self._transport.connect()
+                        self._resync(timeout=timeout)
                     self._configure_project()
                     self.offline = False
                     self._notify_if_active()

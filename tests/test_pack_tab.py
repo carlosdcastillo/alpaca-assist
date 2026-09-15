@@ -14,6 +14,7 @@ from unittest.mock import patch
 
 import pytest
 
+from core.pack_tab import MAX_CONCURRENT_PACK_CONNECTIONS
 from core.pack_tab import PackTab
 from core.pack_transport import PackTransportError
 
@@ -86,6 +87,81 @@ class TestConstruction:
 
 
 class TestConnect:
+    def test_bulk_restore_limits_simultaneous_ssh_connections(
+        self,
+        mock_transport_class: MagicMock,
+        app_core: MagicMock,
+    ) -> None:
+        """Restoring many Pack tabs must not overwhelm sshd MaxStartups."""
+        transports: list[MagicMock] = []
+
+        def make_transport(*_args: Any) -> MagicMock:
+            transport = MagicMock()
+            transport.connected = False
+            transport.send_request.return_value = ATTACH_RESPONSE
+            transports.append(transport)
+            return transport
+
+        mock_transport_class.side_effect = make_transport
+        tabs = [
+            PackTab(
+                f"tab-{index}",
+                "Pack Tab",
+                app_core,
+                index,
+                "user@host",
+                f"session-{index}",
+            )
+            for index in range(MAX_CONCURRENT_PACK_CONNECTIONS + 2)
+        ]
+        release_connections = threading.Event()
+        count_lock = threading.Lock()
+        started = 0
+        active = 0
+        max_active = 0
+
+        def connect(model=None) -> None:
+            nonlocal started, active, max_active
+            with count_lock:
+                started += 1
+                active += 1
+                max_active = max(max_active, active)
+            assert release_connections.wait(timeout=2.0)
+            with count_lock:
+                active -= 1
+
+        for transport in transports:
+            transport.connect.side_effect = connect
+
+        try:
+            for tab in tabs:
+                tab.connect_async()
+
+            deadline = time.monotonic() + 2.0
+            while time.monotonic() < deadline:
+                with count_lock:
+                    if started == MAX_CONCURRENT_PACK_CONNECTIONS:
+                        break
+                time.sleep(0.01)
+
+            with count_lock:
+                assert started == MAX_CONCURRENT_PACK_CONNECTIONS
+                assert max_active == MAX_CONCURRENT_PACK_CONNECTIONS
+            time.sleep(0.05)
+            with count_lock:
+                assert started == MAX_CONCURRENT_PACK_CONNECTIONS
+        finally:
+            release_connections.set()
+
+        deadline = time.monotonic() + 2.0
+        while time.monotonic() < deadline and any(tab._connect_pending for tab in tabs):
+            time.sleep(0.01)
+
+        assert all(not tab._connect_pending for tab in tabs)
+        with count_lock:
+            assert started == len(tabs)
+            assert max_active == MAX_CONCURRENT_PACK_CONNECTIONS
+
     def test_connect_forwards_model_to_the_transport(
         self,
         pack_tab: PackTab,
