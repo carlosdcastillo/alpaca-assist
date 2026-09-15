@@ -167,6 +167,7 @@ class PackDaemonAdapter:
         fold_type: str,
         body_text: str,
         answer_index: int,
+        duration_ms: int | None = None,
     ) -> None:
         event_key = f"{tab_id}:{fold_id}"
         with self._lock:
@@ -179,6 +180,7 @@ class PackDaemonAdapter:
                 "fold_type": fold_type,
                 "body_text": body_text,
                 "answer_index": answer_index,
+                "duration_ms": duration_ms,
             },
         )
 

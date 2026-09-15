@@ -514,6 +514,7 @@ class PackTab:
             params["fold_type"],
             params["body_text"],
             params["answer_index"],
+            duration_ms=params.get("duration_ms"),
         )
 
         def confirm() -> None:

@@ -205,7 +205,14 @@ class TestPackDaemonAdapter:
         conn = MagicMock()
         adapter.set_connection(conn)
 
-        adapter.inject_tool_fold("tab-1", "fold-1", "result", "body", 0)
+        adapter.inject_tool_fold(
+            "tab-1",
+            "fold-1",
+            "result",
+            "body",
+            0,
+            duration_ms=1234,
+        )
         conn.send_notification.assert_called_once_with(
             "inject_tool_fold",
             {
@@ -214,6 +221,7 @@ class TestPackDaemonAdapter:
                 "fold_type": "result",
                 "body_text": "body",
                 "answer_index": 0,
+                "duration_ms": 1234,
             },
         )
 

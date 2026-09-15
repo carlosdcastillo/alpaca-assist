@@ -896,6 +896,7 @@ class TestNotificationHandlers:
                 "fold_type": "result",
                 "body_text": "body",
                 "answer_index": 0,
+                "duration_ms": 1234,
             },
         )
 
@@ -905,6 +906,7 @@ class TestNotificationHandlers:
             "result",
             "body",
             0,
+            duration_ms=1234,
         )
 
     def test_on_inject_tool_fold_echoes_render_confirmation_without_remote_tab_id(
