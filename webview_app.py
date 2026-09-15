@@ -7,6 +7,7 @@ import urllib.parse
 from pathlib import Path
 from typing import Any
 from typing import Optional
+from wsgiref.simple_server import WSGIServer
 
 import webview
 
@@ -15,6 +16,15 @@ from logging_config import configure_logging
 from webview_api import WebViewAPI
 
 logger = logging.getLogger(__name__)
+
+# pywebview's http_server is a wsgiref WSGIServer, whose listen backlog is
+# socketserver's default of 5.  index.html pulls ~30 files in one burst while
+# _restore_session() keeps the GIL busy, so the accept loop falls behind; on
+# Windows a full backlog refuses connections outright instead of letting the
+# client retry.  A refused js/lib/marked.min.js made ChatDisplay throw in
+# AlpacaApp._init(), which left the UI with no tabs and "Loading models...".
+HTTP_SERVER_BACKLOG = 128
+WSGIServer.request_queue_size = HTTP_SERVER_BACKLOG
 
 
 def get_web_dir() -> Path:
