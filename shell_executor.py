@@ -82,15 +82,27 @@ class ShellExecutor:
             return None
 
         # PowerShell itself commonly exits 0 after a failed native command unless
-        # the script explicitly forwards that command's status. Capture `$?`
-        # immediately so the bookkeeping below cannot overwrite it.
+        # the script explicitly forwards that command's status.
+        #
+        # `$?` must be read inside the scriptblock, straight after the command:
+        # outside it, `$?` only reports whether the `& { }` invocation ran and
+        # is true even after `cmd /c exit 3`. The block is piped to
+        # Out-Default so table-formatted output (`pwd`, `Get-Location`) is
+        # flushed before `exit`, which otherwise discards it. The command sits
+        # on its own lines so a trailing `# comment` cannot swallow the
+        # bookkeeping.
         script = (
-            "[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false); "
-            "$OutputEncoding = [Console]::OutputEncoding; "
-            f"& {{ {command} }}; "
-            "$alpacaSuccess = $?; $alpacaExitCode = $LASTEXITCODE; "
-            "if ($alpacaSuccess) { exit 0 }; "
-            "if ($null -ne $alpacaExitCode) { exit $alpacaExitCode }; exit 1"
+            "[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)\n"
+            "$OutputEncoding = [Console]::OutputEncoding\n"
+            "$global:LASTEXITCODE = $null; $global:alpacaSuccess = $true\n"
+            "& {\n"
+            f"{command}\n"
+            "$global:alpacaSuccess = $?\n"
+            "} | Out-Default\n"
+            "if ($global:alpacaSuccess) { exit 0 }\n"
+            "if ($null -ne $LASTEXITCODE -and $LASTEXITCODE -ne 0) "
+            "{ exit $LASTEXITCODE }\n"
+            "exit 1"
         )
         return [
             powershell,

@@ -43,6 +43,7 @@ import shutil
 import signal
 import socket
 import subprocess
+import sys
 import threading
 import time
 from pathlib import Path
@@ -145,9 +146,9 @@ def _kill_group(pid: int, sig: int) -> None:
     leaves them in the same group, and killing the group takes the lot.
     """
     try:
-        if hasattr(os, "killpg"):
-            # Guarded by the hasattr above; mypy checking against win32 stubs
-            # cannot see that, and these only ever run on the Pack host.
+        # A sys.platform check rather than hasattr(os, "killpg"): mypy
+        # narrows on the former, so a win32 type check skips this branch.
+        if sys.platform != "win32":
             os.killpg(os.getpgid(pid), sig)
         else:  # pragma: no cover - Windows has neither; tests fake the spawn
             os.kill(pid, sig)

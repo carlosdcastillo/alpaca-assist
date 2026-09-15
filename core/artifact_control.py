@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import socket
+import sys
 import threading
 from pathlib import Path
 from typing import Any
@@ -11,6 +12,15 @@ from typing import Any
 from core import pack_protocol
 
 SOCKET_NAME = "control.sock"
+
+
+def _unix_socket() -> socket.socket:
+    # The control channel only exists on the Pack host. Windows has no
+    # socket.AF_UNIX (typeshed hides it from win32 type checks too), so fail
+    # with a clear error rather than an AttributeError.
+    if sys.platform == "win32":
+        raise OSError("the artifact control socket needs AF_UNIX (Pack host only)")
+    return socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
 
 
 class ArtifactControlServer:
@@ -21,7 +31,7 @@ class ArtifactControlServer:
 
     def start(self) -> None:
         self.socket_path.unlink(missing_ok=True)
-        listener = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        listener = _unix_socket()
         listener.bind(str(self.socket_path))
         listener.listen(4)
         self.socket_path.chmod(0o600)
@@ -72,7 +82,7 @@ class ArtifactControlClient:
         return cls(candidates[0]) if len(candidates) == 1 else None
 
     def call(self, method: str, params: dict[str, Any]) -> Any:
-        sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        sock = _unix_socket()
         sock.settimeout(45)
         try:
             sock.connect(str(self.socket_path))

@@ -6,6 +6,7 @@ argv directly with shell=False. Windows execution deliberately uses PowerShell
 as its command language, while still launching it with shell=False.
 """
 
+import platform
 import subprocess
 from pathlib import Path
 from unittest.mock import Mock
@@ -248,7 +249,12 @@ class TestShellExecutorRun:
         a quoted string-literal statement instead of executable code and
         silently produces no output.
         """
-        with patch("subprocess.run") as mock_run:
+        # Quote stripping belongs to the POSIX argv path; on Windows the whole
+        # command is handed to PowerShell as one script instead.
+        with (
+            patch("shell_executor.platform.system", return_value="Linux"),
+            patch("subprocess.run") as mock_run,
+        ):
             mock_result = Mock()
             mock_result.stdout = b"1\n"
             mock_result.stderr = b""
@@ -498,6 +504,57 @@ class TestShellExecutorIntegration:
 
         assert isinstance(result, ExecutionResult)
         assert result.exit_code == 0
+
+
+@pytest.mark.skipif(
+    platform.system() != "Windows",
+    reason="exercises the real PowerShell wrapper",
+)
+class TestWindowsPowerShellExecution:
+    """Unmocked PowerShell runs: the wrapper script's behaviour only shows up
+
+    in a real interpreter, which is how both regressions below slipped past
+    the mocked tests.
+    """
+
+    @pytest.mark.parametrize(
+        ("command", "expected"),
+        [
+            ("cmd /c exit 3", 3),
+            ('python -c "import sys; sys.exit(4)"', 4),
+            ("Get-Item C:/definitely/not/here", 1),
+            ("nonexistent-command-xyz", 1),
+            ("echo first; cmd /c exit 3", 3),
+            ("cmd /c exit 3; echo after", 0),
+            ("try { Get-Item C:/nope -ErrorAction Stop } catch { 'caught' }", 0),
+            ("exit 7", 7),
+        ],
+    )
+    def test_exit_code_follows_the_last_statement(
+        self,
+        shell_executor: ShellExecutor,
+        command: str,
+        expected: int,
+    ) -> None:
+        assert shell_executor.run(command).exit_code == expected
+
+    def test_table_formatted_output_is_not_lost_on_exit(
+        self,
+        shell_executor: ShellExecutor,
+        tmp_path: Path,
+    ) -> None:
+        result = shell_executor.run("Get-Location", working_directory=str(tmp_path))
+
+        assert result.exit_code == 0
+        assert tmp_path.name in result.stdout
+
+    def test_trailing_comment_does_not_swallow_the_wrapper(
+        self,
+        shell_executor: ShellExecutor,
+    ) -> None:
+        result = shell_executor.run("cmd /c exit 5 # trailing comment")
+
+        assert result.exit_code == 5
 
 
 class TestSecurityFeatures:

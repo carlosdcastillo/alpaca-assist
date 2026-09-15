@@ -128,12 +128,9 @@ def test_internal_tools_default_to_pack_workspace(tmp_path: Path, monkeypatch) -
     assert "hello" in read["content"][0]["text"]
     assert shell.cwd == str(tmp_path)
     if os.name == "nt":
-        # ShellExecutor resolves "pwd" to Git for Windows' MSYS pwd.exe,
-        # which prints its own POSIX-mount translation of the cwd (e.g.
-        # the temp dir under a /tmp mount point) rather than the literal
-        # Windows path — a quirk of that binary, not of ShellExecutor.
-        # shell.cwd above already proves the right directory was used.
-        assert shell.stdout.strip()
+        # On Windows "pwd" is PowerShell's Get-Location, which prints a
+        # formatted "Path" table rather than the bare path.
+        assert tmp_path.name in shell.stdout
     else:
         assert shell.stdout.strip() == str(tmp_path)
 
