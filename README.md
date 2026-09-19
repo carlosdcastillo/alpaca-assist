@@ -82,8 +82,9 @@ pyinstaller --clean --noconfirm AlpacaAssist.spec
 
 The packaged application is written to `dist/AlpacaAssist` on Windows and
 Linux, or `dist/AlpacaAssist.app` on macOS. The spec embeds the native icon and
-bundles the complete `web/` frontend plus the runtime PNG icon; Windows, macOS,
-and Linux builds select the appropriate `.ico`, `.icns`, or `.png` source.
+bundles the complete `web/` frontend plus the runtime PNG icon. Windows and
+macOS builds embed the appropriate `.ico` or `.icns`; Linux uses the PNG as
+the pywebview window icon at runtime.
 
 ### Model backends
 

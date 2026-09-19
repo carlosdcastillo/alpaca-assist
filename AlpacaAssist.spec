@@ -13,7 +13,9 @@ if sys.platform == "win32":
 elif sys.platform == "darwin":
     executable_icon = icon_dir / "alpaca-assist.icns"
 else:
-    executable_icon = icon_dir / "alpaca-assist.png"
+    # Linux executables do not contain icon resources. The bundled PNG is
+    # passed to pywebview at runtime instead.
+    executable_icon = None
 
 a = Analysis(
     [str(project_root / "webview_app.py")],
@@ -50,7 +52,7 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon=str(executable_icon),
+    icon=str(executable_icon) if executable_icon else None,
 )
 
 if sys.platform == "darwin":
