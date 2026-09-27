@@ -3892,23 +3892,6 @@ class AlpacaApp {
     else if (b64.startsWith("UklG")) mime = "image/webp";
     return `data:${mime};base64,${b64}`;
   }
-
-  /**
-   * Copy code to clipboard
-   */
-  async copyCode(button) {
-    const codeBlock = button.closest(".code-block").querySelector("code");
-    const code = codeBlock.textContent;
-
-    const success = await Helpers.copyToClipboard(code);
-    if (success) {
-      const originalText = button.textContent;
-      button.textContent = "Copied!";
-      setTimeout(() => {
-        button.textContent = originalText;
-      }, 2000);
-    }
-  }
 }
 
 // Export class for testing

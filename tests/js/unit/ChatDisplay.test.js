@@ -148,6 +148,21 @@ describe("ChatDisplay", () => {
         expect(window.pythonAPI.open_link).not.toHaveBeenCalled();
       },
     );
+
+    it("should copy literal HTML from a sanitized fenced code block", async () => {
+      const renderer = marked.setOptions.mock.calls.at(-1)[0].renderer;
+      const source = '<main class="demo">Hello & goodbye</main>';
+      hljs.getLanguage.mockReturnValueOnce(false);
+      container.innerHTML = renderer.code({ text: source, lang: "html" });
+      const button = container.querySelector(".copy-btn");
+
+      expect(button.hasAttribute("onclick")).toBe(false);
+      button.click();
+      await Promise.resolve();
+
+      expect(window.Helpers.copyToClipboard).toHaveBeenCalledWith(source);
+      expect(button.textContent).toBe("Copied!");
+    });
   });
 
   describe("addQuestion", () => {

@@ -85,6 +85,13 @@ class ChatDisplay {
     // Use delegation so images created by streaming Markdown and images inside
     // tool-fold shadow roots are covered without per-render event handlers.
     this.container.addEventListener("click", (event) => {
+      const copyButton = event.target.closest?.(".code-header .copy-btn");
+      if (copyButton) {
+        event.preventDefault();
+        this._copyCode(copyButton);
+        return;
+      }
+
       const image = event
         .composedPath()
         .find((node) => node instanceof HTMLImageElement);
@@ -235,7 +242,7 @@ class ChatDisplay {
                 <div class="code-block">
                     <div class="code-header">
                         <span class="lang">${language || "text"}</span>
-                        <button class="copy-btn" onclick="app.copyCode(this)">Copy</button>
+                        <button type="button" class="copy-btn">Copy</button>
                     </div>
                     <pre><code class="language-${language}">${highlighted}</code></pre>
                 </div>
@@ -268,6 +275,22 @@ class ChatDisplay {
         data.forceKeepAttr = true;
       }
     });
+  }
+
+  async _copyCode(button) {
+    const code = button
+      .closest(".code-block")
+      ?.querySelector("code")?.textContent;
+    if (code === undefined) return;
+
+    const success = await window.Helpers.copyToClipboard(code);
+    if (!success) return;
+
+    const originalText = button.textContent;
+    button.textContent = "Copied!";
+    setTimeout(() => {
+      button.textContent = originalText;
+    }, 2000);
   }
 
   /**
