@@ -25,11 +25,11 @@ describe("TabManager", () => {
   });
 
   beforeEach(() => {
-    // Set up DOM (scroll buttons must exist for TabManager constructor)
     document.body.innerHTML = `
-      <button id="tab-scroll-left" class="tab-scroll-btn hidden"></button>
       <div id="tab-container"></div>
-      <button id="tab-scroll-right" class="tab-scroll-btn hidden"></button>
+      <div id="tabs-scrollbar" class="hidden">
+        <div id="tabs-scrollbar-thumb"></div>
+      </div>
       <button id="toolbar-tab-back"></button>
       <button id="toolbar-tab-forward"></button>
     `;
@@ -639,35 +639,41 @@ describe("TabManager", () => {
   });
 
   describe("vertical overflow", () => {
-    it("scroll buttons move the tab list vertically", () => {
-      container.scrollBy = jest.fn();
-
-      document.getElementById("tab-scroll-right").click();
-      document.getElementById("tab-scroll-left").click();
-
-      expect(container.scrollBy).toHaveBeenNthCalledWith(1, {
-        top: 44,
-        behavior: "smooth",
-      });
-      expect(container.scrollBy).toHaveBeenNthCalledWith(2, {
-        top: -44,
-        behavior: "smooth",
-      });
-    });
-
-    it("shows overflow controls when tabs exceed the available height", () => {
+    it("shows a conventional scrollbar when tabs exceed the available height", () => {
       Object.defineProperties(container, {
         clientHeight: { configurable: true, value: 200 },
         scrollHeight: { configurable: true, value: 300 },
       });
+      Object.defineProperty(tabManager.scrollbar, "clientHeight", {
+        configurable: true,
+        value: 200,
+      });
 
-      tabManager._checkOverflow();
+      tabManager._updateScrollbar();
 
-      expect(document.getElementById("tab-scroll-left")).not.toHaveClass(
-        "hidden",
+      expect(tabManager.scrollbar).not.toHaveClass("hidden");
+      expect(tabManager.scrollbarThumb.style.height).toBe(
+        "133.33333333333334px",
       );
-      expect(document.getElementById("tab-scroll-right")).not.toHaveClass(
-        "hidden",
+      expect(tabManager.scrollbarThumb.style.transform).toBe("translateY(0px)");
+    });
+
+    it("moves the thumb with the task list scroll position", () => {
+      Object.defineProperties(container, {
+        clientHeight: { configurable: true, value: 200 },
+        scrollHeight: { configurable: true, value: 400 },
+        scrollTop: { configurable: true, value: 100 },
+      });
+      Object.defineProperty(tabManager.scrollbar, "clientHeight", {
+        configurable: true,
+        value: 200,
+      });
+
+      tabManager._updateScrollbar();
+
+      expect(tabManager.scrollbarThumb.style.height).toBe("100px");
+      expect(tabManager.scrollbarThumb.style.transform).toBe(
+        "translateY(50px)",
       );
     });
   });

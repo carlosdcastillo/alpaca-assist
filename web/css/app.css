@@ -438,6 +438,7 @@ button {
     padding: 8px 10px 10px;
     gap: 0;
     min-height: 0;
+    position: relative;
 }
 
 .app-body.sidebar-collapsed .tab-bar {
@@ -467,41 +468,45 @@ button {
     gap: 4px;
     min-height: 0;
     overflow-y: auto;
-    scrollbar-width: none;         /* Firefox / WebView2 */
-    -ms-overflow-style: none;       /* IE / old Edge */
+    padding-right: 14px;
+    scrollbar-width: none;
 }
 
 .tabs-container::-webkit-scrollbar {
-    display: none;                  /* WebKit / Chromium */
+    width: 0;
 }
 
-/* Tab scroll buttons */
-.tab-scroll-btn {
-    background: transparent;
-    border: none;
-    color: var(--text-secondary);
-    padding: 0 6px;
-    cursor: pointer;
-    border-radius: 4px;
-    font-size: 13px;
-    line-height: 1;
-    flex-shrink: 0;
-    user-select: none;
-    transition: color 0.15s, background 0.15s;
+.tabs-scrollbar {
+    position: absolute;
+    top: 40px;
+    right: 10px;
+    bottom: 10px;
+    width: 12px;
+    background: var(--bg-primary);
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
 }
 
-.tab-scroll-btn:hover:not(:disabled) {
-    background: var(--bg-hover);
-    color: var(--text-primary);
-}
-
-.tab-scroll-btn:disabled {
-    opacity: 0.3;
-    cursor: default;
-}
-
-.tab-scroll-btn.hidden {
+.tabs-scrollbar.hidden {
     display: none;
+}
+
+.tabs-scrollbar-thumb {
+    position: absolute;
+    inset: 0 2px auto;
+    min-height: 32px;
+    background: var(--text-secondary);
+    border-radius: 4px;
+    cursor: grab;
+}
+
+.tabs-scrollbar:hover .tabs-scrollbar-thumb {
+    background: var(--text-primary);
+}
+
+.tabs-scrollbar-thumb:active {
+    background: var(--accent-primary);
+    cursor: grabbing;
 }
 
 .tab {

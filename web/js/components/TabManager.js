@@ -13,14 +13,10 @@ class TabManager {
 
     this.backBtn = document.getElementById("toolbar-tab-back");
     this.forwardBtn = document.getElementById("toolbar-tab-forward");
+    this.scrollbar = document.getElementById("tabs-scrollbar");
+    this.scrollbarThumb = document.getElementById("tabs-scrollbar-thumb");
 
-    // Scroll button references
-    this.scrollLeftBtn = document.getElementById("tab-scroll-left");
-    this.scrollRightBtn = document.getElementById("tab-scroll-right");
-    this._scrollStep = 44; // fallback pixels per click
-
-    this._setupScrollButtons();
-    this._setupOverflowObserver();
+    this._setupScrollbar();
     this._updateNavigationButtons();
   }
 
@@ -529,95 +525,70 @@ class TabManager {
     }
   }
 
-  // ── Scroll button support ──────────────────────────────────────────
-
-  /**
-   * Wire click handlers and scroll event for the scroll buttons.
-   */
-  _setupScrollButtons() {
-    this.scrollLeftBtn.addEventListener("click", () => {
-      const step = this._getScrollStep();
-      this.container.scrollBy({ top: -step, behavior: "smooth" });
+  _setupScrollbar() {
+    this.container.addEventListener("scroll", () => this._updateScrollbar());
+    this.scrollbar.addEventListener("click", (event) => {
+      if (event.target === this.scrollbarThumb) return;
+      const track = this.scrollbar.getBoundingClientRect();
+      const maxScroll =
+        this.container.scrollHeight - this.container.clientHeight;
+      const maxThumbTop = track.height - this.scrollbarThumb.offsetHeight;
+      this.container.scrollTop =
+        ((event.clientY - track.top - this.scrollbarThumb.offsetHeight / 2) /
+          maxThumbTop) *
+        maxScroll;
+    });
+    this.scrollbarThumb.addEventListener("pointerdown", (event) => {
+      event.preventDefault();
+      const startY = event.clientY;
+      const startScrollTop = this.container.scrollTop;
+      const maxScroll =
+        this.container.scrollHeight - this.container.clientHeight;
+      const maxThumbTop =
+        this.scrollbar.clientHeight - this.scrollbarThumb.offsetHeight;
+      this.scrollbarThumb.setPointerCapture(event.pointerId);
+      const onPointerMove = (moveEvent) => {
+        this.container.scrollTop =
+          startScrollTop +
+          ((moveEvent.clientY - startY) / maxThumbTop) * maxScroll;
+      };
+      this.scrollbarThumb.addEventListener("pointermove", onPointerMove);
+      this.scrollbarThumb.addEventListener(
+        "pointerup",
+        () =>
+          this.scrollbarThumb.removeEventListener("pointermove", onPointerMove),
+        { once: true },
+      );
     });
 
-    this.scrollRightBtn.addEventListener("click", () => {
-      const step = this._getScrollStep();
-      this.container.scrollBy({ top: step, behavior: "smooth" });
-    });
-
-    // Update button enabled/disabled states as the user scrolls
-    this.container.addEventListener("scroll", () => {
-      this._updateScrollButtonStates();
-    });
-  }
-
-  /**
-   * Return the number of pixels to scroll per click. Tries to use one tab
-   * height; falls back to the fixed _scrollStep if no tabs exist yet.
-   */
-  _getScrollStep() {
-    const firstTab = this.container.querySelector(".tab");
-    if (firstTab) {
-      // offsetHeight + gap (4px from CSS)
-      return firstTab.offsetHeight + 4;
-    }
-    return this._scrollStep;
-  }
-
-  /**
-   * Enable or disable the scroll buttons based on current scroll position.
-   */
-  _updateScrollButtonStates() {
-    const el = this.container;
-    const atStart = el.scrollTop <= 0;
-    // Tolerance of 1px to handle floating-point rounding
-    const atEnd = el.scrollTop + el.clientHeight >= el.scrollHeight - 1;
-
-    this.scrollLeftBtn.disabled = atStart;
-    this.scrollRightBtn.disabled = atEnd;
-  }
-
-  /**
-   * Set up observers to detect when the tab container overflows (or stops
-   * overflowing).  ResizeObserver catches window resizes; MutationObserver
-   * catches tab additions and removals.
-   */
-  _setupOverflowObserver() {
-    this._resizeObserver = new ResizeObserver(() => {
-      this._checkOverflow();
-    });
+    this._resizeObserver = new ResizeObserver(() => this._updateScrollbar());
     this._resizeObserver.observe(this.container);
-
-    this._mutationObserver = new MutationObserver(() => {
-      this._checkOverflow();
-    });
+    this._mutationObserver = new MutationObserver(() =>
+      this._updateScrollbar(),
+    );
     this._mutationObserver.observe(this.container, { childList: true });
   }
 
-  /**
-   * Show or hide the scroll buttons based on whether the container overflows.
-   */
-  _checkOverflow() {
-    const el = this.container;
-    const isOverflowing = el.scrollHeight > el.clientHeight;
+  _updateScrollbar() {
+    const maxScroll = this.container.scrollHeight - this.container.clientHeight;
+    this.scrollbar.classList.toggle("hidden", maxScroll <= 0);
+    if (maxScroll <= 0) return;
 
-    if (isOverflowing) {
-      this.scrollLeftBtn.classList.remove("hidden");
-      this.scrollRightBtn.classList.remove("hidden");
-      this._updateScrollButtonStates();
-    } else {
-      this.scrollLeftBtn.classList.add("hidden");
-      this.scrollRightBtn.classList.add("hidden");
-    }
+    const thumbHeight = Math.max(
+      32,
+      (this.scrollbar.clientHeight * this.container.clientHeight) /
+        this.container.scrollHeight,
+    );
+    const thumbTop =
+      (this.container.scrollTop / maxScroll) *
+      (this.scrollbar.clientHeight - thumbHeight);
+    this.scrollbarThumb.style.height = `${thumbHeight}px`;
+    this.scrollbarThumb.style.transform = `translateY(${thumbTop}px)`;
   }
 
-  /**
-   * Disconnect observers.  Not strictly required (TabManager lives for the
-   * lifetime of the page) but good practice.
-   */
   destroy() {
-    if (this._resizeObserver) this._resizeObserver.disconnect();
-    if (this._mutationObserver) this._mutationObserver.disconnect();
+    this._resizeObserver.disconnect();
+    this._mutationObserver.disconnect();
   }
 }
 
