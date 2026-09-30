@@ -1,4 +1,4 @@
-"""Immutable Milestone-1 HTML artifact storage for one Pack session."""
+"""Immutable Milestone-1 HTML artifact storage for one chat session."""
 
 from __future__ import annotations
 
@@ -13,6 +13,31 @@ from core.artifact_protocol import ARTIFACT_ID_RE
 from core.artifact_protocol import validate_manifest
 
 MAX_ARTIFACT_HTML_BYTES = 2 * 1024 * 1024
+
+# A local (non-Pack) tab has no Pack session directory to key artifacts to,
+# and can't use ArtifactControlServer at all: that's an AF_UNIX socket, and
+# socket.AF_UNIX simply does not exist on Windows. Nothing crossing that
+# socket is remote, though — publish/attach are pure filesystem work on a
+# path this process can already reach — so a local tab skips the transport
+# and drives ArtifactStore directly, on both sides.
+LOCAL_ARTIFACT_ROOT_ENV = "ALPACA_ARTIFACT_ROOT"
+
+
+def local_artifact_root() -> Path:
+    """Session directory holding a local tab's durable ``artifacts/``.
+
+    Deliberately *not* under tool_output_gate's temp root: that tree is
+    swept on startup and wiped when a tab closes, so a conversation
+    reopened later would still render its artifact card but fail to
+    attach ("unavailable"). Artifacts are persisted in the conversation,
+    so their bytes have to outlive the tab too. Cwd-relative to sit
+    beside the other durable per-checkout state (conversations.db,
+    mcp_servers.json, logs/), with an env override because the MCP
+    subprocess runs with the *workspace* as its cwd, not this one.
+    """
+    override = os.environ.get(LOCAL_ARTIFACT_ROOT_ENV)
+    return Path(override) if override else Path.cwd()
+
 
 _CSP = (
     "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; "

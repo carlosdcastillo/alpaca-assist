@@ -33,11 +33,43 @@ def test_artifact_attach_forwards_only_the_opaque_id(api) -> None:
     assert result["html"] == "<canvas></canvas>"
 
 
-def test_artifact_attach_rejects_a_local_tab(api) -> None:
+def test_artifact_attach_reads_the_local_store_for_a_non_pack_tab(
+    api,
+    tmp_path,
+) -> None:
+    """A local tab has no daemon to proxy through, but the artifact bytes
+    are on this machine either way — nothing about publishing or attaching
+    was ever remote."""
+    from core.artifact_store import ArtifactStore
+
+    bridge, core = api
+    source = tmp_path / "demo.html"
+    source.write_text("<canvas id='sim'></canvas>", encoding="utf-8")
+    manifest = ArtifactStore(tmp_path).publish_html(str(source), "Demo")["manifest"]
+    core.tabs["local-1"] = Mock(spec=["tab_id", "chat_state"])
+
+    result = bridge.artifact_attach("local-1", manifest["artifact_id"])
+
+    assert result["success"] is True
+    assert "<canvas id='sim'></canvas>" in result["html"]
+    # The store, not the caller, is what makes this safe to serve.
+    assert "Content-Security-Policy" in result["html"]
+
+
+def test_artifact_attach_still_reports_an_unknown_id(api) -> None:
     bridge, core = api
     core.tabs["local-1"] = Mock(spec=["tab_id", "chat_state"])
 
     result = bridge.artifact_attach("local-1", "art_12345678")
 
     assert result["success"] is False
-    assert "Pack tab" in result["error"]
+
+
+def test_artifact_attach_refuses_a_traversal_id(api) -> None:
+    bridge, core = api
+    core.tabs["local-1"] = Mock(spec=["tab_id", "chat_state"])
+
+    result = bridge.artifact_attach("local-1", "../../etc")
+
+    assert result["success"] is False
+    assert "invalid artifact id" in result["error"]

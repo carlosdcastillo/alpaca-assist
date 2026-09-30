@@ -693,3 +693,46 @@ def test_cli_jsonl_emits_heartbeats_during_a_silent_gap() -> None:
     assert output[-1] == {"type": "result"}
     assert output[:-1] == [{"type": "cli_heartbeat"}] * (len(output) - 1)
     assert len(output) > 1
+
+
+def test_cli_mcp_config_registers_artifacts_for_a_local_tab(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Unlike surfaces, artifacts need no remote display and no daemon --
+    publishing is filesystem work on a path this process already reaches.
+    Gating them on surface_socket only ever meant "you happen to be in a
+    Pack session," which was never a real dependency.
+    """
+    monkeypatch.chdir(tmp_path)
+    config_path = _build_claude_mcp_config_file(str(tmp_path / "events.jsonl"), None)
+    try:
+        config = json.loads(Path(config_path).read_text())
+    finally:
+        Path(config_path).unlink()
+
+    artifact = config["mcpServers"]["alpaca-artifact"]
+    assert "ALPACA_ARTIFACT_SOCKET" not in artifact["env"]
+    # Absolute: the CLI subprocess runs with the workspace as its cwd, so a
+    # relative root would scatter artifacts where attach can never find them.
+    root = Path(artifact["env"]["ALPACA_ARTIFACT_ROOT"])
+    assert root.is_absolute()
+    assert root == tmp_path.resolve()
+
+
+def test_cli_mcp_config_keeps_the_socket_for_a_pack_tab(tmp_path: Path) -> None:
+    config_path = _build_claude_mcp_config_file(
+        str(tmp_path / "events.jsonl"),
+        None,
+        str(tmp_path / "session" / "surfaces" / "control.sock"),
+    )
+    try:
+        config = json.loads(Path(config_path).read_text())
+    finally:
+        Path(config_path).unlink()
+
+    env = config["mcpServers"]["alpaca-artifact"]["env"]
+    assert env["ALPACA_ARTIFACT_SOCKET"] == str(
+        tmp_path / "session" / "artifacts" / "control.sock",
+    )
+    assert "ALPACA_ARTIFACT_ROOT" not in env

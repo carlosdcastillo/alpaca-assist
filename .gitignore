@@ -69,6 +69,11 @@ dmypy.json
 # *.log alone misses RotatingFileHandler's numbered backups (.log.1, .log.2, ...)
 /logs/
 
+# Published HTML artifacts for local (non-Pack) tabs — durable runtime
+# data keyed to conversations.db, not source. Anchored: Pack sessions keep
+# their own artifacts/ under ~/.alpaca_pack.
+/artifacts/
+
 # Backup files
 *.bak
 

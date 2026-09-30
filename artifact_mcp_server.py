@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""MCP tool for publishing self-contained HTML artifacts from a Pack host."""
+"""MCP tool for publishing self-contained HTML artifacts."""
 
 from __future__ import annotations
 
@@ -17,6 +17,9 @@ from mcp.types import Tool
 
 from core.artifact_control import ArtifactControlClient
 from core.artifact_protocol import encode_artifact_result
+from core.artifact_store import LOCAL_ARTIFACT_ROOT_ENV
+from core.artifact_store import ArtifactStore
+from core.artifact_store import local_artifact_root
 
 server = Server(
     "alpaca-artifact",
@@ -28,11 +31,37 @@ server = Server(
 )
 
 
-def _client() -> ArtifactControlClient:
+class _LocalStoreBackend:
+    """Same ``call`` surface as ArtifactControlClient, minus the socket.
+
+    A Pack session needs the socket because the store is *owned* by the
+    daemon process; a local tab has no such owner, so the MCP subprocess
+    writes the artifact directory itself. Kept behind the same one-method
+    interface so call_tool doesn't have to know which world it's in.
+    """
+
+    def __init__(self, session_dir: str) -> None:
+        self._store = ArtifactStore(session_dir)
+
+    def call(self, method: str, params: dict[str, Any]) -> Any:
+        return self._store.dispatch(method, params)
+
+
+def _client() -> ArtifactControlClient | _LocalStoreBackend:
+    # Explicit env wins over discovery in both directions. Pack sets the
+    # socket path (see anthropic_ollama_server._cli_mcp_servers); a local
+    # tab sets the root. Checking discover() first would let a local tab on
+    # Linux silently latch onto some unrelated Pack session's socket via
+    # the "exactly one session on this host" fallback.
+    socket_path = os.environ.get("ALPACA_ARTIFACT_SOCKET")
+    if socket_path:
+        return ArtifactControlClient(socket_path)
+    if os.environ.get(LOCAL_ARTIFACT_ROOT_ENV):
+        return _LocalStoreBackend(str(local_artifact_root()))
     client = ArtifactControlClient.discover()
-    if client is None:
-        raise RuntimeError("Interactive artifacts need a Pack tab")
-    return client
+    if client is not None:
+        return client
+    return _LocalStoreBackend(str(local_artifact_root()))
 
 
 @server.list_tools()

@@ -34,6 +34,8 @@ import yaml
 
 import image_tool_result
 import video_tool_result
+from core.artifact_store import LOCAL_ARTIFACT_ROOT_ENV
+from core.artifact_store import local_artifact_root
 from core.config import MCP_SERVERS_FILE
 
 # This file prints emoji/non-ASCII text throughout (status markers like
@@ -1689,20 +1691,38 @@ def _cli_mcp_servers(
             "args": [surface_script],
             "env": surface_env,
         }
+    # Unlike alpaca-surface directly above, this one is NOT gated on
+    # surface_socket. Surfaces need a remote X display and so genuinely
+    # can't work on a local tab; artifacts need nothing but a directory
+    # this process can write to, and the CSP/sandbox that make them safe
+    # are applied by ArtifactStore and ArtifactPanel, not by anything
+    # Pack-specific. The socket a Pack session uses isn't providing
+    # *access* either — the MCP subprocess and the daemon share a host and
+    # a filesystem — it's providing ownership, which a local tab has no
+    # need for. So Pack keeps the socket; a local tab gets a root and
+    # writes the store directly (see artifact_mcp_server._client).
     artifact_script = os.path.join(os.path.dirname(__file__), "artifact_mcp_server.py")
-    if surface_socket and os.path.isfile(artifact_script):
-        session_dir = os.path.dirname(os.path.dirname(surface_socket))
+    if os.path.isfile(artifact_script):
+        artifact_env = {"ALPACA_CLI_MEDIA_EVENTS": media_event_path}
+        if surface_socket:
+            session_dir = os.path.dirname(os.path.dirname(surface_socket))
+            artifact_env["ALPACA_ARTIFACT_SOCKET"] = os.path.join(
+                session_dir,
+                "artifacts",
+                "control.sock",
+            )
+        else:
+            # Resolved here rather than left to the child: the CLI
+            # subprocess runs with the *workspace* as its cwd, so a
+            # cwd-relative default there would scatter artifacts into
+            # whatever directory the turn happened to run in — and
+            # webview_api.artifact_attach, resolving its own cwd, would
+            # never find them again.
+            artifact_env[LOCAL_ARTIFACT_ROOT_ENV] = str(local_artifact_root().resolve())
         servers["alpaca-artifact"] = {
             "command": sys.executable,
             "args": [artifact_script],
-            "env": {
-                "ALPACA_CLI_MEDIA_EVENTS": media_event_path,
-                "ALPACA_ARTIFACT_SOCKET": os.path.join(
-                    session_dir,
-                    "artifacts",
-                    "control.sock",
-                ),
-            },
+            "env": artifact_env,
         }
     return servers
 

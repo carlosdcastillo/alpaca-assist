@@ -1280,14 +1280,26 @@ class WebViewAPI:
             return {"success": False, "error": str(e)}
 
     def artifact_attach(self, tab_id: str, artifact_id: str) -> dict[str, Any]:
-        """Fetch static HTML for a durable Pack artifact descriptor."""
+        """Fetch static HTML for a durable artifact descriptor.
+
+        A Pack tab proxies through its daemon, which owns the store for
+        that session. A local tab has no daemon to ask, so it reads the
+        store on this machine directly — the same shape as
+        get_gated_tool_output below, and safe for the same reason: the
+        artifact id is validated by ArtifactStore.attach against
+        ARTIFACT_ID_RE before it is ever joined onto a path.
+        """
         try:
             tab = self._app.core.tabs.get(tab_id)
             if tab is None:
                 raise RuntimeError("Tab not found")
-            if not hasattr(tab, "artifact_attach"):
-                raise RuntimeError("Interactive artifacts need a Pack tab")
-            result = cast(Any, tab).artifact_attach(artifact_id)
+            if hasattr(tab, "artifact_attach"):
+                result = cast(Any, tab).artifact_attach(artifact_id)
+            else:
+                from core.artifact_store import ArtifactStore
+                from core.artifact_store import local_artifact_root
+
+                result = ArtifactStore(local_artifact_root()).attach(artifact_id)
             return {"success": True, **result}
         except Exception as e:
             logger.info(f"Could not attach to artifact {artifact_id}: {e}")
