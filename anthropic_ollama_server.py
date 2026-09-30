@@ -1977,16 +1977,135 @@ def _run_cli_jsonl(
                 print(msg.encode("ascii", errors="replace").decode("ascii"))
 
 
+# The alpaca-* MCP servers write their own completed-call records to the
+# ALPACA_CLI_MEDIA_EVENTS side channel (see cli_media_mcp_server._record_event
+# and friends), because their results carry sentinels Alpaca has to render
+# specially. Forwarding the CLI's view of those same calls as well would
+# render every one of them twice.
+_ALPACA_MCP_TOOL_PREFIX = "mcp__alpaca-"
+
+# Every fold here is persisted into the conversation and replayed on each
+# later turn, so an unbounded `Read` of a large file would be paid for
+# repeatedly. core.tool_output_gate does this job for tools Alpaca executes
+# itself; these results never pass through it (the CLI ran them), so they
+# are bounded at the source instead.
+_CLI_TOOL_RESULT_MAX_CHARS = 16000
+_CLI_TOOL_ARG_MAX_CHARS = 4000
+
+
+def _truncate_for_fold(text: str, limit: int) -> str:
+    if len(text) <= limit:
+        return text
+    return f"{text[:limit]}\n\n[...truncated {len(text) - limit} more characters]"
+
+
+def _cli_message_blocks(line: dict[str, Any]) -> list[dict[str, Any]]:
+    content = line.get("message", {}).get("content")
+    if not isinstance(content, list):
+        return []
+    return [block for block in content if isinstance(block, dict)]
+
+
+def _bound_cli_tool_arguments(arguments: Any) -> dict[str, Any]:
+    if not isinstance(arguments, dict):
+        return {"value": _truncate_for_fold(str(arguments), _CLI_TOOL_ARG_MAX_CHARS)}
+    return {
+        key: (
+            _truncate_for_fold(value, _CLI_TOOL_ARG_MAX_CHARS)
+            if isinstance(value, str)
+            else value
+        )
+        for key, value in arguments.items()
+    }
+
+
+def _cli_tool_result_text(block: dict[str, Any]) -> str:
+    """Flatten one CLI tool_result block into fold-displayable text."""
+    content = block.get("content")
+    if isinstance(content, str):
+        text = content
+    elif isinstance(content, list):
+        parts: list[str] = []
+        for item in content:
+            if not isinstance(item, dict):
+                parts.append(str(item))
+            elif item.get("type") == "text":
+                parts.append(str(item.get("text", "")))
+            elif item.get("type") == "image":
+                # Dropped rather than inlined: this is raw base64 in the
+                # CLI's own context, not one of Alpaca's image sentinels,
+                # so it can't be rendered here — it would only bloat every
+                # future replay of this conversation.
+                parts.append("[image result omitted]")
+            else:
+                parts.append(json.dumps(item, ensure_ascii=False))
+        text = "\n".join(part for part in parts if part)
+    elif content is None:
+        text = ""
+    else:
+        text = str(content)
+    if block.get("is_error"):
+        text = f"[tool error]\n{text}" if text else "[tool error]"
+    # chat_tab_processor's cli_tool_event handler drops an event with an
+    # empty result, and a silently missing fold is worse than an empty one.
+    return _truncate_for_fold(text, _CLI_TOOL_RESULT_MAX_CHARS) or "(no output)"
+
+
+def _record_cli_tool_uses(
+    line: dict[str, Any],
+    pending: dict[str, tuple[str, Any]],
+) -> None:
+    """Remember tool_use blocks so their results can be paired up later."""
+    for block in _cli_message_blocks(line):
+        if block.get("type") != "tool_use":
+            continue
+        name = str(block.get("name") or "tool")
+        tool_id = str(block.get("id") or "")
+        if not tool_id or name.startswith(_ALPACA_MCP_TOOL_PREFIX):
+            continue
+        pending[tool_id] = (name, block.get("input") or {})
+
+
+def _drain_cli_tool_results(
+    line: dict[str, Any],
+    pending: dict[str, tuple[str, Any]],
+) -> Generator[dict[str, Any], None, None]:
+    """Emit a completed-call event per tool_result, for Alpaca to fold.
+
+    Paired at *result* time rather than at tool_use time because
+    chat_tab_processor's cli_tool_event handler injects the call and result
+    folds together from one event. The call's own text has already streamed
+    by then, so the pair still lands in the right place in the answer.
+    """
+    for block in _cli_message_blocks(line):
+        if block.get("type") != "tool_result":
+            continue
+        entry = pending.pop(str(block.get("tool_use_id") or ""), None)
+        if entry is None:
+            continue  # unknown id, or a deliberately hidden alpaca-* call
+        name, arguments = entry
+        yield {
+            "type": "alpaca_tool_event",
+            "id": str(block.get("tool_use_id")),
+            "name": name,
+            "arguments": _bound_cli_tool_arguments(arguments),
+            "result": _cli_tool_result_text(block),
+        }
+
+
 class ClaudeCodeCLIClient:
     """Routes chat turns through the locally-installed `claude` CLI in
     headless mode, spending the logged-in Claude Code subscription's
     usage instead of a metered ANTHROPIC_API_KEY.
 
     Tool calls are NOT executed by this app for these models. `claude -p`
-    receives the app's MCP config and runs its own agent loop. Ordinary CLI
-    tool events remain hidden to avoid double execution; the built-in media
-    MCP server emits a separate completed-call event so Alpaca can mirror its
-    image/video result without executing it again.
+    receives the app's MCP config and runs its own agent loop. What the CLI
+    ran is still mirrored into the transcript as ordinary call/result folds
+    (see _drain_cli_tool_results) — reporting, not dispatch: these arrive on
+    the completed-call side channel that chat_tab_processor renders without
+    ever handing to Alpaca's own tool executor, so there is no double
+    execution. Only the alpaca-* MCP servers are skipped there, since they
+    already publish their own richer events on that same channel.
 
     Runs with --dangerously-skip-permissions because headless mode has no
     TTY to answer an interactive permission prompt on — it would just
@@ -2058,6 +2177,7 @@ class ClaudeCodeCLIClient:
         text_block_indices: set[int] = set()
         forwarded_message_text = False
         current_message_has_text = False
+        pending_cli_tools: dict[str, tuple[str, Any]] = {}
 
         try:
             for line in _run_cli_jsonl(
@@ -2074,6 +2194,19 @@ class ClaudeCodeCLIClient:
 
                 if line_type == "cli_heartbeat":
                     yield line
+                    continue
+
+                # The complete assistant/user records, not the partial
+                # stream_events below: only these carry a tool_use block's
+                # finished input and its matching tool_result. Text is
+                # ignored here because --include-partial-messages already
+                # streamed it token by token.
+                if line_type == "assistant":
+                    _record_cli_tool_uses(line, pending_cli_tools)
+                    continue
+
+                if line_type == "user":
+                    yield from _drain_cli_tool_results(line, pending_cli_tools)
                     continue
 
                 if line_type == "result":
@@ -2104,9 +2237,11 @@ class ClaudeCodeCLIClient:
                     if block_type == "text":
                         text_block_indices.add(index)
                         yield event
-                    # tool_use blocks: recorded as NOT text, silently
-                    # consumed below — the CLI already executed them
-                    # internally.
+                    # tool_use blocks: recorded as NOT text, so their
+                    # partial_json deltas are dropped rather than streamed
+                    # into the answer as garbage. The call itself is not
+                    # lost — it is reported from the complete assistant/user
+                    # records above, where the input is whole.
                 elif event_type == "content_block_delta":
                     if index in text_block_indices and "text" in event.get(
                         "delta",

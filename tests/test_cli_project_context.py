@@ -736,3 +736,140 @@ def test_cli_mcp_config_keeps_the_socket_for_a_pack_tab(tmp_path: Path) -> None:
         tmp_path / "session" / "artifacts" / "control.sock",
     )
     assert "ALPACA_ARTIFACT_ROOT" not in env
+
+
+def test_claude_cli_mirrors_its_own_tool_calls_as_folds() -> None:
+    """The CLI runs these itself, so Alpaca never dispatched them and had
+    nothing to fold -- the turn rendered as bare prose with the work
+    invisible. These arrive on the completed-call side channel, which
+    chat_tab_processor renders without handing anything to the tool
+    executor, so mirroring them cannot cause double execution.
+    """
+    cli_events = [
+        {
+            "type": "assistant",
+            "message": {
+                "content": [
+                    {"type": "text", "text": "Checking."},
+                    {
+                        "type": "tool_use",
+                        "id": "toolu_01",
+                        "name": "Read",
+                        "input": {"file_path": "/tmp/a.py"},
+                    },
+                ],
+            },
+        },
+        {
+            "type": "user",
+            "message": {
+                "content": [
+                    {
+                        "type": "tool_result",
+                        "tool_use_id": "toolu_01",
+                        "content": [{"type": "text", "text": "print(1)"}],
+                    },
+                ],
+            },
+        },
+    ]
+
+    with (
+        patch(
+            "anthropic_ollama_server._build_claude_mcp_config_file",
+            return_value=None,
+        ),
+        patch(
+            "anthropic_ollama_server._run_cli_jsonl",
+            return_value=iter(cli_events),
+        ),
+    ):
+        events = list(ClaudeCodeCLIClient().stream_complete())
+
+    assert events == [
+        {
+            "type": "alpaca_tool_event",
+            "id": "toolu_01",
+            "name": "Read",
+            "arguments": {"file_path": "/tmp/a.py"},
+            "result": "print(1)",
+        },
+    ]
+
+
+def test_claude_cli_leaves_alpaca_mcp_calls_to_their_own_side_channel() -> None:
+    """cli_media_mcp_server (and the surface/artifact servers) already write
+    a richer completed-call record carrying the sentinels Alpaca renders.
+    Mirroring the CLI's view of the same call would fold it twice.
+    """
+    cli_events = [
+        {
+            "type": "assistant",
+            "message": {
+                "content": [
+                    {
+                        "type": "tool_use",
+                        "id": "toolu_02",
+                        "name": "mcp__alpaca-media__view_image",
+                        "input": {"path": "a.png"},
+                    },
+                ],
+            },
+        },
+        {
+            "type": "user",
+            "message": {
+                "content": [
+                    {
+                        "type": "tool_result",
+                        "tool_use_id": "toolu_02",
+                        "content": "sentinel",
+                    },
+                ],
+            },
+        },
+    ]
+
+    with (
+        patch(
+            "anthropic_ollama_server._build_claude_mcp_config_file",
+            return_value=None,
+        ),
+        patch(
+            "anthropic_ollama_server._run_cli_jsonl",
+            return_value=iter(cli_events),
+        ),
+    ):
+        events = list(ClaudeCodeCLIClient().stream_complete())
+
+    assert events == []
+
+
+def test_claude_cli_tool_folds_are_bounded_and_never_empty() -> None:
+    """Every fold is persisted and replayed on each later turn, so an
+    unbounded `Read` of a large file gets paid for repeatedly.
+    core.tool_output_gate can't help here -- the CLI ran the tool, so the
+    result never passes through it. And chat_tab_processor drops an event
+    whose result is empty, which would silently lose the fold entirely.
+    """
+    from anthropic_ollama_server import _CLI_TOOL_ARG_MAX_CHARS
+    from anthropic_ollama_server import _CLI_TOOL_RESULT_MAX_CHARS
+    from anthropic_ollama_server import _bound_cli_tool_arguments
+    from anthropic_ollama_server import _cli_tool_result_text
+
+    huge = "x" * (_CLI_TOOL_RESULT_MAX_CHARS + 500)
+    bounded = _cli_tool_result_text({"content": huge})
+    assert bounded.startswith("x" * 100)
+    assert "truncated 500 more characters" in bounded
+
+    args = _bound_cli_tool_arguments({"content": "y" * (_CLI_TOOL_ARG_MAX_CHARS + 10)})
+    assert "truncated 10 more characters" in args["content"]
+
+    assert _cli_tool_result_text({"content": ""}) == "(no output)"
+    assert _cli_tool_result_text({"content": "", "is_error": True}) == "[tool error]"
+    assert (
+        _cli_tool_result_text(
+            {"content": [{"type": "image", "source": {"data": "AAAA"}}]},
+        )
+        == "[image result omitted]"
+    )
