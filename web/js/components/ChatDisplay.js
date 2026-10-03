@@ -431,14 +431,14 @@ class ChatDisplay {
 
   /**
    * Single-dollar math is common in model output but collides with currency.
-   * Require tight delimiters and reject the numeric/range shapes that occur in
-   * prices. Explicit \(...\) remains available for intentionally ambiguous
-   * formulas such as a lone number.
+   * Require tight delimiters and never interpret a numeric-leading candidate
+   * as math: in prose, that shape is overwhelmingly a currency marker paired
+   * with a later price. Explicit \(...\) remains available for intentionally
+   * ambiguous formulas such as \(2x + 1\).
    */
   _isInlineDollarMath(body) {
     if (!body || body !== body.trim()) return false;
-    if (/^\d[\d,]*(?:\.\d+)?$/.test(body)) return false;
-    if (/^\d[\d,.]*\s*(?:-|–|—|to)\s*$/i.test(body)) return false;
+    if (/^\d/.test(body)) return false;
 
     // A currency amount wrapped in Markdown emphasis can otherwise pair with
     // the next price on the line ("**$10,050** ... **$11,500**"). KaTeX then

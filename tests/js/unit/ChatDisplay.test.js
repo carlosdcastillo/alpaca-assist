@@ -464,6 +464,26 @@ describe("ChatDisplay", () => {
       });
     });
 
+    it("should leave price-heavy prose unchanged even around Markdown emphasis", () => {
+      const text =
+        "**Retail:** about $11,800 **on the Oyster** and **$12,000** on the Jubilee. " +
+        "The secondary market is about $17k to $19k versus $20k to $27k.";
+
+      expect(chatDisplay._protectMath(text)).toEqual({
+        protectedText: text,
+        formulas: new Map(),
+      });
+    });
+
+    it("should not pair numeric currency with a later dollar after math-like prose", () => {
+      const text = "Revenue rose from $5 million + fees to $10 million.";
+
+      expect(chatDisplay._protectMath(text)).toEqual({
+        protectedText: text,
+        formulas: new Map(),
+      });
+    });
+
     it("should normalize single-dollar formulas to unambiguous delimiters", () => {
       const { protectedText, formulas } = chatDisplay._protectMath(
         "Energy is $E = mc^2$ and position is $x$.",
@@ -485,6 +505,14 @@ describe("ChatDisplay", () => {
         protectedText: text,
         formulas: new Map(),
       });
+    });
+
+    it("should require explicit delimiters for numeric-leading formulas", () => {
+      const text = "Use $2x + 1$ or \\(2x + 1\\).";
+      const { protectedText, formulas } = chatDisplay._protectMath(text);
+
+      expect(protectedText).toBe("Use $2x + 1$ or ALPACA_MATH_TOKEN_0_END.");
+      expect(Array.from(formulas.values())).toEqual(["\\(2x + 1\\)"]);
     });
 
     it("should track last render length", () => {
