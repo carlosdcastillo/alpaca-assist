@@ -440,6 +440,13 @@ class ChatDisplay {
     if (/^\d[\d,]*(?:\.\d+)?$/.test(body)) return false;
     if (/^\d[\d,.]*\s*(?:-|–|—|to)\s*$/i.test(body)) return false;
 
+    // A currency amount wrapped in Markdown emphasis can otherwise pair with
+    // the next price on the line ("**$10,050** ... **$11,500**"). KaTeX then
+    // consumes the prose between them and renders the emphasis markers as
+    // multiplication symbols. TeX has no useful double-asterisk or
+    // double-underscore operator, so keep those candidates as Markdown.
+    if (/\*\*|__/.test(body)) return false;
+
     // Whitespace-only prose is more likely to be a pair of currency markers.
     // Real spaced formulas normally contain an operator or a TeX command.
     if (/\s/.test(body) && !/[\\^_{}=+*/<>≤≥≈]/.test(body)) return false;

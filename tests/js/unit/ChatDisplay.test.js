@@ -454,6 +454,16 @@ describe("ChatDisplay", () => {
       });
     });
 
+    it("should not treat bold Markdown prices as math", () => {
+      const text =
+        "Retail is **$10,050**. Unworn examples sell for **$11,500 to $13,000**.";
+
+      expect(chatDisplay._protectMath(text)).toEqual({
+        protectedText: text,
+        formulas: new Map(),
+      });
+    });
+
     it("should normalize single-dollar formulas to unambiguous delimiters", () => {
       const { protectedText, formulas } = chatDisplay._protectMath(
         "Energy is $E = mc^2$ and position is $x$.",
