@@ -1649,6 +1649,27 @@ def _cli_mcp_servers(
         "env": media_env,
     }
 
+    # CLI-backed models run their own agent loop and therefore never receive
+    # AppCore's in-process internal tools. Expose the saved-conversation tools
+    # over MCP, with an explicit path because the CLI cwd is commonly a project
+    # workspace rather than the directory that owns conversations.db. A Pack
+    # socket identifies its session directory and therefore its isolated DB.
+    conversation_script = os.path.join(
+        os.path.dirname(__file__),
+        "conversation_mcp_server.py",
+    )
+    if os.path.isfile(conversation_script):
+        if surface_socket:
+            session_dir = os.path.dirname(os.path.dirname(surface_socket))
+            conversation_db = os.path.join(session_dir, "conversations.db")
+        else:
+            conversation_db = os.path.abspath("conversations.db")
+        servers["conversation-history"] = {
+            "command": sys.executable,
+            "args": [conversation_script],
+            "env": {"ALPACA_CONVERSATIONS_DB": conversation_db},
+        }
+
     # Unlike a raw mcp_servers.json entry (left as-is above, matching alpaca's
     # own flat-command format), this one must survive the CLI subprocess's
     # cwd being the *workspace*, not the repo -- a bare "python" or a

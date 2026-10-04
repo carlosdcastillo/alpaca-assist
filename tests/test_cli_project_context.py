@@ -514,6 +514,57 @@ def test_cli_mcp_config_always_includes_media_bridge(tmp_path: Path) -> None:
     assert any("ALPACA_CLI_MEDIA_EVENTS" in value for value in overrides)
 
 
+def test_cli_mcp_config_includes_conversation_history_with_absolute_db(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    event_path = str(tmp_path / "events.jsonl")
+    config_path = _build_claude_mcp_config_file(event_path, "/other/workspace")
+    try:
+        config = json.loads(Path(config_path).read_text())
+    finally:
+        Path(config_path).unlink()
+
+    history = config["mcpServers"]["conversation-history"]
+    assert history["command"] == sys.executable
+    assert Path(history["args"][0]).is_absolute()
+    assert history["args"][0].endswith("conversation_mcp_server.py")
+    assert history["env"]["ALPACA_CONVERSATIONS_DB"] == str(
+        tmp_path / "conversations.db",
+    )
+
+    overrides = _codex_mcp_overrides(event_path, "/other/workspace")
+    assert any(
+        "mcp_servers.conversation-history.command=" in value for value in overrides
+    )
+    assert any(
+        "mcp_servers.conversation-history.env.ALPACA_CONVERSATIONS_DB=" in value
+        for value in overrides
+    )
+
+
+def test_cli_mcp_config_uses_pack_session_conversation_database(
+    tmp_path: Path,
+) -> None:
+    session_dir = tmp_path / "pack-session"
+    socket_path = session_dir / "surfaces" / "control.sock"
+    config_path = _build_claude_mcp_config_file(
+        str(tmp_path / "events.jsonl"),
+        "/workspace",
+        str(socket_path),
+    )
+    try:
+        config = json.loads(Path(config_path).read_text())
+    finally:
+        Path(config_path).unlink()
+
+    history = config["mcpServers"]["conversation-history"]
+    assert history["env"]["ALPACA_CONVERSATIONS_DB"] == str(
+        session_dir / "conversations.db",
+    )
+
+
 def test_cli_mcp_config_surface_server_is_absolute_regardless_of_cwd(
     tmp_path: Path,
 ) -> None:
