@@ -150,6 +150,38 @@ conversation reuses the same workspace; closing it never deletes remote files.
 - **Dark / light themes**
 - **Session persistence** — conversations auto-save and restore on launch
 
+### Local subagents
+
+Ask an app-managed model to delegate independent work. It can call
+`internal_spawn_agent(task, context?, title?)` to open a background child tab,
+then `internal_wait_agents(task_ids, timeout_seconds?)` to collect its final
+answer. Spawn returns immediately; wait returns completed results and pending
+IDs after at most 60 seconds, so the model can wait again. Results include a
+stable transcript link and remain readable on repeated waits.
+
+Children are grouped under their parent, show their task status, and have an
+**↑ Parent** button. Open them to inspect their complete tool transcript.
+Their final answer is captured only after the entire tool loop finishes—not
+after the first model invocation. Stop remains available while a parent waits.
+`internal_cancel_agent(task_id)`, stopping the parent, or closing either tab
+cancels outstanding delegated work. Completed results are retained.
+
+This version supports **local tabs and app-managed models only**, not Pack
+tabs or the Claude Code/Codex CLI backends. It allows four running children
+across the app, with no nested delegation. Children receive only the supplied
+task/context, inherit the parent's model and project workspace, and share its
+filesystem; coordinate edits rather than treating tabs as isolated worktrees.
+Cancellation is cooperative: it stops generation and prevents later result
+delivery, but does not undo writes or forcibly terminate already executing
+tools. Saved completed results survive session restore. In-flight local tasks
+restore as **interrupted**, never silently rerun after a restart.
+
+Run the deterministic HTTP integration checks with:
+
+```bash
+python -m pytest tests/test_subagents.py -q
+```
+
 ## Development
 
 - **New JS <-> Python method:** add it to `webview_api.py`, then call it from

@@ -113,6 +113,7 @@ class StreamingHandler:
         # measured wall time includes payload assembly and thread start — the
         # user's wait begins at send, not at socket open.
         self._chat.current_turn_timing = TurnTiming.start()
+        self._chat.turn_error = None
 
         # Clear stop flag
         self._chat.stop_streaming_flag.clear()
@@ -123,7 +124,7 @@ class StreamingHandler:
             api.on_streaming_start(self._chat.tab_id, answer_index)
 
         # Get available tools and the tab-specific system prompt.
-        tools = self._chat._app_core.get_available_mcp_tools()
+        tools = self._chat._app_core.get_available_mcp_tools(self._chat)
         system_prompt = self._chat._app_core.get_system_prompt(self._chat)
 
         # Prepare data payload
@@ -165,6 +166,7 @@ class StreamingHandler:
 
         # Set stop flag on ChatTabBase (single source of truth)
         self._chat.stop_streaming_flag.set()
+        self._chat._app_core.subagents.stop_tab(self._chat)
 
         # Close the underlying HTTP response to unblock any iter_lines() call
         # that is waiting for bytes on a dead or very slow connection.
@@ -237,7 +239,7 @@ class StreamingHandler:
             }
 
             # Add tools if available
-            tools = self._chat._app_core.get_available_mcp_tools()
+            tools = self._chat._app_core.get_available_mcp_tools(self._chat)
             if tools:
                 ollama_payload["tools"] = tools
                 logger.info(f"[CONTINUATION] Added {len(tools)} tools")

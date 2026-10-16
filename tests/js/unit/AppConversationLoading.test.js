@@ -1,4 +1,6 @@
 require("../../../web/js/app.js");
+require("../../../web/js/components/TabManager.js");
+require("../../../web/js/components/InputArea.js");
 
 describe("AlpacaApp conversation display loading", () => {
   let app;
@@ -97,5 +99,85 @@ describe("AlpacaApp conversation display loading", () => {
 
     expect(app.api.get_conversation_state).not.toHaveBeenCalled();
     expect(app.chatDisplay.clear).not.toHaveBeenCalled();
+  });
+});
+
+describe("whole-turn Stop control", () => {
+  let app;
+  beforeEach(() => {
+    document.body.innerHTML =
+      '<div id="tabs"></div><div id="tabs-scrollbar"><div id="tabs-scrollbar-thumb"></div></div><button id="send"></button><button id="stop"></button>';
+    app = Object.create(window.AlpacaApp.prototype);
+    app.currentTabId = "parent";
+    app.api = {
+      switch_tab: async () => ({ success: true }),
+      stop_streaming: async () => ({ success: true }),
+      get_conversation_state: async () => ({ success: true, state: {} }),
+    };
+    app.tabManager = new window.TabManager("tabs", app.api);
+    app.tabManager.createTabUI("parent", "Parent", false);
+    app.tabManager.createTabUI("child", "Child", false);
+    app.inputArea = Object.create(window.InputArea.prototype);
+    app.inputArea.sendBtn = document.getElementById("send");
+    app.inputArea.stopBtn = document.getElementById("stop");
+    app.inputArea.isConnected = true;
+    app.inputArea.markdownInput = { setDisabled() {}, setPlaceholder() {} };
+    app.chatDisplay = {
+      clear() {},
+      setStreaming() {},
+      startAnswerTimer() {},
+      stopAnswerTimer() {},
+      appendContent() {},
+      setAnswerTiming() {},
+    };
+    for (const name of [
+      "_startStatusTicker",
+      "_stopStatusTicker",
+      "_updateStatusBar",
+      "_scheduleStatusUpdate",
+      "_renderConversationState",
+      "_updateWorkspaceHeader",
+    ]) {
+      app[name] = () => {};
+    }
+  });
+
+  it("keeps Stop enabled through invocation completion and tab switches, until the whole turn ends", async () => {
+    app.onStreamingStart("parent", 0);
+    app.onContentUpdate("parent", { is_done: true });
+    app.onStreamingEnd("parent", 0);
+    expect(app.inputArea.stopBtn).not.toBeDisabled();
+    expect(app.inputArea.sendBtn).toBeDisabled();
+    await app._onTabSwitched("child");
+    expect(app.inputArea.stopBtn).toBeDisabled();
+    await app._onTabSwitched("parent");
+    expect(app.inputArea.stopBtn).not.toBeDisabled();
+    app.onTurnTiming("parent", 0, { completed_at: 123 });
+    expect(app.inputArea.stopBtn).toBeDisabled();
+    expect(app.inputArea.sendBtn).not.toBeDisabled();
+  });
+
+  it("allows stopping a waiting turn and clears completed background turns", async () => {
+    app.onStreamingStart("parent", 0);
+    app.onStreamingEnd("parent", 0);
+    await app._onStopStreaming();
+    expect(app.tabManager.isTabStreaming("parent")).toBe(false);
+    expect(app.inputArea.stopBtn).toBeDisabled();
+    app.onStreamingStart("child", 0);
+    app.onStreamingEnd("child", 0);
+    app.onTurnTiming("child", 0, { completed_at: 456 });
+    await app._onTabSwitched("child");
+    expect(app.inputArea.stopBtn).toBeDisabled();
+  });
+
+  it("does not mark the newly selected child stopped when a parent Stop request resolves", async () => {
+    app.onStreamingStart("parent", 0);
+    const stopping = app._onStopStreaming();
+    app.onStreamingStart("child", 0);
+    await app._onTabSwitched("child");
+    await stopping;
+    expect(app.tabManager.isTabStreaming("parent")).toBe(false);
+    expect(app.tabManager.isTabStreaming("child")).toBe(true);
+    expect(app.inputArea.stopBtn).not.toBeDisabled();
   });
 });

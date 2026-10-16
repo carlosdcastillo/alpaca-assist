@@ -54,6 +54,9 @@ class ChatTabBase:
         self.chat_state: ChatState | ConversationGraph = ConversationGraph()
         self.conversation_id: int = conversation_id
         self.preferences: dict[str, Any] = app_core.preferences
+        self.subagent: dict[str, Any] | None = None
+        self.subagent_tasks: dict[str, dict[str, Any]] = {}
+        self.turn_error: str | None = None
 
         # Streaming state (managed by StreamingHandler)
         self._streaming = False
@@ -119,6 +122,20 @@ class ChatTabBase:
         if api is not None:
             api.on_turn_timing(self.tab_id, answer_index, record)
 
+    def on_turn_finished(self, answer_index: int) -> None:
+        """Report a delegated result only after the entire tool loop drains."""
+        status = "completed"
+        if self.turn_error:
+            status = "failed"
+        elif self.stop_streaming_flag.is_set():
+            status = "cancelled"
+        self._app_core.subagents.finish(
+            self,
+            answer_index,
+            status,
+            self.turn_error or "",
+        )
+
     def cleanup_resources(self) -> None:
         """Clean up resources when tab is closed."""
         self.stop_streaming_flag.set()
@@ -156,6 +173,7 @@ class ChatTabBase:
             "name": self.title,
             "conversation_id": self.conversation_id,
         }
+        data.update(self._app_core.subagents.snapshot(self))
         if self.project_name:
             data.update(
                 {
@@ -187,3 +205,4 @@ class ChatTabBase:
         self.workspace_path = data.get("workspace_path") or None
         self.project_fingerprint = data.get("project_fingerprint") or None
         self.project_spinup_pending = bool(data.get("project_spinup_pending", False))
+        self._app_core.subagents.restore(self, data)

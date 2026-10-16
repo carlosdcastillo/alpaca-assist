@@ -638,6 +638,94 @@ describe("TabManager", () => {
     });
   });
 
+  describe("subagent tabs", () => {
+    const info = (status = "running") => ({
+      parent_conversation_id: 42,
+      task_id: "task-1",
+      status,
+    });
+    const order = () =>
+      Array.from(container.children, (el) => el.dataset.tabId);
+
+    beforeEach(() => {
+      for (const id of ["parent", "other", "child-1", "child-2"]) {
+        tabManager.createTabUI(id, id, false);
+      }
+      tabManager.setConversationId("parent", 42);
+    });
+
+    it("groups siblings in creation order without switching or duplicating UI", async () => {
+      await tabManager.switchToTab("other");
+      mockApi.switch_tab.mockClear();
+      tabManager.setSubagentInfo("child-2", info());
+      tabManager.setSubagentInfo("child-1", info());
+      tabManager.setSubagentInfo("child-1", info());
+      expect(order()).toEqual(["parent", "child-1", "child-2", "other"]);
+      expect(container.querySelectorAll(".tab-subagent-meta")).toHaveLength(2);
+      expect(tabManager.activeTabId).toBe("other");
+      expect(mockApi.switch_tab).not.toHaveBeenCalled();
+      await tabManager.switchToTab("parent");
+      tabManager.nextTab();
+      expect(tabManager.activeTabId).toBe("child-1");
+      await tabManager.closeTab("child-1");
+      expect(tabManager.activeTabId).toBe("parent");
+    });
+
+    it.each(["running", "completed", "failed", "cancelled", "interrupted"])(
+      "shows %s while keeping the conversation inspectable",
+      (status) => {
+        tabManager.setSubagentInfo("child-1", info());
+        tabManager.setSubagentInfo("child-1", info(status));
+        const child = tabManager.getTab("child-1").button;
+        expect(child.querySelector(".tab-subagent-status").textContent).toBe(
+          `↳ Child · ${status}`,
+        );
+        expect(child.querySelectorAll(".tab-subagent-parent")).toHaveLength(1);
+        child.querySelector(".tab-title").click();
+        expect(tabManager.activeTabId).toBe("child-1");
+      },
+    );
+
+    it("navigates only to the parent and disables back when it closes", async () => {
+      tabManager.setSubagentInfo("child-1", info());
+      const back = tabManager
+        .getTab("child-1")
+        .button.querySelector(".tab-subagent-parent");
+      mockApi.switch_tab.mockClear();
+      back.click();
+      expect(mockApi.switch_tab.mock.calls).toEqual([["parent"]]);
+      await tabManager.closeTab("parent");
+      expect(back.disabled).toBe(true);
+      expect(back.title).toBe("Parent #42 is not open");
+      mockApi.switch_tab.mockClear();
+      back.click();
+      expect(mockApi.switch_tab).not.toHaveBeenCalled();
+    });
+
+    it("reconciles late child IDs and a parent restored after its children", async () => {
+      await tabManager.closeTab("parent");
+      tabManager.setSubagentInfo("child-2", info());
+      tabManager.setSubagentInfo("child-1", info());
+      tabManager.setConversationId("child-1", 43);
+      const back = tabManager
+        .getTab("child-1")
+        .button.querySelector(".tab-subagent-parent");
+      expect(back.disabled).toBe(true);
+      tabManager.createTabUI("restored-parent", "Parent", false);
+      expect(back.disabled).toBe(true);
+      tabManager.setConversationId("restored-parent", 42);
+      expect(order()).toEqual([
+        "other",
+        "restored-parent",
+        "child-1",
+        "child-2",
+      ]);
+      expect(back.disabled).toBe(false);
+      back.click();
+      expect(tabManager.activeTabId).toBe("restored-parent");
+    });
+  });
+
   describe("vertical overflow", () => {
     it("shows a conventional scrollbar when tabs exceed the available height", () => {
       Object.defineProperties(container, {

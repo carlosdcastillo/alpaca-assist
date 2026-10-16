@@ -33,6 +33,7 @@ from chat_state import ToolCall
 from chat_state import ToolResult
 from core.app_core import AppCore
 from core.chat_tab import ChatTab
+from core.subagents import SubagentCoordinator
 
 DEFAULT_CASES = Path(__file__).with_name("benchmarks") / "offline_regression_cases.json"
 DEFAULT_MODEL = "glm-5p2"
@@ -187,11 +188,13 @@ class _RegressionAppCore(AppCore):
         self.api: Any = _RegressionAPI()
         self.preferences = {"api_url": api_url, "model": model}
         self.tool_profile = tool_profile
+        self.tabs = {}
+        self.subagents = SubagentCoordinator(self)
 
     def get_skills_xml(self) -> str:
         return ""
 
-    def get_available_mcp_tools(self) -> list[dict[str, Any]]:
+    def get_available_mcp_tools(self, tab: Any = None) -> list[dict[str, Any]]:
         tools = list(internal_tools.TOOL_SCHEMAS)
         if self.tool_profile == "suite":
             tools = [

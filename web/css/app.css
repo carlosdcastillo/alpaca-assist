@@ -598,6 +598,37 @@ button {
 .tab-workspace-meta--dirty { color: var(--warning-color); }
 .tab-workspace-meta--error { color: var(--error-color); }
 
+.tab.subagent {
+    flex-wrap: wrap;
+    padding-left: 20px;
+}
+
+.tab-subagent-meta {
+    grid-column: 1 / -1;
+    flex-basis: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 6px;
+    color: var(--text-secondary);
+    font-size: 10px;
+}
+
+.tab-subagent-parent {
+    padding: 1px 4px;
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    background: var(--bg-tertiary);
+    color: var(--accent-primary);
+    font: inherit;
+    cursor: pointer;
+}
+
+.tab-subagent-parent:disabled {
+    color: var(--text-secondary);
+    cursor: default;
+}
+
 /* Offline state: the remote daemon is unreachable (host down, SSH
    dropped, or connection not yet established). Retried opportunistically
    on tab click (switch_tab) or the next message send. */

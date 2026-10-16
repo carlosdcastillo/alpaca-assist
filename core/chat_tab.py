@@ -104,6 +104,20 @@ class ChatTab(ChatTabBase):
             message: The user's message text.
             images: List of image data strings (if any).
         """
+        # A stream may already have ended while its tool workers are still
+        # running. Do not let their eventual continuation target a newer turn.
+        with self._tool_handler._pending_lock:
+            if (
+                self.current_turn_timing is not None
+                or self._tool_handler._pending_count
+            ):
+                raise ValueError(
+                    "Previous turn is still running; wait for its tools to finish",
+                )
+        thread = self._streaming_handler._current_thread
+        if thread is not None and thread.is_alive():
+            raise ValueError("Previous stream is still shutting down")
+
         # Add question to chat state - single source of truth for answer index
         self._current_answer_index = self.chat_state.add_question(message)
         answer_index = self._current_answer_index
@@ -177,7 +191,15 @@ class ChatTab(ChatTabBase):
             error: Error message describing what went wrong.
         """
         # Note: streaming flags are reset by StreamingHandler before calling this method
+        self.turn_error = error
+        self.stop_streaming_flag.set()
         self.finalize_turn_timing(self._current_answer_index)
+        self._app_core.subagents.finish(
+            self,
+            self._current_answer_index,
+            "failed",
+            error,
+        )
 
         # Notify UI (if available - don't raise if API is None)
         api = self._app_core.api

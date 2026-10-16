@@ -398,11 +398,17 @@ class StreamProcessor:
                         logger.info(
                             f"[STREAM] Stop flag set before any content received",
                         )
+                        self._queue_content_update(answer_index, "", is_done=True)
                     else:
                         logger.warning(
                             f"[STREAM] Loop ended without done signal after {chunk_count} chunks",
                         )
-                    self._queue_content_update(answer_index, "", is_done=True)
+                        self._queue_content_update(
+                            answer_index,
+                            "\n[Error]: Connection ended before the completion signal",
+                            is_done=True,
+                            is_error=True,
+                        )
                 api = self._chat._app_core.api
                 if api is not None:
                     api.on_streaming_end(self._chat.tab_id, answer_index)
@@ -505,6 +511,9 @@ class StreamProcessor:
             is_done: Whether this is the final update.
             is_error: Whether this is an error update.
         """
+        if is_error:
+            self._chat.turn_error = content
+            self._chat.stop_streaming_flag.set()
         update = utils.ContentUpdate(
             answer_index=answer_index,
             content_chunk=content,

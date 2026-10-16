@@ -27,6 +27,7 @@ from typing import Any
 import image_tool_result
 import utils
 from core import timing
+from core.subagents import TOOL_NAMES as SUBAGENT_TOOL_NAMES
 from core.tool_output_gate import gate_tool_call_arguments
 from core.tool_output_gate import gate_tool_output
 
@@ -173,6 +174,7 @@ class ToolHandler:
             # .stop also finalises, and whichever gets there first wins —
             # finalize_turn_timing drops the timing object once it has run.
             self._chat.finalize_turn_timing(answer_index)
+            self._chat.on_turn_finished(answer_index)
 
     def handle_tool_call(
         self,
@@ -315,7 +317,16 @@ class ToolHandler:
                 import internal_tools
 
                 logger.debug(f"[TOOL] Calling internal tool: {tool_name}")
-                result = internal_tools.call_tool(tool_name, arguments)
+                if tool_name in SUBAGENT_TOOL_NAMES:
+                    result = self._chat._app_core.subagents.call(
+                        self._chat,
+                        tool_name,
+                        arguments,
+                        answer_index,
+                        tool_id,
+                    )
+                else:
+                    result = internal_tools.call_tool(tool_name, arguments)
                 callback(result)
             else:
                 logger.debug("[TOOL] Calling MCP tool via app_core")

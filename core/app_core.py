@@ -24,6 +24,8 @@ from core import timing
 from core.config import _DEFAULT_SKILLS_DIR
 from core.config import DEFAULT_PREFERENCES
 from core.config import MCP_SERVERS_FILE
+from core.subagents import TOOL_SCHEMAS as SUBAGENT_TOOL_SCHEMAS
+from core.subagents import SubagentCoordinator
 from core.text_parsing import export_and_open
 from core.text_parsing import parse_code_blocks
 from core.tool_output_gate import sweep_orphaned_output_dirs
@@ -56,6 +58,7 @@ class AppCore:
         self.preferences = DEFAULT_PREFERENCES.copy()
         self.load_preferences()
         self.tabs: dict[str, ChatTab | PackTab] = {}
+        self.subagents = SubagentCoordinator(self)
         self.mcp_manager = MCPManager()
         self.event_loop: asyncio.AbstractEventLoop | None = None
         self.mcp_thread: threading.Thread | None = None
@@ -205,11 +208,13 @@ class AppCore:
         self.mcp_manager._server_locks.clear()
         self.load_mcp_servers()
 
-    def get_available_mcp_tools(self) -> list[dict[str, Any]]:
+    def get_available_mcp_tools(self, tab: Any = None) -> list[dict[str, Any]]:
         """Get all available MCP tools in Ollama-compatible format."""
         import internal_tools
 
         available_tools: list[dict[str, Any]] = list(internal_tools.TOOL_SCHEMAS)
+        if tab is not None and self.subagents.available(tab):
+            available_tools.extend(SUBAGENT_TOOL_SCHEMAS)
         mcp_tools = self.mcp_manager.get_available_tools()
         logger.debug(f"Debug: MCP Manager has {len(mcp_tools)} servers")
         logger.debug(f"Debug: Server names: {list(mcp_tools.keys())}")
@@ -440,6 +445,7 @@ class AppCore:
         if tab_id not in self.tabs:
             return
         tab = self.tabs[tab_id]
+        self.subagents.stop_tab(tab)
         self.store_tab_in_database(tab)
         tab.cleanup_resources()
         del self.tabs[tab_id]

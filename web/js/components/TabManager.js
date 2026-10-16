@@ -7,6 +7,7 @@ class TabManager {
     this.api = api;
     this.tabs = new Map(); // tabId -> { button, chatDisplay, inputArea, data }
     this._convIds = new Map(); // tabId -> conversation_id (permanent)
+    this._tabSequence = 0;
     this.activeTabId = null;
     this.navigationHistory = [];
     this.navigationHistoryIndex = -1;
@@ -36,7 +37,7 @@ class TabManager {
     const title = `#${convId}`;
 
     this.createTabUI(tabId, title);
-    this._convIds.set(tabId, convId);
+    this.setConversationId(tabId, convId);
     return tabId;
   }
 
@@ -67,7 +68,7 @@ class TabManager {
       result.project || null,
       result.display_name || result.host || host,
     );
-    this._convIds.set(tabId, convId);
+    this.setConversationId(tabId, convId);
     return tabId;
   }
 
@@ -77,6 +78,7 @@ class TabManager {
    */
   setConversationId(tabId, convId) {
     this._convIds.set(tabId, convId);
+    this._refreshSubagents();
     const tab = this.tabs.get(tabId);
     if (!tab) return;
     // Update title only when it is still the placeholder set at creation.
@@ -91,6 +93,88 @@ class TabManager {
    */
   getConversationId(tabId) {
     return this._convIds.get(tabId) ?? null;
+  }
+
+  /** Mark an existing conversation as a child without activating it. */
+  setSubagentInfo(tabId, info) {
+    const tab = this.tabs.get(tabId);
+    if (!tab) return;
+    tab.subagentInfo = { ...info };
+    if (!tab.button.querySelector(".tab-subagent-meta")) {
+      const meta = document.createElement("span");
+      meta.className = "tab-subagent-meta";
+      const status = document.createElement("span");
+      status.className = "tab-subagent-status";
+      const back = document.createElement("button");
+      back.type = "button";
+      back.className = "tab-subagent-parent";
+      back.textContent = "↑ Parent";
+      back.addEventListener("click", (event) => {
+        event.stopPropagation();
+        const parent = this._subagentParent(tab);
+        if (parent) this.switchToTab(parent.id);
+      });
+      meta.append(status, back);
+      tab.button.appendChild(meta);
+      tab.button.classList.add("subagent");
+    }
+    this._refreshSubagents();
+  }
+
+  _subagentParent(tab) {
+    if (!tab.subagentInfo) return null;
+    return Array.from(this.tabs.values()).find(
+      (parent) =>
+        parent !== tab &&
+        this._convIds.get(parent.id) ===
+          tab.subagentInfo.parent_conversation_id,
+    );
+  }
+
+  _refreshSubagents() {
+    // Creation order keeps siblings stable even when metadata arrives backwards.
+    const tabs = Array.from(this.tabs.values()).sort(
+      (a, b) => a.order - b.order,
+    );
+    const children = new Map();
+    for (const tab of tabs) {
+      if (!tab.subagentInfo) continue;
+      const parent = this._subagentParent(tab);
+      if (parent) {
+        if (!children.has(parent.id)) children.set(parent.id, []);
+        children.get(parent.id).push(tab);
+      }
+      const { status, task_id, parent_conversation_id } = tab.subagentInfo;
+      const meta = tab.button.querySelector(".tab-subagent-meta");
+      meta.querySelector(".tab-subagent-status").textContent =
+        `↳ Child · ${status}`;
+      meta.title = `Task: ${task_id}`;
+      const back = meta.querySelector(".tab-subagent-parent");
+      back.disabled = !parent;
+      back.title = parent
+        ? `Back to parent #${parent_conversation_id}`
+        : `Parent #${parent_conversation_id} is not open`;
+    }
+    const ordered = [];
+    const visited = new Set();
+    const visit = (tab) => {
+      if (visited.has(tab.id)) return; // Also tolerate malformed cycles.
+      visited.add(tab.id);
+      ordered.push(tab);
+      for (const child of children.get(tab.id) || []) visit(child);
+    };
+    for (const tab of tabs) if (!this._subagentParent(tab)) visit(tab);
+    for (const tab of tabs) visit(tab);
+    this.tabs.clear();
+    ordered.forEach((tab, index) => {
+      this.tabs.set(tab.id, tab);
+      if (this.container.children[index] !== tab.button) {
+        this.container.insertBefore(
+          tab.button,
+          this.container.children[index] || null,
+        );
+      }
+    });
   }
 
   /**
@@ -117,6 +201,7 @@ class TabManager {
     // Create tab data structure
     const tabData = {
       id: tabId,
+      order: this._tabSequence++,
       title: title,
       button: tabButton,
       chatDisplay: null, // Set when tab is activated
@@ -127,6 +212,7 @@ class TabManager {
     };
 
     this.tabs.set(tabId, tabData);
+    this._refreshSubagents();
 
     // Dispatch tab created event
     document.dispatchEvent(
@@ -281,6 +367,7 @@ class TabManager {
     tab.button.remove();
     this.tabs.delete(tabId);
     this._convIds.delete(tabId);
+    this._refreshSubagents();
     this._updateNavigationButtons();
 
     // Notify Python

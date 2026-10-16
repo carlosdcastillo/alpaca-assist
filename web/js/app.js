@@ -2526,19 +2526,22 @@ class AlpacaApp {
    * Handle stop streaming
    */
   async _onStopStreaming() {
-    if (!this.currentTabId) return;
+    const tabId = this.currentTabId;
+    if (!tabId) return;
 
-    const isStreaming = this.tabManager.isTabStreaming(this.currentTabId);
+    const isStreaming = this.tabManager.isTabStreaming(tabId);
     if (!isStreaming) return;
 
-    await this.api.stop_streaming(this.currentTabId);
-    this._setStreamingComplete(this.currentTabId);
+    await this.api.stop_streaming(tabId);
+    this._setStreamingComplete(tabId);
   }
 
   /**
    * Set streaming as complete for a specific tab
    */
   _setStreamingComplete(tabId) {
+    const tab = this.tabManager.getTab(tabId);
+    if (tab) tab.turnInProgress = false;
     this.tabManager.setTabStreaming(tabId, false);
     // Only update input area UI if this is the current tab
     if (tabId === this.currentTabId) {
@@ -2561,7 +2564,9 @@ class AlpacaApp {
     // Always process completion signals, even for non-active tabs
     if (update.is_done || update.type === "done") {
       console.log(`[APP DEBUG] Streaming complete for tab ${tabId}`);
-      this._setStreamingComplete(tabId);
+      if (!this.tabManager.getTab(tabId)?.turnInProgress) {
+        this._setStreamingComplete(tabId);
+      }
       // Don't return here - still need to render if this is the current tab
     }
 
@@ -2587,6 +2592,8 @@ class AlpacaApp {
    */
   onStreamingStart(tabId, answerIndex) {
     // Always update the tab's streaming state, even if not the current tab
+    const tab = this.tabManager.getTab(tabId);
+    if (tab) tab.turnInProgress = true;
     this.tabManager.setTabStreaming(tabId, true);
     // Receiving any live notification proves a Pack tab's connection is up.
     this.tabManager.setTabOffline(tabId, false);
@@ -2605,8 +2612,11 @@ class AlpacaApp {
    * Called when streaming ends
    */
   onStreamingEnd(tabId, answerIndex) {
-    // Always update the tab's streaming state, even if not the current tab
-    this.tabManager.setTabStreaming(tabId, false);
+    // A model invocation can end while wait_agents or other tools still run.
+    // Keep Stop available until the once-per-turn timing signal arrives.
+    if (!this.tabManager.getTab(tabId)?.turnInProgress) {
+      this._setStreamingComplete(tabId);
+    }
 
     // The turn stopwatch is deliberately NOT stopped here — this fires once
     // per LLM invocation, so a tool loop hits it several times mid-turn.
@@ -2615,7 +2625,7 @@ class AlpacaApp {
     // Only update UI if this is the current tab
     if (tabId === this.currentTabId) {
       this.chatDisplay.setStreaming(false);
-      this.inputArea.setStreaming(false);
+      this.inputArea.setStreaming(this.tabManager.isTabStreaming(tabId));
       this._updateStatusBar();
     }
   }
@@ -2625,6 +2635,7 @@ class AlpacaApp {
    * with the wall/model/tool breakdown for it.
    */
   onTurnTiming(tabId, answerIndex, timing) {
+    this._setStreamingComplete(tabId);
     if (tabId !== this.currentTabId) return;
     // Anchor for the next question's gap, so a divider appears live during a
     // session and not only after the conversation is reloaded from disk.
