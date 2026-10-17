@@ -131,6 +131,120 @@ performs project-specific setup before the user's task. Relative built-in file,
 search, and shell tool paths default to the managed workspace. Reopening the
 conversation reuses the same workspace; closing it never deletes remote files.
 
+### Starting Pack tasks from a model
+
+Models can discover `list_pack_targets`, then call `start_pack_task` to open a
+**new** project-bound Pack tab and submit a prompt with an explicit model:
+
+```json
+{
+  "request_id": "reports-refresh-2026-10-16",
+  "host": "build-host",
+  "project": "my-project",
+  "model": "codex/gpt-5.6-sol",
+  "prompt": "Update the report using the latest project data."
+}
+```
+
+The project must already be defined under `~/packs` on the invoking controller;
+the host is an SSH destination available to that controller. `model` must match
+a name advertised by the target host's `/api/tags` endpoint. Use
+`claude-code/sonnet` (or another offered Claude Code model), `codex/…`, or an
+offered regular model. There is no implicit backend/model fallback for tasks.
+The target host needs the updated Pack daemon (and updated bundled API proxy
+if used), its usual API service, and the selected backend's CLI/credentials.
+Project setup finishes before submission;
+the existing runbook and first-turn spinup instructions still apply.
+
+Ordinary models see the `packtasks_`-prefixed tools. Claude Code and Codex get
+the same tools through the automatically injected `alpaca-pack-tasks` MCP
+adapter. Its authenticated loopback channel requires the CLI proxy and owning
+Alpaca process to run on the same machine, as they do in a Pack session. Do not
+manually copy its per-process control credentials into shared MCP config.
+
+Creation returns a `task_id` immediately. Poll `get_pack_task` for `starting`,
+`started`, or `failed`; **started means the remote daemon accepted the prompt,
+not that the work finished successfully**. Results and subsequent backend
+errors arrive through the new conversation. Desktop-created tasks add a Pack
+tab without switching focus. A task invoked inside a remote daemon belongs to
+that daemon's AppCore; it is not automatically added as a top-level desktop tab.
+
+Reuse the same `request_id` and identical arguments when retrying a tool call:
+within the controller's lifetime this returns the same launch instead of
+creating a second tab. Conflicting reuse is rejected. Launch status and retry
+deduplication are in memory, **not durable across controller restarts**; remote
+conversations/workspaces retain normal Pack persistence. Failed launches keep
+their tab/session for inspection and never retry automatically. A connection
+loss during submission can leave delivery uncertain: inspect that session
+before launching again with a new request ID.
+
+This is immediate execution, not scheduling. It uses existing SSH, filesystem,
+and backend permissions; neither a new sandbox nor an additional approval
+system is introduced. Only request remote work you intend to authorize.
+
+### Scheduling Pack tasks
+
+The same ordinary-model and Claude Code/Codex MCP paths expose
+`create_pack_schedule`, `list_pack_schedules`, `update_pack_schedule`, and
+`control_pack_schedule`. For example, run a report every Monday at 09:00
+Los Angeles time:
+
+```json
+{
+  "request_id": "weekly-report-v1",
+  "host": "build-host",
+  "project": "my-project",
+  "model": "claude-code/sonnet",
+  "prompt": "Update the report using the latest project data. Do not push.",
+  "when": {
+    "kind": "weekly",
+    "time": "09:00",
+    "timezone": "America/Los_Angeles",
+    "weekday": 0
+  }
+}
+```
+
+Other `when` forms: `{"kind":"delay","seconds":600}`,
+`{"kind":"once","at":"2026-12-01T09:00:00-08:00"}`, or daily with `time`
+and `timezone` but no `weekday`. Weekdays are Monday=0 through Sunday=6.
+One-shot times must be in the future and include an offset; delays become a
+fixed UTC timestamp at creation. Recurrence uses an explicit IANA timezone,
+skips nonexistent DST times, and runs repeated local times only once (the first
+occurrence). Returned `next_run`, `due_at`, and `claimed_at` are Unix UTC seconds.
+
+Schedules and occurrence history persist in `pack_schedules.db` alongside the
+controller's session files. Request-ID deduplication for schedule creation
+survives restarts. The app resumes the scheduler after session restoration;
+a Pack daemon owns its own schedules independently of the desktop. Only one
+controller may own a given store. Keep the store on a local filesystem, not
+a network share, and protect it like chat history: it contains prompts.
+
+Each occurrence gets a fresh Pack session/workspace. A durable claim precedes
+launch; overlapping occurrences of the **same schedule** are blocked until the
+whole remote turn ends, including tool continuations. Different schedules may
+run concurrently. Missed recurring slots coalesce into one immediate catch-up
+run; overdue one-shots run once on reopening. There is no host wakeup, OS
+service, autostart, or execution while the owning process is stopped.
+
+Use `control_pack_schedule` with `schedule_id` and `action` set to `pause`,
+`resume`, or `cancel`. These affect future launches, not an already claimed
+task. Cancel is terminal. Updating requires the full host/project/model/prompt
+and `when`, and is refused while a run is active or uncertain; paused schedules
+stay paused. `list_pack_schedules` includes the latest 20 occurrences.
+
+A restart during a claimed/running occurrence, launch failure, or failed status
+query marks it `needs_inspection` and blocks further occurrences. There is **no
+automatic retry**: inspect the recorded host/session/workspace, verify the task
+is no longer running, then explicitly `acknowledge` its `occurrence_id` through
+the control tool. Acknowledgment never reruns that occurrence. `finished` only
+means the turn ended (including stop/error), not that its work was correct.
+
+Scheduling grants future execution with the host's existing permissions and
+credentials, not a new security boundary. No budget enforcement or automatic
+workspace cleanup is added. Review long-lived prompts, repo/runbook changes,
+disk growth, backend costs, and cancellation before authorizing recurring work.
+
 ## Features
 
 - **Streaming responses** with live markdown rendering and syntax-highlighted

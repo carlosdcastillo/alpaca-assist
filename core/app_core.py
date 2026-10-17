@@ -67,6 +67,9 @@ class AppCore:
         self.skill_manager = SkillManager()
         self._autosave_timer: threading.Timer | None = None
         self._shutdown_event = threading.Event()
+        # Lazy, unless persisted schedules need resuming after session restore.
+        self._pack_tasks: Any = None
+        self._pack_tasks_lock = threading.Lock()
         self.start_mcp_event_loop()
         self.load_mcp_servers()
         self.discover_skills()
@@ -211,10 +214,22 @@ class AppCore:
     def get_available_mcp_tools(self, tab: Any = None) -> list[dict[str, Any]]:
         """Get all available MCP tools in Ollama-compatible format."""
         import internal_tools
+        from core.pack_tasks import TOOLS
 
         available_tools: list[dict[str, Any]] = list(internal_tools.TOOL_SCHEMAS)
         if tab is not None and self.subagents.available(tab):
             available_tools.extend(SUBAGENT_TOOL_SCHEMAS)
+        available_tools.extend(
+            {
+                "type": "function",
+                "function": {
+                    "name": f"packtasks_{tool['name']}",
+                    "description": tool["description"],
+                    "parameters": tool["inputSchema"],
+                },
+            }
+            for tool in TOOLS
+        )
         mcp_tools = self.mcp_manager.get_available_tools()
         logger.debug(f"Debug: MCP Manager has {len(mcp_tools)} servers")
         logger.debug(f"Debug: Server names: {list(mcp_tools.keys())}")
@@ -233,6 +248,15 @@ class AppCore:
         logger.debug(f"Debug: Final tool count: {len(available_tools)}")
         return available_tools
 
+    def pack_task_service(self) -> Any:
+        from core.pack_tasks import PackTaskService
+
+        # Serialize lazy construction across stream/tool threads.
+        with self._pack_tasks_lock:
+            if self._pack_tasks is None:
+                self._pack_tasks = PackTaskService(self)
+            return self._pack_tasks
+
     def call_mcp_tool(
         self,
         server_name: str,
@@ -241,6 +265,16 @@ class AppCore:
         callback: Any | None = None,
     ) -> None:
         """Call an MCP tool and optionally execute a callback with the result."""
+        if server_name == "packtasks":
+            result: dict[str, Any]
+            try:
+                value = self.pack_task_service().call(tool_name, arguments)
+                result = {"content": [{"type": "text", "text": json.dumps(value)}]}
+            except Exception as exc:
+                result = {"error": str(exc)}
+            if callback:
+                callback(result)
+            return
         if not self.event_loop:
             logger.error(
                 f"[MCP] Cannot call tool '{tool_name}': event loop not running "
@@ -617,6 +651,15 @@ class AppCore:
         # Then schedule periodic saves
         self._schedule_next_autosave()
         logger.info("Autosave timer scheduled")
+        # Session restoration is complete before this lifecycle hook. Only start
+        # the scheduler automatically if this controller has persisted schedules.
+        from core.pack_scheduler import STORE
+
+        if Path(STORE).exists():
+            try:
+                self.pack_task_service().scheduler()
+            except Exception:
+                logger.exception("Could not resume Pack schedules")
 
     def _schedule_next_autosave(self) -> None:
         """Schedule the next autosave iteration."""
@@ -658,6 +701,8 @@ class AppCore:
 
     def shutdown(self) -> None:
         """Clean shutdown of the application."""
+        if self._pack_tasks is not None:
+            self._pack_tasks.close()
         self.stop_autosave()
         self.save_preferences()
         logger.info("Saving session on exit...")

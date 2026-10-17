@@ -97,6 +97,19 @@ class WebViewAPI:
         with self._lock:
             self._pending_updates.put(js_code)
 
+    def on_pack_task_created(self, tab: PackTab) -> None:
+        """Show a model-created Pack tab without stealing the user's focus."""
+        self._current_answer_index[tab.tab_id] = -1
+        self._safe_evaluate_js(
+            f"app.tabManager.createTabUI({json.dumps(tab.tab_id)}, "
+            f"{json.dumps(tab.title)}, false, true, {json.dumps(tab.project_name)}, "
+            f"{json.dumps(self._lookup_pack_display_name(tab.host))});",
+        )
+        self._safe_evaluate_js(
+            f"app.tabManager.setConversationId({json.dumps(tab.tab_id)}, "
+            f"{tab.conversation_id});",
+        )
+
     # =======================================================================
     # JavaScript-callable API methods
     # =======================================================================

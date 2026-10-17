@@ -594,6 +594,35 @@ class PackTab:
         )
         return result
 
+    def start_task(self, model: str, prompt: str) -> dict[str, Any]:
+        """Wait for project readiness, then select a model and submit once."""
+        if self._project_payload:
+            if not self._project_ready.wait(
+                timeout=PROJECT_SETUP_TIMEOUT + ATTACH_TIMEOUT,
+            ):
+                raise PackTransportError("timed out waiting for initial project setup")
+            if self.project_setup_error:
+                # A failed first setup is terminal for this launch. The normal
+                # interactive send path may reconnect; a task must not retry it.
+                raise PackTransportError(self.project_setup_error)
+        self._ensure_connected(timeout=ATTACH_TIMEOUT)
+        result: dict[str, Any] = self._transport.send_request(
+            "start_task",
+            {"model": model, "prompt": prompt},
+            timeout=SEND_MESSAGE_TIMEOUT,
+        )
+        self._current_answer_index = result["answer_index"]
+        return result
+
+    def get_task_status(self, answer_index: int) -> dict[str, Any]:
+        """Read whole-turn completion without reconnecting or resubmitting."""
+        result: dict[str, Any] = self._transport.send_request(
+            "task_status",
+            {"answer_index": answer_index},
+            timeout=MUTATE_TIMEOUT,
+        )
+        return result
+
     def get_workspace_status(self, max_age: float = 5.0) -> dict[str, Any] | None:
         if not self.project_name or not self.workspace_path or self.offline:
             return self._workspace_status

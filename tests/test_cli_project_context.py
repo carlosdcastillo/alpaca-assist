@@ -324,17 +324,63 @@ def test_proxy_dispatches_the_project_workspace_to_the_selected_backend() -> Non
             model="codex/gpt-5.6-sol",
             request_system="project instructions",
             working_directory="/srv/workspaces/alpaca-session",
+            pack_control="/tmp/controller-private.json",
         )
 
     assert (
         backend.stream_complete.call_args.kwargs["working_directory"]
         == "/srv/workspaces/alpaca-session"
     )
+    assert (
+        backend.stream_complete.call_args.kwargs["pack_control"]
+        == "/tmp/controller-private.json"
+    )
     system = backend.stream_complete.call_args.kwargs["system"]
     assert system[0]["text"] == SYSTEM_PROMPT
     assert "without extra workspace discovery" in system[0]["text"]
     assert system[0]["cache_control"] == {"type": "ephemeral"}
     assert system[1] == {"type": "text", "text": "project instructions"}
+
+
+@pytest.mark.parametrize(
+    ("model", "strict", "expected_status"),
+    [
+        ("not-a-model", True, 500),
+        ("not-a-model", False, 200),
+        ("claude-code/sonnet", True, 200),
+    ],
+)
+def test_task_requests_refuse_model_fallback_without_changing_regular_requests(
+    model,
+    strict,
+    expected_status,
+) -> None:
+    from http.server import ThreadingHTTPServer
+
+    import requests
+
+    backend = MagicMock()
+    backend.stream_complete.return_value = iter(())
+    server = ThreadingHTTPServer(("127.0.0.1", 0), OllamaRequestHandler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        with patch(
+            "anthropic_ollama_server.get_client_for_model",
+            return_value=backend,
+        ):
+            response = requests.post(
+                f"http://127.0.0.1:{server.server_port}/api/chat",
+                json={"model": model, "messages": [], "require_exact_model": strict},
+                timeout=5,
+            )
+        assert response.status_code == expected_status
+        if expected_status == 500:
+            assert "would fall back" in response.text
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(5)
 
 
 @pytest.mark.parametrize("workspace", [None, "/srv/workspaces/alpaca-session"])

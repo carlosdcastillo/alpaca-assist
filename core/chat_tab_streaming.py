@@ -150,6 +150,10 @@ class StreamingHandler:
             "prompt_images": images or [],
             "chat_history_images": chat_history_images,
         }
+        if data_payload["model"].startswith(("claude-code/", "codex/")):
+            data_payload["pack_control"] = (
+                self._chat._app_core.pack_task_service().control_file
+            )
 
         # Start the streaming request thread
         self._current_thread = threading.Thread(
@@ -254,6 +258,12 @@ class StreamingHandler:
             if surface_socket:
                 ollama_payload["surface_socket"] = surface_socket
 
+            if ollama_payload["model"].startswith(("claude-code/", "codex/")):
+                ollama_payload["pack_control"] = (
+                    self._chat._app_core.pack_task_service().control_file
+                )
+            if getattr(self._chat, "require_exact_model", False):
+                ollama_payload["require_exact_model"] = True
             # Make the continuation request
             api_url = self._chat.preferences.get(
                 "api_url",
@@ -366,6 +376,10 @@ class StreamingHandler:
             if surface_socket:
                 ollama_payload["surface_socket"] = surface_socket
 
+            if data_payload.get("pack_control"):
+                ollama_payload["pack_control"] = data_payload["pack_control"]
+            if getattr(self._chat, "require_exact_model", False):
+                ollama_payload["require_exact_model"] = True
             # Make the streaming request
             api_url = self._chat.preferences.get(
                 "api_url",

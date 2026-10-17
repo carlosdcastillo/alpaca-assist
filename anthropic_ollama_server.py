@@ -1196,6 +1196,9 @@ class OllamaRequestHandler(BaseHTTPRequestHandler):
                 surface_socket = request_data.get("surface_socket")
                 if not isinstance(surface_socket, str):
                     surface_socket = None
+                pack_control = request_data.get("pack_control")
+                if not isinstance(pack_control, str):
+                    pack_control = None
 
                 # Extract tool call token from headers for secure tag-based detection
                 tool_call_token = self.headers.get("X-Tool-Call-Token")
@@ -1211,6 +1214,14 @@ class OllamaRequestHandler(BaseHTTPRequestHandler):
 
                 # Use the model mapping function to get the Anthropic API model ID
                 model = map_ollama_to_model(requested_model)
+                if (
+                    request_data.get("require_exact_model")
+                    and model == DEFAULT_MODEL
+                    and requested_model != DEFAULT_MODEL
+                ):
+                    raise ValueError(
+                        f"Model {requested_model!r} would fall back to {DEFAULT_MODEL!r}; refusing task",
+                    )
                 _console_logger.debug(
                     "Requested model %s mapped to %s",
                     requested_model,
@@ -1242,6 +1253,7 @@ class OllamaRequestHandler(BaseHTTPRequestHandler):
                     conversation_id,
                     working_directory,
                     surface_socket,
+                    pack_control,
                 )
             except json.JSONDecodeError:
                 self.send_error(400, "Invalid JSON")
@@ -1260,6 +1272,7 @@ class OllamaRequestHandler(BaseHTTPRequestHandler):
         conversation_id: int | str | None = None,
         working_directory: str | None = None,
         surface_socket: str | None = None,
+        pack_control: str | None = None,
     ):
         """Handle requests with optional tools."""
         anthropic_tools = None
@@ -1291,6 +1304,7 @@ class OllamaRequestHandler(BaseHTTPRequestHandler):
             conversation_id=conversation_id,
             working_directory=working_directory,
             surface_socket=surface_socket,
+            pack_control=pack_control,
         )
         self._process_stream(stream, tool_call_token)
 
@@ -1371,6 +1385,7 @@ class ClaudeClient:
         conversation_id: int | str | None = None,
         working_directory: str | None = None,
         surface_socket: str | None = None,
+        pack_control: str | None = None,
     ) -> Generator[dict[str, Any], None, None]:
         """
         Send a streaming completion request to Claude 3.7 Sonnet
@@ -1515,6 +1530,7 @@ class FireworksClient:
         conversation_id: int | str | None = None,
         working_directory: str | None = None,
         surface_socket: str | None = None,
+        pack_control: str | None = None,
     ) -> Generator[dict[str, Any], None, None]:
         url = f"{self.base_url}/messages"
 
@@ -1618,6 +1634,7 @@ def _cli_mcp_servers(
     media_event_path: str,
     working_directory: str | None,
     surface_socket: str | None = None,
+    pack_control: str | None = None,
 ) -> dict[str, dict[str, Any]]:
     """Return configured MCP servers plus Alpaca's CLI media bridge."""
     servers: dict[str, dict[str, Any]] = {}
@@ -1639,6 +1656,15 @@ def _cli_mcp_servers(
                     servers[name]["env"] = dict(spec["env"])
         except (OSError, json.JSONDecodeError) as error:
             print(f"[warn] Could not read {MCP_SERVERS_FILE} for CLI MCP: {error}")
+
+    if pack_control:
+        servers["alpaca-pack-tasks"] = {
+            "command": sys.executable,
+            "args": [
+                os.path.join(os.path.dirname(__file__), "pack_task_mcp_server.py"),
+            ],
+            "env": {"ALPACA_PACK_CONTROL_FILE": pack_control},
+        }
 
     media_env = {"ALPACA_CLI_MEDIA_EVENTS": media_event_path}
     if working_directory:
@@ -1752,6 +1778,7 @@ def _build_claude_mcp_config_file(
     media_event_path: str,
     working_directory: str | None,
     surface_socket: str | None = None,
+    pack_control: str | None = None,
 ) -> str:
     """Translate alpaca-assist's mcp_servers.json into the schema `claude
     --mcp-config` actually expects.
@@ -1773,6 +1800,7 @@ def _build_claude_mcp_config_file(
                     media_event_path,
                     working_directory,
                     surface_socket,
+                    pack_control,
                 ),
             },
             f,
@@ -1784,6 +1812,7 @@ def _codex_mcp_overrides(
     media_event_path: str,
     working_directory: str | None,
     surface_socket: str | None = None,
+    pack_control: str | None = None,
 ) -> list[str]:
     """Build `-c mcp_servers.<name>...` overrides for `codex exec`.
 
@@ -1804,6 +1833,7 @@ def _codex_mcp_overrides(
         media_event_path,
         working_directory,
         surface_socket,
+        pack_control,
     ).items():
         if not re.fullmatch(r"[A-Za-z0-9_-]+", name):
             print(
@@ -2148,6 +2178,7 @@ class ClaudeCodeCLIClient:
         conversation_id: int | str | None = None,
         working_directory: str | None = None,
         surface_socket: str | None = None,
+        pack_control: str | None = None,
     ) -> Generator[dict[str, Any], None, None]:
         alias = model.split("/", 1)[1] if "/" in model else model
 
@@ -2186,6 +2217,7 @@ class ClaudeCodeCLIClient:
             media_event_path,
             working_directory,
             surface_socket,
+            pack_control,
         )
         cmd += ["--strict-mcp-config", "--mcp-config", mcp_config_path]
 
@@ -2373,6 +2405,7 @@ class CodexCLIClient:
         conversation_id: int | str | None = None,
         working_directory: str | None = None,
         surface_socket: str | None = None,
+        pack_control: str | None = None,
     ) -> Generator[dict[str, Any], None, None]:
         alias = model.split("/", 1)[1] if "/" in model else model
         prompt, image_temp_dir, image_paths = _prepare_cli_images(messages)
@@ -2414,7 +2447,12 @@ class CodexCLIClient:
         for image_path in image_paths:
             cmd.extend(("--image", image_path))
         cmd.extend(
-            _codex_mcp_overrides(media_event_path, working_directory, surface_socket),
+            _codex_mcp_overrides(
+                media_event_path,
+                working_directory,
+                surface_socket,
+                pack_control,
+            ),
         )
 
         yielded_start = False

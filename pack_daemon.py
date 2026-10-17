@@ -309,6 +309,44 @@ def make_dispatcher(
         if method == "send_message":
             tab.handle_user_message(params.get("message", ""), params.get("images", []))
             return {"answer_index": getattr(tab, "_current_answer_index", 0)}
+        if method == "start_task":
+            if tab.is_streaming or tab.chat_state.questions:
+                raise RuntimeError("start_task requires a fresh, idle Pack tab")
+            import requests
+
+            from utils import normalize_api_url
+
+            model = params["model"]
+            api_url = normalize_api_url(
+                tab.preferences.get("api_url", "http://localhost:11434"),
+            )
+            response = requests.get(f"{api_url}/api/tags", timeout=10)
+            response.raise_for_status()
+            offered = {m["name"] for m in response.json().get("models", [])}
+            if model not in offered:
+                raise ValueError(
+                    f"Model {model!r} is not offered by the target host's API",
+                )
+            tab.preferences["model"] = model
+            tab.require_exact_model = True
+            core.save_preferences()
+            tab.handle_user_message(params["prompt"], [])
+            return {"model": model, "answer_index": tab._current_answer_index}
+        if method == "task_status":
+            # streaming_end is per invocation, including between tool calls.
+            # Stop/error can finalize timing early; also wait for outstanding
+            # tools and the stream thread, as handle_user_message does.
+            timing = tab.chat_state.get_turn_timing(params["answer_index"])
+            with tab._tool_handler._pending_lock:
+                busy = tab.current_turn_timing is not None or bool(
+                    tab._tool_handler._pending_count,
+                )
+            thread = tab._streaming_handler._current_thread
+            busy = busy or (thread is not None and thread.is_alive())
+            return {
+                "status": "finished" if timing is not None and not busy else "running",
+                "timing": timing,
+            }
         if method == "configure_project":
             if tab.is_streaming:
                 raise RuntimeError("Cannot configure a project while streaming")
@@ -650,7 +688,6 @@ def main() -> None:
             core.save_preferences()
         _tab_id, tab = core.create_tab("Pack Tab")
 
-    core.start_autosave()
     adapter.set_tab(tab)
 
     # A CLI-backed model's tool subprocess (claude/codex) runs with the
@@ -680,6 +717,7 @@ def main() -> None:
     sock_path = session_dir / "daemon.sock"
     listener = _bind_socket(sock_path)
     logger.info(f"Pack daemon listening on {sock_path} (resumed={resumed})")
+    core.start_autosave()
 
     try:
         while True:

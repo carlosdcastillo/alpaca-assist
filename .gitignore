@@ -63,6 +63,7 @@ dmypy.json
 *.db
 *.sqlite
 *.sqlite3
+/pack_schedules.db*
 
 # Logs
 *.log
