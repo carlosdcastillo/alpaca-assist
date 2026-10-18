@@ -21,6 +21,7 @@ from anthropic_ollama_server import _extract_claude_cli_usage
 from anthropic_ollama_server import _extract_codex_cli_usage
 from anthropic_ollama_server import _run_cli_jsonl
 from core.chat_tab_streaming import StreamingHandler
+from image_tool_result import encode_image_result
 
 PROJECT_SYSTEM_BLOCKS = [
     {"type": "text", "text": "Base instructions."},
@@ -509,6 +510,22 @@ def test_cli_clients_materialize_user_images(
         "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk"
         "+A8AAQUBAScY42YAAAAASUVORK5CYII="
     )
+    image_result = encode_image_result("image/png", image, "Generated drawing")
+
+    def inspect_images(command, prompt, workspace, **kwargs):
+        import base64
+        import re
+
+        paths = re.findall(r"Attached image: (.+)", prompt)
+        assert len(paths) == 2
+        assert len(set(paths)) == 2
+        assert all(Path(path).read_bytes() == base64.b64decode(image) for path in paths)
+        assert image not in prompt
+        assert "@@ALPACA_IMAGE_RESULT@@" not in prompt
+        assert "Generated drawing" in prompt
+        assert "Describe it" in prompt
+        return iter(())
+
     with (
         patch(
             "anthropic_ollama_server._build_claude_mcp_config_file",
@@ -516,13 +533,20 @@ def test_cli_clients_materialize_user_images(
         ),
         patch(
             "anthropic_ollama_server._run_cli_jsonl",
-            return_value=iter(()),
+            side_effect=inspect_images,
         ) as run_cli,
     ):
         list(
             client.stream_complete(
                 messages=[
                     {"role": "user", "content": "Describe it", "images": [image]},
+                    {
+                        "role": "tool_result",
+                        "content": "Tool execution result:\n"
+                        + json.dumps(
+                            {"content": [{"type": "text", "text": image_result}]},
+                        ),
+                    },
                 ],
                 model=model,
             ),

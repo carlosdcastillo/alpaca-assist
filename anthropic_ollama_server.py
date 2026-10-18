@@ -1859,8 +1859,17 @@ def _prepare_cli_images(
     prepared: list[dict[str, Any]] = []
     for message_index, message in enumerate(messages):
         item = dict(message)
+        images = list(item.get("images", []))
+        # Stored image tool results carry base64 in their text sentinel.
+        # Reattach them like user images, never as millions of text tokens.
+        if item.get("role") == "tool_result" and isinstance(item.get("content"), str):
+            image_result = image_tool_result.parse_image_result(item["content"])
+            if image_result is not None:
+                _mime_type, image_data, description = image_result
+                images.append(image_data)
+                item["content"] = description
         image_lines: list[str] = []
-        for image_index, image in enumerate(item.get("images", [])):
+        for image_index, image in enumerate(images):
             try:
                 mime_type = _detect_image_format(image)
                 if mime_type is None:
