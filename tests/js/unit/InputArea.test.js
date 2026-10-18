@@ -290,6 +290,37 @@ describe("InputArea", () => {
       expect(inputArea.attachedImages).toHaveLength(0);
     });
 
+    it("keeps the attachment icon while adding and clearing the image count", async () => {
+      mockApi.attach_image = jest.fn().mockResolvedValue({
+        success: true,
+        data: "image-data",
+        mime_type: "image/png",
+        filename: "image.png",
+      });
+      const button = document.getElementById("attach-btn");
+
+      for (let count = 1; count <= 2; count++) {
+        button.click();
+        await Promise.resolve();
+        expect(button.textContent.trim()).toBe(String(count));
+        expect(button.querySelector("img").getAttribute("src")).toBe(
+          "icons/toolbar/attach.svg",
+        );
+        expect(button.querySelector(".attach-dark").getAttribute("src")).toBe(
+          "icons/toolbar/attach_dark.svg",
+        );
+      }
+
+      inputArea.clear();
+      expect(button.textContent).toBe("");
+      expect(button.querySelector("img").getAttribute("src")).toBe(
+        "icons/toolbar/attach.svg",
+      );
+      expect(button.querySelector(".attach-dark").getAttribute("src")).toBe(
+        "icons/toolbar/attach_dark.svg",
+      );
+    });
+
     it("focus should call markdownInput.focus", () => {
       const focusSpy = jest.spyOn(inputArea.markdownInput, "focus");
       inputArea.focus();

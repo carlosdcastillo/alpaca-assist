@@ -130,15 +130,15 @@
                     </button>
                     <div class="toolbar-tab-navigation" aria-label="Task navigation">
                         <button class="toolbar-btn toolbar-nav-btn" id="toolbar-tab-back" title="Back" aria-label="Back" disabled>
-                            <span class="toolbar-icon">←</span>
+                            <img class="toolbar-icon" src="icons/toolbar/back.svg" alt="" width="20" height="20">
                         </button>
                         <button class="toolbar-btn toolbar-nav-btn" id="toolbar-tab-forward" title="Forward" aria-label="Forward" disabled>
-                            <span class="toolbar-icon">→</span>
+                            <img class="toolbar-icon" src="icons/toolbar/forward.svg" alt="" width="20" height="20">
                         </button>
                     </div>
                     <div class="toolbar-new-tab-dropdown" id="toolbar-new-tab-dropdown">
                         <button class="toolbar-btn" id="toolbar-new-tab" title="New Task (Ctrl+N)" aria-haspopup="true" aria-expanded="false">
-                            <span class="toolbar-icon">+</span>
+                            <img class="toolbar-icon" src="icons/toolbar/new_task.svg" alt="" width="20" height="20">
                             <span class="toolbar-text">New Task</span>
                             <span class="new-tab-caret"></span>
                         </button>
@@ -155,11 +155,11 @@
                         </div>
                     </div>
                     <button class="toolbar-btn" id="toolbar-close-tab" title="Close Task (Ctrl+W)">
-                        <span class="toolbar-icon">×</span>
+                        <img class="toolbar-icon" src="icons/toolbar/close_task.svg" alt="" width="20" height="20">
                         <span class="toolbar-text">Close Task</span>
                     </button>
                     <button class="toolbar-btn" id="toolbar-history" title="Task History (Ctrl+Y)">
-                        <span class="toolbar-icon">🕐</span>
+                        <img class="toolbar-icon" src="icons/toolbar/history.svg" alt="" width="20" height="20">
                         <span class="toolbar-text">History</span>
                     </button>
                     <div class="toolbar-separator"></div>
@@ -216,9 +216,9 @@
                             </div>
                             <div class="input-toolbar">
                                 <div class="input-actions">
-                                    <button id="attach-btn" title="Attach images">📎</button>
-                                    <button id="stop-btn" title="Stop streaming" disabled>⏹</button>
-                                    <button id="send-btn" title="Send (Ctrl+Enter)">➤</button>
+                                    <button id="attach-btn" title="Attach images" aria-label="Attach images"><img class="toolbar-icon attach-light" src="icons/toolbar/attach.svg" alt="" width="20" height="20"><img class="toolbar-icon attach-dark" src="icons/toolbar/attach_dark.svg" alt="" width="20" height="20"></button>
+                                    <button id="stop-btn" title="Stop streaming" aria-label="Stop streaming" disabled><img class="toolbar-icon" src="icons/toolbar/stop.svg" alt="" width="20" height="20"></button>
+                                    <button id="send-btn" title="Send (Ctrl+Enter)" aria-label="Send"><img class="toolbar-icon" src="icons/toolbar/send.svg" alt="" width="20" height="20"></button>
                                 </div>
                             </div>
                             <div id="markdown-input-container"></div>

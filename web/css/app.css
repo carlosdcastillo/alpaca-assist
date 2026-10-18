@@ -242,8 +242,8 @@ button {
     align-items: center;
     gap: 6px;
     padding: 6px 12px;
-    background: var(--bg-tertiary);
-    border: 1px solid var(--border-color);
+    background: var(--bg-secondary);
+    border: 1px solid var(--bg-tertiary);
     border-radius: 4px;
     color: var(--text-primary);
     cursor: pointer;
@@ -253,8 +253,8 @@ button {
 }
 
 .toolbar-btn:hover:not(:disabled) {
-    background: var(--bg-hover);
-    border-color: var(--border-light);
+    background: var(--accent-secondary);
+    border-color: var(--accent-primary);
 }
 
 .toolbar-btn:active {
@@ -324,8 +324,19 @@ button {
 }
 
 .toolbar-icon {
-    font-size: 14px;
-    line-height: 1;
+    display: block;
+    width: 20px;
+    height: 20px;
+    flex-shrink: 0;
+}
+
+.attach-light,
+[data-theme="light"] .attach-dark {
+    display: none;
+}
+
+[data-theme="light"] .attach-light {
+    display: block;
 }
 
 .toolbar-text {
@@ -1347,8 +1358,11 @@ a[href^="alpaca://conv/"] {
 }
 
 .input-actions button {
-    background: var(--bg-tertiary);
-    border: 1px solid var(--border-color);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    background: var(--bg-secondary);
+    border: 1px solid var(--bg-tertiary);
     color: var(--text-primary);
     padding: 6px 12px;
     border-radius: 4px;
@@ -1357,7 +1371,8 @@ a[href^="alpaca://conv/"] {
 }
 
 .input-actions button:hover:not(:disabled) {
-    background: var(--bg-hover);
+    background: var(--accent-secondary);
+    border-color: var(--accent-primary);
 }
 
 .input-actions button:disabled {
@@ -1365,13 +1380,18 @@ a[href^="alpaca://conv/"] {
     cursor: not-allowed;
 }
 
-#send-btn {
-    background: var(--accent-primary);
-    color: white;
+/* Let the colored toolbar artwork stand on a quiet surface in light mode. */
+[data-theme="light"] .toolbar-btn,
+[data-theme="light"] .input-actions button {
+    background: var(--bg-primary);
+    border-color: var(--border-light);
+    color: var(--text-primary);
 }
 
-#send-btn:hover:not(:disabled) {
-    background: var(--accent-hover);
+.toolbar-btn:focus-visible,
+.input-actions button:focus-visible {
+    outline: 2px solid var(--accent-primary);
+    outline-offset: 2px;
 }
 
 /* Markdown Input Component */

@@ -1,0 +1,2 @@
+<?xml version='1.0' encoding='utf-8'?>
+<svg xmlns="http://www.w3.org/2000/svg" width="100.0" height="100.0" viewBox="0 0 100.0 100.0"><title>Stop</title><defs><linearGradient id="disk_grad" x1="0" y1="0" x2="0" y2="1"><stop id="disk_g0" offset="0" stop-color="#f07070" /><stop id="disk_g1" offset="1" stop-color="#d64545" /></linearGradient></defs><g id="icon"><circle id="disk" cx="50" cy="50" r="44" fill="url(#disk_grad)" stroke="#8f2424" stroke-width="4" /><rect id="square" x="32" y="32" width="36" height="36" rx="6" fill="#ffffff" /></g></svg>

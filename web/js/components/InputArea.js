@@ -228,11 +228,12 @@ class InputArea {
    * Update attach button state and image strip visibility
    */
   _updateAttachButton() {
-    // Update attach button text
+    // Keep the icon when showing or clearing the attachment count.
+    this.attachBtn.innerHTML =
+      '<img class="toolbar-icon attach-light" src="icons/toolbar/attach.svg" alt="" width="20" height="20">' +
+      '<img class="toolbar-icon attach-dark" src="icons/toolbar/attach_dark.svg" alt="" width="20" height="20">';
     if (this.attachedImages.length > 0) {
-      this.attachBtn.textContent = `📎 ${this.attachedImages.length}`;
-    } else {
-      this.attachBtn.textContent = "📎";
+      this.attachBtn.append(` ${this.attachedImages.length}`);
     }
 
     // Update image attachment strip
