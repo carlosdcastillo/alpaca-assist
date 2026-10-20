@@ -2157,38 +2157,29 @@ class AlpacaApp {
    * Render conversation state to chat display
    */
   _renderConversationState(state) {
-    console.log(
-      "[DEBUG] Rendering conversation state:",
-      JSON.stringify(state, null, 2),
-    );
-
     if (!state || !state.chat_state) {
       console.warn("[DEBUG] No chat_state in state");
       return;
     }
 
     const chatState = state.chat_state;
-    console.log("[DEBUG] chatState type:", typeof chatState);
-    console.log("[DEBUG] chatState keys:", Object.keys(chatState));
-
-    // Check if it's ConversationGraph format (has 'graph' key) or legacy ChatState format
-    if (chatState.graph) {
-      console.log("[DEBUG] Rendering ConversationGraph format");
-      // New ConversationGraph format
-      this._renderConversationGraph(chatState.graph);
-    } else if (chatState.questions && chatState.answers) {
-      console.log("[DEBUG] Rendering legacy ChatState format");
-      console.log("[DEBUG] Questions count:", chatState.questions.length);
-      console.log("[DEBUG] Answers count:", chatState.answers.length);
-      console.log("[DEBUG] First question:", chatState.questions[0]);
-      console.log("[DEBUG] First answer:", chatState.answers[0]);
-      // Legacy ChatState format
-      this._renderLegacyChatState(chatState);
-    } else {
-      console.warn(
-        "[DEBUG] Unknown chat state format:",
-        Object.keys(chatState),
-      );
+    // History is replayed synchronously. Avoid forcing layout for every
+    // question/token update; scroll once after the whole DOM is populated.
+    this.chatDisplay.isRestoringHistory = true;
+    try {
+      if (chatState.graph) {
+        this._renderConversationGraph(chatState.graph);
+      } else if (chatState.questions && chatState.answers) {
+        this._renderLegacyChatState(chatState);
+      } else {
+        console.warn(
+          "[DEBUG] Unknown chat state format:",
+          Object.keys(chatState),
+        );
+      }
+    } finally {
+      this.chatDisplay.isRestoringHistory = false;
+      this.chatDisplay.scrollToBottom();
     }
   }
 
@@ -2204,9 +2195,10 @@ class AlpacaApp {
     while (nodeId) {
       const node = graph.nodes[nodeId];
       if (!node) break;
-      activePath.unshift(nodeId);
+      activePath.push(nodeId);
       nodeId = node.parent_id ?? null;
     }
+    activePath.reverse();
 
     // Walk active path, pairing user/assistant nodes and rendering them.
     let answerIndex = 0;
@@ -2421,20 +2413,10 @@ class AlpacaApp {
     const turnTimings = chatState.turn_timings || [];
     let previousEnd = null;
 
-    console.log("[DEBUG] _renderLegacyChatState called");
-    console.log("[DEBUG] questions:", questions.length);
-    console.log("[DEBUG] answers:", answers.length);
-
     for (let i = 0; i < questions.length; i++) {
-      console.log(`[DEBUG] Rendering Q&A pair ${i}`);
-
       // Render question
       const questionImages = (chatState.question_images?.[i] || []).map((b64) =>
         this._base64ToDataUri(b64),
-      );
-      console.log(
-        `[DEBUG] Adding question ${i}:`,
-        questions[i].substring(0, 50),
       );
       this.chatDisplay.addQuestion(questions[i], questionImages, {
         timestamp: questionTimes[i],
@@ -2450,11 +2432,8 @@ class AlpacaApp {
       // Render answer if exists
       if (i < answers.length && answers[i]) {
         const answer = answers[i];
-        console.log(`[DEBUG] Answer ${i} type:`, typeof answer);
-        console.log(`[DEBUG] Answer ${i} value:`, answer);
 
         if (typeof answer === "string") {
-          console.log(`[DEBUG] Rendering string answer ${i}`);
           this.chatDisplay.appendContent({
             type: "content",
             content: answer,
@@ -2462,7 +2441,6 @@ class AlpacaApp {
             is_done: true,
           });
         } else if (answer.components) {
-          console.log(`[DEBUG] Rendering FullAnswer ${i} with components`);
           this._renderFullAnswer(answer, i);
         } else {
           console.warn(
@@ -2470,13 +2448,10 @@ class AlpacaApp {
             Object.keys(answer),
           );
         }
-      } else {
-        console.log(`[DEBUG] No answer for question ${i}`);
       }
     }
 
     this._lastTurnEnd = previousEnd;
-    console.log("[DEBUG] _renderLegacyChatState complete");
   }
 
   /**

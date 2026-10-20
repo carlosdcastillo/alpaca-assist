@@ -33,6 +33,7 @@ class ChatDisplay {
 
     // Track streaming state
     this.isStreaming = false;
+    this.isRestoringHistory = false;
     this.currentAnswerIndex = -1;
 
     // Map answer_index -> serialized TurnTiming. Held separately from the
@@ -507,7 +508,7 @@ class ChatDisplay {
 
     // Snapshot scroll position before the DOM update — scrollHeight grows
     // after content is added, so checking afterwards always looks "far".
-    const nearBottom = this._isNearBottom();
+    const nearBottom = !this.isRestoringHistory && this._isNearBottom();
 
     // Update current answer index
     this.currentAnswerIndex = answer_index;
@@ -1489,6 +1490,7 @@ class ChatDisplay {
    * Scroll to bottom of container
    */
   scrollToBottom() {
+    if (this.isRestoringHistory) return;
     this.container.scrollTop = this.container.scrollHeight;
   }
 

@@ -27,6 +27,8 @@ require("../../../web/js/utils/imageResult.js");
 
 // Load the module - this populates window.ChatDisplay
 require("../../../web/js/components/ChatDisplay.js");
+require("../../../web/js/utils/timeFormat.js");
+require("../../../web/js/app.js");
 
 describe("ChatDisplay", () => {
   let ChatDisplay;
@@ -71,6 +73,66 @@ describe("ChatDisplay", () => {
     document.body.innerHTML = "";
     jest.clearAllMocks();
   });
+
+  it.each(["legacy", "graph"])(
+    "restores %s history in order at the bottom, then respects live scroll position",
+    (format) => {
+      const app = Object.create(window.AlpacaApp.prototype);
+      app.chatDisplay = chatDisplay;
+      Object.defineProperties(container, {
+        scrollHeight: { get: () => container.children.length * 300 },
+        clientHeight: { value: 200 },
+      });
+      const chatState =
+        format === "legacy"
+          ? { questions: ["First", "Second"], answers: ["Alpha", "Beta"] }
+          : {
+              graph: {
+                active_node_id: "a2",
+                nodes: {
+                  q1: { role: "user", content: "First", parent_id: null },
+                  a1: { role: "assistant", content: "Alpha", parent_id: "q1" },
+                  q2: { role: "user", content: "Second", parent_id: "a1" },
+                  a2: { role: "assistant", content: "Beta", parent_id: "q2" },
+                  unused: {
+                    role: "assistant",
+                    content: "Inactive branch",
+                    parent_id: "q1",
+                  },
+                },
+              },
+            };
+
+      app._renderConversationState({ chat_state: chatState });
+
+      expect(
+        [
+          ...container.querySelectorAll(".message-content, .answer-segment"),
+        ].map((el) => el.textContent),
+      ).toEqual(["First", "Alpha", "Second", "Beta"]);
+      expect(container.scrollTop).toBe(container.scrollHeight);
+      container.scrollTop = 0;
+      chatDisplay.appendContent({
+        type: "content",
+        content: " continued",
+        answer_index: 1,
+        is_done: true,
+      });
+      expect(container.scrollTop).toBe(0);
+      expect(container.querySelector(".answer-1")).toHaveTextContent(
+        "Beta continued",
+      );
+
+      container.scrollTop = container.scrollHeight - container.clientHeight;
+      chatDisplay.appendContent({
+        type: "content",
+        content: " at bottom",
+        answer_index: 1,
+        is_done: true,
+      });
+      expect(container.scrollTop).toBe(container.scrollHeight);
+    },
+  );
 
   describe("initialization", () => {
     it("should store container reference", () => {

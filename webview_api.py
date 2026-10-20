@@ -409,35 +409,8 @@ class WebViewAPI:
 
             # Get base serializable data
             state = tab.get_serializable_data()
-
-            # Ensure chat_state is properly serialized
+            # Both local and Pack tabs serialize chat_state in this snapshot.
             chat_state = state.get("chat_state", {})
-
-            # If it's a ConversationGraph, ensure it's fully serialized
-            if hasattr(tab.chat_state, "to_dict"):
-                chat_state = tab.chat_state.to_dict()
-                state["chat_state"] = chat_state
-
-            # DEBUG: Log the actual structure
-            logger.debug(f"[DEBUG] chat_state type: {type(tab.chat_state)}")
-            logger.debug(
-                f"[DEBUG] chat_state keys: {chat_state.keys() if isinstance(chat_state, dict) else 'N/A'}",
-            )
-            if isinstance(chat_state, dict):
-                if "questions" in chat_state:
-                    logger.debug(
-                        f"[DEBUG] questions count: {len(chat_state['questions'])}",
-                    )
-                if "answers" in chat_state:
-                    logger.debug(f"[DEBUG] answers count: {len(chat_state['answers'])}")
-                    for i, ans in enumerate(chat_state["answers"]):
-                        logger.debug(
-                            f"[DEBUG] answer[{i}] type: {type(ans)}, value: {ans}",
-                        )
-                if "graph" in chat_state:
-                    logger.debug(
-                        f"[DEBUG] graph nodes count: {len(chat_state['graph'].get('nodes', {}))}",
-                    )
 
             # Add metadata for the frontend
             state["_metadata"] = {
