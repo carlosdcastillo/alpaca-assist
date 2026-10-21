@@ -40,13 +40,163 @@ describe("TabManager", () => {
       create_pack_tab: jest.fn(),
       close_tab: jest.fn(),
       switch_tab: jest.fn(),
+      save_preferences: jest.fn().mockResolvedValue({ success: true }),
     };
 
     tabManager = new TabManager("tab-container", mockApi);
   });
 
   afterEach(() => {
+    tabManager.destroy();
     document.body.innerHTML = "";
+  });
+
+  describe("tab organization", () => {
+    beforeEach(() => {
+      for (const [id, conv] of [
+        ["a", 41],
+        ["b", 73],
+        ["c", 105],
+        ["child", 106],
+      ]) {
+        tabManager.createTabUI(id, id, false);
+        tabManager.setConversationId(id, conv);
+      }
+      tabManager.setSubagentInfo("child", {
+        parent_conversation_id: 73,
+        status: "running",
+        task_id: "task",
+      });
+    });
+
+    it("pins groups, retains independent colors, and restores using permanent IDs", async () => {
+      tabManager.setTabPinned("b", true);
+      tabManager.setTabColor("child", "purple");
+      expect(tabManager.getAllTabIds()).toEqual(["b", "child", "a", "c"]);
+      expect(tabManager.reorderTab("a", "b")).toBe(false);
+      tabManager.moveTab("c", -1);
+      expect(tabManager.getAllTabIds()).toEqual(["b", "child", "c", "a"]);
+      await tabManager._saveLayoutQueue;
+      const saved = mockApi.save_preferences.mock.calls.at(-1)[0].tab_layout;
+      tabManager.destroy();
+      container.replaceChildren();
+      tabManager = new TabManager("tab-container", mockApi);
+      tabManager.applyLayout(saved);
+      // Opposite creation order and new ephemeral tab IDs, as on restart.
+      for (const [id, conv] of [
+        ["new-c", 105],
+        ["new-a", 41],
+        ["new-b", 73],
+        ["new-child", 106],
+      ]) {
+        tabManager.createTabUI(id, id, false);
+        tabManager.setConversationId(id, conv);
+      }
+      tabManager.setSubagentInfo("new-child", {
+        parent_conversation_id: 73,
+        status: "running",
+        task_id: "task",
+      });
+      expect(tabManager.getAllTabIds()).toEqual([
+        "new-b",
+        "new-child",
+        "new-c",
+        "new-a",
+      ]);
+      expect(
+        tabManager.getTab("new-b").button.classList.contains("pinned"),
+      ).toBe(true);
+      expect(tabManager.getTab("new-child").button.dataset.color).toBe(
+        "purple",
+      );
+      tabManager.setTabPinned("new-b", false);
+      tabManager.moveTab("new-b", 1);
+      expect(tabManager.getAllTabIds()).toEqual([
+        "new-c",
+        "new-b",
+        "new-child",
+        "new-a",
+      ]);
+      tabManager.createTabUI("fresh", "Fresh task", false);
+      tabManager.setConversationId("fresh", 200);
+      expect(tabManager.getAllTabIds().at(-1)).toBe("fresh");
+    });
+
+    it("reorders multiple pins and siblings without detaching children", () => {
+      tabManager.createTabUI("sibling", "Sibling", false);
+      tabManager.setConversationId("sibling", 107);
+      tabManager.setSubagentInfo("sibling", {
+        parent_conversation_id: 73,
+        status: "running",
+        task_id: "other-task",
+      });
+      tabManager.moveTab("sibling", -1);
+      expect(tabManager.getAllTabIds()).toEqual([
+        "a",
+        "b",
+        "sibling",
+        "child",
+        "c",
+      ]);
+      tabManager.setTabPinned("a", true);
+      tabManager.setTabPinned("b", true);
+      tabManager.moveTab("b", -1);
+      expect(tabManager.getAllTabIds()).toEqual([
+        "b",
+        "sibling",
+        "child",
+        "a",
+        "c",
+      ]);
+      tabManager.setSubagentInfo("child", {
+        parent_conversation_id: 73,
+        status: "complete",
+        task_id: "task",
+      });
+      expect(tabManager.getAllTabIds()).toEqual([
+        "b",
+        "sibling",
+        "child",
+        "a",
+        "c",
+      ]);
+      expect(tabManager.reorderTab("child", "c")).toBe(false);
+    });
+
+    it("reorders from keyboard without activating, respects boundaries and keeps focus", () => {
+      const button = tabManager.getTab("c").button;
+      button.focus();
+      button.dispatchEvent(
+        new KeyboardEvent("keydown", {
+          key: "ArrowUp",
+          altKey: true,
+          shiftKey: true,
+          bubbles: true,
+        }),
+      );
+      expect(tabManager.getAllTabIds()).toEqual(["a", "c", "b", "child"]);
+      expect(document.activeElement).toBe(button);
+      expect(mockApi.switch_tab).not.toHaveBeenCalled();
+      tabManager.moveTab("a", -1);
+      expect(tabManager.getAllTabIds()).toEqual(["a", "c", "b", "child"]);
+      expect(tabManager.reorderTab("child", "a")).toBe(false);
+    });
+
+    it("exposes keyboard-operable actions, color clearing, and focus restoration", () => {
+      const actions = tabManager
+        .getTab("a")
+        .button.querySelector(".tab-actions");
+      actions.click();
+      const menu = document.querySelector('[role="dialog"]');
+      [...menu.querySelectorAll("button")]
+        .find((b) => b.textContent === "Blue")
+        .click();
+      expect(tabManager.getTab("a").button.dataset.color).toBe("blue");
+      expect(document.activeElement).toBe(actions);
+      actions.click();
+      document.querySelector('.tab-layout-menu [data-color="none"]').click();
+      expect(tabManager.getTab("a").button.dataset.color).toBe("none");
+    });
   });
 
   describe("initialization", () => {

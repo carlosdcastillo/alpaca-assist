@@ -726,6 +726,7 @@ class AlpacaApp {
    * Apply preferences to UI
    */
   _applyPreferences(prefs) {
+    if (prefs.tab_layout) this.tabManager.applyLayout(prefs.tab_layout);
     // Theme. Only "dark" (the default, no attribute needed) and "light"
     // (web/css/themes.css [data-theme="light"]) are real themes. A stale or
     // otherwise unrecognized value (e.g. a preferences.json predating this
