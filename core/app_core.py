@@ -257,6 +257,23 @@ class AppCore:
                 self._pack_tasks = PackTaskService(self)
             return self._pack_tasks
 
+    def call_internal_tool(
+        self,
+        tool_name: str,
+        arguments: dict[str, Any],
+    ) -> dict[str, Any]:
+        import internal_tools
+
+        if tool_name in internal_tools.CONVERSATION_TOOL_NAMES:
+            arguments = {
+                **arguments,
+                "_db_path": self.db.db_path,
+                "_open_conversations": [
+                    tab.get_serializable_data() for tab in list(self.tabs.values())
+                ],
+            }
+        return internal_tools.call_tool(tool_name, arguments)
+
     def call_mcp_tool(
         self,
         server_name: str,

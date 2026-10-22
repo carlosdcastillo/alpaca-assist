@@ -1,4 +1,4 @@
-"""MCP access to Alpaca Assist's saved conversation history.
+"""MCP access to Alpaca Assist's open and saved conversation history.
 
 CLI-backed models do not receive Alpaca's in-process internal tools, so this
 server exposes the existing conversation handlers over the MCP transport they
@@ -9,6 +9,7 @@ the CLI's working directory may be an unrelated project workspace.
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 from typing import Any
 
@@ -18,19 +19,16 @@ from mcp.types import TextContent
 from mcp.types import Tool
 
 import internal_tools
+from core.pack_tasks import call_control
 
 DATABASE_ENV = "ALPACA_CONVERSATIONS_DB"
-TOOL_NAMES = {
-    "search_conversations",
-    "get_conversation",
-    "get_tool_details",
-    "dump_conversations",
-}
+CONTROL_ENV = "ALPACA_PACK_CONTROL_FILE"
+TOOL_NAMES = internal_tools.CONVERSATION_TOOL_NAMES
 
 server = Server(
     "conversation-history",
     instructions=(
-        "Search and read the user's saved Alpaca Assist conversation history. "
+        "Search and read the user's open and saved Alpaca Assist conversations. "
         "When asked about recurring themes, interests, or patterns across the "
         "whole history, use dump_conversations with include_content=true, then "
         "read and analyze the exported JSON. Use search_conversations for a "
@@ -69,13 +67,23 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent]:
     if name not in TOOL_NAMES:
         return [TextContent(type="text", text=f"Unknown tool: {name}")]
 
-    db_path = os.environ.get(DATABASE_ENV)
-    if not db_path:
-        return [TextContent(type="text", text=f"Error: {DATABASE_ENV} is not set")]
-
-    forwarded = dict(arguments)
-    forwarded["_db_path"] = db_path
-    result = internal_tools.call_tool(name, forwarded)
+    control_path = os.environ.get(CONTROL_ENV)
+    if control_path:
+        with open(control_path, encoding="utf-8") as file:
+            control = json.load(file)
+        forwarded = dict(arguments)
+        if name == "dump_conversations":
+            forwarded["output_path"] = os.path.abspath(
+                str(arguments.get("output_path", "conversations_export.json")),
+            )
+        result = await asyncio.to_thread(call_control, control, name, forwarded)
+    else:
+        db_path = os.environ.get(DATABASE_ENV)
+        if not db_path:
+            return [TextContent(type="text", text=f"Error: {DATABASE_ENV} is not set")]
+        forwarded = dict(arguments)
+        forwarded["_db_path"] = db_path
+        result = internal_tools.call_tool(name, forwarded)
     content = result.get("content", [])
     text = "\n".join(
         str(item.get("text", ""))

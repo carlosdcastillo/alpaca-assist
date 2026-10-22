@@ -159,6 +159,10 @@ class PackTaskService:
         *,
         task_id: str | None = None,
     ) -> dict[str, Any]:
+        from internal_tools import CONVERSATION_TOOL_NAMES
+
+        if method in CONVERSATION_TOOL_NAMES:
+            return dict(self.core.call_internal_tool(method, params))
         schema = next((t["inputSchema"] for t in TOOLS if t["name"] == method), None)
         if schema is None:
             raise ValueError(f"Unknown Pack task tool: {method}")

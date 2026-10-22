@@ -325,6 +325,11 @@ class ToolHandler:
                         answer_index,
                         tool_id,
                     )
+                elif tool_name in internal_tools.CONVERSATION_TOOL_NAMES:
+                    result = self._chat._app_core.call_internal_tool(
+                        tool_name,
+                        arguments,
+                    )
                 else:
                     result = internal_tools.call_tool(tool_name, arguments)
                 callback(result)

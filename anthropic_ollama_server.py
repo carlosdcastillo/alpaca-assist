@@ -1676,7 +1676,7 @@ def _cli_mcp_servers(
     }
 
     # CLI-backed models run their own agent loop and therefore never receive
-    # AppCore's in-process internal tools. Expose the saved-conversation tools
+    # AppCore's in-process internal tools. Expose the conversation tools
     # over MCP, with an explicit path because the CLI cwd is commonly a project
     # workspace rather than the directory that owns conversations.db. A Pack
     # socket identifies its session directory and therefore its isolated DB.
@@ -1695,6 +1695,11 @@ def _cli_mcp_servers(
             "args": [conversation_script],
             "env": {"ALPACA_CONVERSATIONS_DB": conversation_db},
         }
+        if pack_control:
+            # Ask the owning AppCore for live tabs as well as its saved DB.
+            servers["conversation-history"]["env"][
+                "ALPACA_PACK_CONTROL_FILE"
+            ] = pack_control
 
     # Unlike a raw mcp_servers.json entry (left as-is above, matching alpaca's
     # own flat-command format), this one must survive the CLI subprocess's

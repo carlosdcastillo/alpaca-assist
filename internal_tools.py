@@ -719,6 +719,55 @@ def run_shell_command(arguments: dict[str, Any]) -> dict[str, Any]:
 # Conversation tools (search / read conversation history)
 # ---------------------------------------------------------------------------
 
+CONVERSATION_TOOL_NAMES = {
+    "search_conversations",
+    "get_conversation",
+    "get_tool_details",
+    "dump_conversations",
+}
+
+
+def _conv_rows(
+    arguments: dict[str, Any],
+    conv_id: int | None = None,
+) -> list[dict[str, Any]]:
+    """Open tabs override saved copies; never persist a tab just to read it."""
+    live = arguments.get("_open_conversations", [])
+    conn = _conv_open_db(str(arguments.get("_db_path", CONVERSATIONS_DB)))
+    try:
+        sql = (
+            "SELECT id, title, created_date, closed_date, chat_data FROM conversations"
+        )
+        rows = conn.execute(
+            sql
+            + (
+                " WHERE id = ?" if conv_id is not None else " ORDER BY closed_date DESC"
+            ),
+            (conv_id,) if conv_id is not None else (),
+        ).fetchall()
+    finally:
+        conn.close()
+    saved = {row["id"]: dict(row) for row in rows}
+    merged = []
+    for tab in live:
+        tab_id = tab["conversation_id"]
+        if conv_id is not None and tab_id != conv_id:
+            continue
+        previous = saved.pop(tab_id, {})
+        merged.append(
+            {
+                "id": tab_id,
+                "title": tab["name"],
+                "created_date": previous.get(
+                    "created_date",
+                    tab.get("created_date", ""),
+                ),
+                "closed_date": previous.get("closed_date", ""),
+                "chat_data": json.dumps(tab),
+            },
+        )
+    return merged + list(saved.values())
+
 
 def _conv_open_db(db_path: str = CONVERSATIONS_DB) -> sqlite3.Connection:
     conn = sqlite3.connect(db_path, check_same_thread=False)
@@ -936,17 +985,9 @@ def search_conversations(arguments: dict[str, Any]) -> dict[str, Any]:
         return _err("'query' argument is required")
     search_content = bool(arguments.get("search_content", False))
     limit = min(int(arguments.get("limit", 20)), 100)
-    db_path = str(arguments.get("_db_path", CONVERSATIONS_DB))
 
     try:
-        conn = _conv_open_db(db_path)
-        try:
-            rows = conn.execute(
-                "SELECT id, title, created_date, chat_data FROM conversations"
-                " ORDER BY closed_date DESC",
-            ).fetchall()
-        finally:
-            conn.close()
+        rows = _conv_rows(arguments)
     except Exception as e:
         return _err(f"Error opening database: {e}")
 
@@ -998,17 +1039,10 @@ def get_conversation(arguments: dict[str, Any]) -> dict[str, Any]:
     if conv_id is None:
         return _err(f"Invalid conversation_id '{raw_id}'")
     include_tool_calls = bool(arguments.get("include_tool_calls", False))
-    db_path = str(arguments.get("_db_path", CONVERSATIONS_DB))
 
     try:
-        conn = _conv_open_db(db_path)
-        try:
-            row = conn.execute(
-                "SELECT chat_data, title, created_date FROM conversations WHERE id = ?",
-                (conv_id,),
-            ).fetchone()
-        finally:
-            conn.close()
+        rows = _conv_rows(arguments, conv_id)
+        row = rows[0] if rows else None
     except Exception as e:
         return _err(f"Error opening database: {e}")
 
@@ -1036,17 +1070,9 @@ def get_tool_details(arguments: dict[str, Any]) -> dict[str, Any]:
     except (TypeError, ValueError):
         return _err("'turn_index' must be an integer")
 
-    db_path = str(arguments.get("_db_path", CONVERSATIONS_DB))
-
     try:
-        conn = _conv_open_db(db_path)
-        try:
-            row = conn.execute(
-                "SELECT chat_data, title FROM conversations WHERE id = ?",
-                (conv_id,),
-            ).fetchone()
-        finally:
-            conn.close()
+        rows = _conv_rows(arguments, conv_id)
+        row = rows[0] if rows else None
     except Exception as e:
         return _err(f"Error opening database: {e}")
 
@@ -1097,17 +1123,9 @@ def dump_conversations(arguments: dict[str, Any]) -> dict[str, Any]:
     output_path = str(arguments.get("output_path", "conversations_export.json"))
     include_content = bool(arguments.get("include_content", True))
     include_tool_names = bool(arguments.get("include_tool_names", False))
-    db_path = str(arguments.get("_db_path", CONVERSATIONS_DB))
 
     try:
-        conn = _conv_open_db(db_path)
-        try:
-            rows = conn.execute(
-                "SELECT id, title, created_date, closed_date, chat_data"
-                " FROM conversations ORDER BY closed_date DESC",
-            ).fetchall()
-        finally:
-            conn.close()
+        rows = _conv_rows(arguments)
     except Exception as e:
         return _err(f"Error opening database: {e}")
 
@@ -1458,7 +1476,7 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "internal_search_conversations",
-            "description": "Search past conversations by keyword. Searches titles by default; set search_content=true to also scan question/answer text. Returns clickable alpaca://conv/N links.",
+            "description": "Search open tabs and saved conversations by keyword. Searches titles by default; set search_content=true to also scan question/answer text. Returns clickable alpaca://conv/N links.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -1485,7 +1503,7 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "internal_get_conversation",
-            "description": "Get a readable Q&A transcript of a past conversation. Accepts a bare integer ID or an alpaca://conv/N URI.",
+            "description": "Get a readable Q&A transcript of an open or saved conversation. Open tabs return their current content. Accepts a bare integer ID or an alpaca://conv/N URI.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -1528,7 +1546,7 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "internal_dump_conversations",
-            "description": "Export the full conversation history to a JSON file on disk. Tool results (file contents, command output) are excluded from the export.",
+            "description": "Export open tabs and saved conversation history to a JSON file on disk, with one entry per conversation and current open-tab content preferred over saved copies. Tool results (file contents, command output) are excluded from the export.",
             "parameters": {
                 "type": "object",
                 "properties": {
