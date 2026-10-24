@@ -35,6 +35,22 @@ class ChatDisplay {
     this.isStreaming = false;
     this.isRestoringHistory = false;
     this.currentAnswerIndex = -1;
+    this._followImageLoads = false;
+    this.container.addEventListener("scroll", () => {
+      this._followImageLoads = this._isNearBottom();
+    });
+    this.container.addEventListener(
+      "load",
+      (event) => {
+        if (
+          event.target instanceof HTMLImageElement &&
+          this._followImageLoads
+        ) {
+          this.scrollToBottom();
+        }
+      },
+      true,
+    );
 
     // Map answer_index -> serialized TurnTiming. Held separately from the
     // answer buffers because on the re-render path timing is known before the
@@ -266,6 +282,15 @@ class ChatDisplay {
     // DOMPurify strips unrecognized URL schemes from href by default.
     // This global hook runs for every DOMPurify.sanitize() call in the app.
     DOMPurify.addHook("uponSanitizeAttribute", (node, data) => {
+      // Blob image sources are inert pixels, not navigable HTML documents.
+      // Keep this restricted to img.src; blob links remain sanitized normally.
+      if (
+        node.tagName === "IMG" &&
+        data.attrName === "src" &&
+        data.attrValue.startsWith("blob:")
+      ) {
+        data.forceKeepAttr = true;
+      }
       if (
         data.attrName === "href" &&
         typeof data.attrValue === "string" &&
@@ -479,6 +504,10 @@ class ChatDisplay {
     const next = document.createElement("div");
     const { protectedText, formulas } = this._protectMath(text);
     next.innerHTML = DOMPurify.sanitize(marked.parse(protectedText));
+    for (const image of next.querySelectorAll("img")) {
+      image.loading = "lazy";
+      image.decoding = "async";
+    }
     this._restoreMathTokens(next, formulas);
     this._renderMath(next);
     this._updateRenderedChildren(element, next);
@@ -927,7 +956,7 @@ class ChatDisplay {
 
   /**
    * Resolve `alpaca://image/<tool_call_id>` markdown image refs to the
-   * matching view_image result's data: URI, using only this same answer's
+   * matching view_image result's blob URL, using only this same answer's
    * own tool results (see registerToolResult's docstring for why this is
    * scoped per-answer rather than a global lookup). Unresolved refs are
    * left as-is — marked/DOMPurify renders them as a normal broken image
@@ -946,7 +975,7 @@ class ChatDisplay {
     const imageResults = results
       ? [...results.entries()].filter(
           ([, c]) =>
-            window.ImageResultUtils?.parse(c) || this._isGatedToolResult(c),
+            window.ImageResultUtils?.load(c) || this._isGatedToolResult(c),
         )
       : [];
     let positionalIdx = 0;
@@ -957,12 +986,12 @@ class ChatDisplay {
         [realId, content] = imageResults[positionalIdx];
       }
       positionalIdx++;
-      const parsed = content && window.ImageResultUtils?.parse(content);
+      const parsed = content && window.ImageResultUtils?.load(content);
       if (!parsed) {
         this._loadGatedToolResult(answerIndex, realId, content);
         return match;
       }
-      return `data:${parsed.mimeType};base64,${parsed.base64Data}`;
+      return parsed.url;
     });
   }
 
@@ -1491,6 +1520,7 @@ class ChatDisplay {
    */
   scrollToBottom() {
     if (this.isRestoringHistory) return;
+    this._followImageLoads = true;
     this.container.scrollTop = this.container.scrollHeight;
   }
 
@@ -1499,6 +1529,8 @@ class ChatDisplay {
    */
   clear() {
     this._closeImageOverlay();
+    this._followImageLoads = false;
+    window.ImageResultUtils?.clear();
     window.VideoResultUtils?.clear();
     this.gatedToolResultEpoch += 1;
     this.container.innerHTML = "";
@@ -1572,6 +1604,8 @@ class ChatDisplay {
 
       for (const img of images) {
         const imgEl = document.createElement("img");
+        imgEl.loading = "lazy";
+        imgEl.decoding = "async";
         imgEl.src = img;
         imagesEl.appendChild(imgEl);
       }

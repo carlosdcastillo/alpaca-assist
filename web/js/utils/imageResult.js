@@ -10,6 +10,7 @@
 const ImageResultUtils = {
   SENTINEL: "@@ALPACA_IMAGE_RESULT@@",
   FIELD_SEP: "@@ALPACA_FIELD@@",
+  _cache: new Map(),
   SAFE_MIME_TYPES: new Set([
     "image/gif",
     "image/jpeg",
@@ -66,6 +67,28 @@ const ImageResultUtils = {
     const description =
       quoteIdx !== -1 ? rawDescription.slice(0, quoteIdx) : rawDescription;
     return { mimeType, base64Data, description };
+  },
+
+  /** Reuse decoded bytes without sending base64 through Markdown/HTML parsing. */
+  load(content) {
+    const cached = this._cache.get(content);
+    if (cached) return cached;
+    const parsed = this.parse(content);
+    if (!parsed) return null;
+    const binary = atob(parsed.base64Data);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+    const result = {
+      ...parsed,
+      url: URL.createObjectURL(new Blob([bytes], { type: parsed.mimeType })),
+    };
+    this._cache.set(content, result);
+    return result;
+  },
+
+  clear() {
+    for (const result of this._cache.values()) URL.revokeObjectURL(result.url);
+    this._cache.clear();
   },
 };
 

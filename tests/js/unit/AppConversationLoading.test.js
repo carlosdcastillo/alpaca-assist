@@ -2,6 +2,48 @@ require("../../../web/js/app.js");
 require("../../../web/js/components/TabManager.js");
 require("../../../web/js/components/InputArea.js");
 
+describe("loading earlier messages", () => {
+  it("keeps the scroll offset, including user scrolling between loaded turns", async () => {
+    document.body.innerHTML =
+      '<div id="chat-container"><div>Latest turn</div></div>';
+    const container = document.getElementById("chat-container");
+    // jsdom has no layout; model growth so height-based scroll compensation
+    // would move the viewport and fail this regression test.
+    Object.defineProperty(container, "scrollHeight", {
+      get: () => container.childElementCount * 200,
+    });
+    const app = Object.create(window.AlpacaApp.prototype);
+    app.chatDisplay = { container };
+    app._updateFindCount = () => {};
+    const page = {
+      start: 2,
+      render(index) {
+        expect(container.scrollTop).toBe(index === 0 ? 0 : 73);
+        const turn = document.createElement("div");
+        turn.textContent = `Earlier turn ${index}`;
+        container.append(turn);
+        if (index === 0)
+          setTimeout(() => {
+            container.scrollTop = 73;
+          }, 0);
+      },
+    };
+    app._historyPage = page;
+    app._updateHistoryControl(page);
+
+    await app._loadEarlierMessages(page);
+
+    expect(container.scrollTop).toBe(73);
+    expect(
+      Array.from(container.children)
+        .slice(1)
+        .map((el) => el.textContent),
+    ).toEqual(["Earlier turn 0", "Earlier turn 1", "Latest turn"]);
+    expect(page.button).not.toBeVisible();
+    expect(page.label).toHaveTextContent("All earlier messages loaded");
+  });
+});
+
 describe("AlpacaApp conversation display loading", () => {
   let app;
   let pending;

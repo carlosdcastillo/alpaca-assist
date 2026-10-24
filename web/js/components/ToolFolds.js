@@ -29,7 +29,7 @@ class ToolFold extends HTMLElement {
    */
   setBody(text) {
     this._bodyText = text;
-    this._highlightBody();
+    this._bodyDirty = true;
     // If shadow DOM is already set up, update the display immediately
     if (this.shadowRoot && this.shadowRoot.querySelector(".fold-body")) {
       this._updateTitle();
@@ -54,7 +54,7 @@ class ToolFold extends HTMLElement {
    */
   _titleText() {
     const type = this.getAttribute("data-type") || "call";
-    const toolName = this._extractToolName();
+    const toolName = type === "call" ? this._extractToolName() : null;
     return type === "call"
       ? toolName
         ? `Tool Call: ${toolName}`
@@ -179,7 +179,7 @@ class ToolFold extends HTMLElement {
     if (type === "result") {
       // A view_image result (see image_tool_result.py) — render the actual
       // image instead of dumping its base64 payload as a wall of text.
-      const imageResult = window.ImageResultUtils?.parse(this._bodyText);
+      const imageResult = window.ImageResultUtils?.load(this._bodyText);
       if (imageResult) {
         this._isImage = true;
         this._imageResult = imageResult;
@@ -276,6 +276,8 @@ class ToolFold extends HTMLElement {
    * Called when element is added to DOM
    */
   connectedCallback() {
+    // History insertion moves mounted folds; keep their body and open state.
+    if (this.shadowRoot.firstChild) return;
     const type = this.getAttribute("data-type") || "call";
     const answerIndex = this.getAttribute("data-answer-index") || "0";
 
@@ -493,33 +495,27 @@ class ToolFold extends HTMLElement {
    * Render body content into the DOM
    */
   _renderBody() {
+    // A collapsed fold needs only its header. In particular, don't parse or
+    // decode a screenshot (or fetch a video) that the reader hasn't opened.
+    if (!this.expanded || !this._bodyDirty) return;
     const bodyDiv = this.shadowRoot?.querySelector(".fold-body");
     if (!bodyDiv) {
       console.log(`[TOOLFOLD DEBUG] _renderBody: no bodyDiv found`);
       return;
     }
+    this._highlightBody();
+    this._bodyDirty = false;
 
     if (this._isImage && this._imageResult) {
-      const { mimeType, base64Data, description } = this._imageResult;
-      // Defensive: this data is server-generated (view_image/Pillow), but
-      // validate before interpolating into an HTML attribute regardless —
-      // a malformed mime type or non-base64 payload falls back to plain
-      // text rather than risk breaking out of the data: URI attribute.
-      const safeMime = /^image\/[a-zA-Z0-9.+-]+$/.test(mimeType)
-        ? mimeType
-        : null;
-      const safeData = /^[A-Za-z0-9+/=]*$/.test(base64Data) ? base64Data : null;
-      if (safeMime && safeData) {
-        const safeDesc = this._escapeHtml(description || "");
-        bodyDiv.innerHTML = `
-          <div class="image-result">
-            <img src="data:${safeMime};base64,${safeData}" alt="${safeDesc}" />
-            ${description ? `<div class="image-caption">${safeDesc}</div>` : ""}
-          </div>
-        `;
-        return;
-      }
-      // Fell through validation — treat as plain text below instead.
+      const { url, description } = this._imageResult;
+      const safeDesc = this._escapeHtml(description || "");
+      bodyDiv.innerHTML = `
+        <div class="image-result">
+          <img src="${url}" alt="${safeDesc}" decoding="async" />
+          ${description ? `<div class="image-caption">${safeDesc}</div>` : ""}
+        </div>
+      `;
+      return;
     }
 
     if (this._isVideo && this._videoResult) {
@@ -701,6 +697,7 @@ class ToolFold extends HTMLElement {
     if (body) {
       body.classList.toggle("expanded", this.expanded);
     }
+    if (this.expanded) this._renderBody();
   }
 
   /**

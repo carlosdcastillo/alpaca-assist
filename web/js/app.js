@@ -2231,7 +2231,6 @@ class AlpacaApp {
         await new Promise((resolve) => setTimeout(resolve, 0));
         if (page !== this._historyPage || !page.control.isConnected) return;
         const scrollTop = container.scrollTop;
-        const scrollHeight = container.scrollHeight;
         const last = container.lastChild;
         const currentAnswerIndex = this.chatDisplay.currentAnswerIndex;
         const previousEnd = this._lastTurnEnd;
@@ -2246,8 +2245,9 @@ class AlpacaApp {
           this.chatDisplay.isRestoringHistory = false;
           this.chatDisplay.currentAnswerIndex = currentAnswerIndex;
           this._lastTurnEnd = previousEnd;
-          container.scrollTop =
-            scrollTop + container.scrollHeight - scrollHeight;
+          // Reveal the loaded history without pushing the reader down by its
+          // height. Snapshot each turn so scrolling during loading is respected.
+          container.scrollTop = scrollTop;
         }
       }
       page.start = start;
@@ -2255,9 +2255,8 @@ class AlpacaApp {
       page.loading = false;
       if (page === this._historyPage && page.control.isConnected) {
         const scrollTop = container.scrollTop;
-        const height = container.scrollHeight;
         this._updateHistoryControl(page);
-        container.scrollTop = scrollTop + container.scrollHeight - height;
+        container.scrollTop = scrollTop;
       }
     }
   }

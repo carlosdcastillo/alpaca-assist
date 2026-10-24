@@ -27,17 +27,20 @@ require("../../../web/js/utils/imageResult.js");
 
 // Load the module - this populates window.ChatDisplay
 require("../../../web/js/components/ChatDisplay.js");
+require("../../../web/js/components/ToolFolds.js");
 require("../../../web/js/utils/timeFormat.js");
 require("../../../web/js/app.js");
 
 describe("ChatDisplay", () => {
   let ChatDisplay;
+  let ImageResultUtils;
   let chatDisplay;
   let container;
 
   beforeAll(() => {
     // Get the class from window after require() populated it
     ChatDisplay = window.ChatDisplay;
+    ImageResultUtils = window.ImageResultUtils;
 
     // Verify the source file was modified correctly
     if (!ChatDisplay) {
@@ -49,6 +52,11 @@ describe("ChatDisplay", () => {
   });
 
   beforeEach(() => {
+    window.ImageResultUtils = ImageResultUtils;
+    ImageResultUtils.clear();
+    let imageId = 0;
+    URL.createObjectURL = jest.fn(() => `blob:image-${++imageId}`);
+    URL.revokeObjectURL = jest.fn();
     // Set up DOM
     document.body.innerHTML = `
       <div id="chat-container"></div>
@@ -182,7 +190,15 @@ describe("ChatDisplay", () => {
           container.querySelector(".history-loader button"),
         ).toBeDisabled();
 
-        // A new question and streaming answer can arrive between history batches.
+        // Let loading begin, then interact before the rest of the page renders.
+        await jest.advanceTimersToNextTimerAsync();
+        expect(visibleQuestions().length).toBeGreaterThan(30);
+        expect(visibleQuestions().length).toBeLessThan(60);
+        expect(
+          container.querySelector(".history-loader button"),
+        ).toBeDisabled();
+
+        // A new question and streaming answer can arrive between history turns.
         chatDisplay.addQuestion("A new message");
         chatDisplay.appendContent({
           type: "content",
@@ -190,7 +206,6 @@ describe("ChatDisplay", () => {
           answer_index: 65,
         });
         container.scrollTop = 125;
-        const height = container.scrollHeight;
         await jest.runAllTimersAsync();
         expect(visibleQuestions()).toEqual([
           ...questions.slice(5),
@@ -198,7 +213,7 @@ describe("ChatDisplay", () => {
         ]);
         expect(container.querySelector(".answer-64")).toBe(latest);
         expect(container.querySelector(".answer-65")).toHaveTextContent("Live");
-        expect(container.scrollTop).toBe(125 + container.scrollHeight - height);
+        expect(container.scrollTop).toBe(125);
         expect(chatDisplay.currentAnswerIndex).toBe(65);
 
         container.querySelector(".history-loader button").click();
@@ -356,6 +371,56 @@ describe("ChatDisplay", () => {
 
       const images = container.querySelector(".message-images");
       expect(images).not.toBeNull();
+      expect(images.querySelector("img").loading).toBe("lazy");
+      expect(images.querySelector("img").decoding).toBe("async");
+    });
+
+    it("follows image growth at the bottom but not after scrolling up", () => {
+      let height = 1000;
+      Object.defineProperties(container, {
+        scrollHeight: { get: () => height },
+        clientHeight: { value: 400 },
+      });
+      chatDisplay.addQuestion("Screenshot", ["data:image/png;base64,QUJDRA=="]);
+      const image = container.querySelector("img");
+      height = 1600;
+      image.dispatchEvent(new Event("load"));
+      expect(container.scrollTop).toBe(1600);
+
+      container.scrollTop = 100;
+      container.dispatchEvent(new Event("scroll"));
+      height = 2200;
+      image.dispatchEvent(new Event("load"));
+      expect(container.scrollTop).toBe(100);
+    });
+
+    it("loads a folded screenshot only when opened and preserves it on moves", () => {
+      const fold = document.createElement("tool-fold");
+      fold.setAttribute("data-type", "result");
+      fold.setBody(
+        "@@ALPACA_IMAGE_RESULT@@image/png@@ALPACA_FIELD@@QUJDRA==@@ALPACA_FIELD@@Preview",
+      );
+      container.append(fold);
+      expect(fold.shadowRoot.querySelector("img")).toBeNull();
+
+      fold.expand();
+      const image = fold.shadowRoot.querySelector("img");
+      expect(image.src).toBe("blob:image-1");
+      expect(image.alt).toBe("Preview");
+      fold.collapse();
+      fold.expand();
+      container.prepend(fold);
+      expect(fold.shadowRoot.querySelector("img")).toBe(image);
+      expect(fold.shadowRoot.querySelector(".fold-body")).toHaveClass(
+        "expanded",
+      );
+
+      fold.collapse();
+      fold.setBody(
+        "@@ALPACA_IMAGE_RESULT@@image/png@@ALPACA_FIELD@@Rk9PRA==@@ALPACA_FIELD@@Updated",
+      );
+      fold.expand();
+      expect(fold.shadowRoot.querySelector("img").alt).toBe("Updated");
     });
 
     it("should open an attached image in a full-size overlay", () => {
@@ -781,7 +846,13 @@ describe("ChatDisplay", () => {
           "![Preview](alpaca://image/shot-1)",
           0,
         ),
-      ).toBe("![Preview](data:image/png;base64,QUJDRA==)");
+      ).toBe("![Preview](blob:image-1)");
+      expect(
+        chatDisplay._resolveInlineImageRefs(
+          "![Again](alpaca://image/shot-1)",
+          0,
+        ),
+      ).toBe("![Again](blob:image-1)");
     });
 
     it("falls back to positional matching when the model uses a wrong id", () => {
@@ -791,7 +862,7 @@ describe("ChatDisplay", () => {
 
       expect(
         chatDisplay._resolveInlineImageRefs("![Preview](alpaca://image/1)", 0),
-      ).toBe("![Preview](data:image/png;base64,QUJDRA==)");
+      ).toBe("![Preview](blob:image-1)");
     });
 
     it("matches multiple wrong-id image refs to results in registration order", () => {
@@ -807,9 +878,7 @@ describe("ChatDisplay", () => {
           "![One](alpaca://image/1) ![Two](alpaca://image/2)",
           0,
         ),
-      ).toBe(
-        "![One](data:image/png;base64,AAAA) ![Two](data:image/png;base64,BBBB)",
-      );
+      ).toBe("![One](blob:image-1) ![Two](blob:image-2)");
     });
 
     it("loads a gated image result and re-renders the reference", async () => {
@@ -842,9 +911,7 @@ describe("ChatDisplay", () => {
       expect(chatDisplay.answerToolResults.get(0).get("shot-1")).toBe(
         fullResult,
       );
-      expect(marked.parse).toHaveBeenLastCalledWith(
-        "![Preview](data:image/png;base64,QUJDRA==)",
-      );
+      expect(marked.parse).toHaveBeenLastCalledWith("![Preview](blob:image-1)");
     });
 
     it("loads a gated video result before hydrating it", async () => {
@@ -908,9 +975,7 @@ describe("ChatDisplay", () => {
         "@@ALPACA_IMAGE_RESULT@@image/jpeg@@ALPACA_FIELD@@QUJDRA==@@ALPACA_FIELD@@Late preview",
       );
 
-      expect(marked.parse).toHaveBeenCalledWith(
-        "![Preview](data:image/jpeg;base64,QUJDRA==)",
-      );
+      expect(marked.parse).toHaveBeenCalledWith("![Preview](blob:image-1)");
     });
 
     it("re-renders an already-painted video reference when its result arrives", () => {
@@ -956,11 +1021,18 @@ describe("ChatDisplay", () => {
   });
 
   describe("clear", () => {
-    it("should clear container innerHTML", () => {
+    it("should clear the container and release loaded image URLs", () => {
       chatDisplay.addQuestion("Test");
+      chatDisplay.registerToolResult(
+        0,
+        "shot",
+        "@@ALPACA_IMAGE_RESULT@@image/png@@ALPACA_FIELD@@QUJDRA==@@ALPACA_FIELD@@Preview",
+      );
+      chatDisplay._resolveInlineImageRefs("![Preview](alpaca://image/shot)", 0);
       chatDisplay.clear();
 
       expect(container.innerHTML).toBe("");
+      expect(URL.revokeObjectURL).toHaveBeenCalledWith("blob:image-1");
     });
 
     it("should clear answer buffers", () => {
