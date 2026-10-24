@@ -2133,8 +2133,27 @@ class AlpacaApp {
     this._historyPage = null;
     this.chatDisplay.clear();
 
-    // Load conversation state
-    const result = await this.api.get_conversation_state(tabId);
+    // Avoid flashing a loading message for fast loads. Each request owns its
+    // indicator so a stale completion cannot remove a newer tab's status.
+    const loading = document.createElement("div");
+    loading.className = "conversation-loading";
+    loading.contentEditable = "false";
+    loading.setAttribute("role", "status");
+    loading.innerHTML =
+      '<span class="loading-spinner" aria-hidden="true"></span><span>Loading…</span>';
+    const loadingTimer = setTimeout(() => {
+      if (tabId === this.currentTabId && mySeq === this._tabSwitchSeq) {
+        this.chatDisplay.container.append(loading);
+      }
+    }, 500);
+
+    let result;
+    try {
+      result = await this.api.get_conversation_state(tabId);
+    } finally {
+      clearTimeout(loadingTimer);
+      loading.remove();
+    }
 
     // Guard: discard stale results — covers both tab-change races and
     // same-tab re-switches (e.g. revival's initial load resolving after

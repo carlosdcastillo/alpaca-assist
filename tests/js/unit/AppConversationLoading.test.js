@@ -50,6 +50,7 @@ describe("AlpacaApp conversation display loading", () => {
 
   beforeEach(() => {
     pending = [];
+    document.body.innerHTML = '<div id="chat-container"></div>';
     app = Object.create(window.AlpacaApp.prototype);
     app.currentTabId = "pack-1";
     app._tabSwitchSeq = 0;
@@ -61,7 +62,11 @@ describe("AlpacaApp conversation display loading", () => {
           }),
       ),
     };
-    app.chatDisplay = { clear: jest.fn() };
+    const container = document.getElementById("chat-container");
+    app.chatDisplay = {
+      container,
+      clear: jest.fn(() => container.replaceChildren()),
+    };
     app._renderConversationState = jest.fn();
     app._updateStatusBar = jest.fn();
     app._updateWorkspaceHeader = jest.fn();
@@ -71,6 +76,57 @@ describe("AlpacaApp conversation display loading", () => {
       isTabStreaming: jest.fn(() => false),
     };
     app.inputArea = { setStreaming: jest.fn() };
+  });
+
+  afterEach(() => jest.useRealTimers());
+
+  it("shows loading only after 500ms and removes it when finished", async () => {
+    jest.useFakeTimers();
+    const fast = app._onTabSwitched("fast");
+    jest.advanceTimersByTime(499);
+    expect(document.querySelector('[role="status"]')).toBeNull();
+    pending.shift()({ success: true, state: {} });
+    await fast;
+    jest.advanceTimersByTime(1);
+    expect(document.querySelector('[role="status"]')).toBeNull();
+
+    const slow = app._onTabSwitched("slow");
+    jest.advanceTimersByTime(499);
+    expect(document.querySelector('[role="status"]')).toBeNull();
+    jest.advanceTimersByTime(1);
+    expect(document.querySelector('[role="status"]')).toHaveTextContent(
+      "Loading…",
+    );
+    pending.shift()({ success: true, state: {} });
+    await slow;
+    expect(document.querySelector('[role="status"]')).toBeNull();
+  });
+
+  it("keeps a newer tab's loading status when a stale load finishes", async () => {
+    jest.useFakeTimers();
+    const older = app._onTabSwitched("older");
+    jest.advanceTimersByTime(500);
+    const newer = app._onTabSwitched("newer");
+    expect(document.querySelector('[role="status"]')).toBeNull();
+    jest.advanceTimersByTime(500);
+    pending.shift()({ success: true, state: {} });
+    await older;
+    expect(document.querySelectorAll('[role="status"]')).toHaveLength(1);
+    pending.shift()({ success: false });
+    await newer;
+    expect(document.querySelector('[role="status"]')).toBeNull();
+  });
+
+  it("removes loading if the backend rejects", async () => {
+    jest.useFakeTimers();
+    app.api.get_conversation_state = () => Promise.reject(new Error("offline"));
+    const load = app._onTabSwitched("offline");
+    jest.advanceTimersByTime(500);
+    expect(document.querySelector('[role="status"]')).toHaveTextContent(
+      "Loading…",
+    );
+    await expect(load).rejects.toThrow("offline");
+    expect(document.querySelector('[role="status"]')).toBeNull();
   });
 
   it.each(["local-new", "pack-new"])(

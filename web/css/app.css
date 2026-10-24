@@ -1749,6 +1749,23 @@ a[href^="alpaca://conv/"] {
     flex-shrink: 0;
 }
 
+/* Delayed conversation loading status, confined to the main chat area. */
+.conversation-loading {
+    min-height: 100%;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    color: var(--text-secondary);
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .conversation-loading .loading-spinner {
+        animation: none;
+    }
+}
+
 /* Loading Overlay */
 .loading-overlay {
     position: fixed;
