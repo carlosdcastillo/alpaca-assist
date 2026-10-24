@@ -863,6 +863,42 @@ button {
     background: var(--bg-primary);
     min-height: 100px;
     cursor: default;
+    /* Earlier-history insertion explicitly preserves the scroll offset. */
+    overflow-anchor: none;
+}
+
+.history-loader {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 0 20px;
+    color: var(--text-secondary);
+    font-size: 12px;
+    text-align: center;
+}
+
+.history-loader button {
+    padding: 8px 16px;
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    background: var(--bg-secondary);
+    color: var(--text-primary);
+    cursor: pointer;
+}
+
+.history-loader button:hover:not(:disabled) {
+    background: var(--bg-hover);
+}
+
+.history-loader button:focus-visible {
+    outline: 2px solid var(--accent-primary);
+    outline-offset: 2px;
+}
+
+.history-loader button:disabled {
+    color: var(--text-secondary);
+    cursor: wait;
 }
 
 .chat-container::-webkit-scrollbar,

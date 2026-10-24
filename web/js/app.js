@@ -1323,6 +1323,9 @@ class AlpacaApp {
     } else {
       this._findCountEl.textContent = `${this._findCurrentIdx + 1} of ${total}`;
     }
+    if (this._historyPage?.start > 0 && this._findInput?.value) {
+      this._findCountEl.textContent += " (loaded messages only)";
+    }
   }
 
   /**
@@ -2127,6 +2130,7 @@ class AlpacaApp {
     // Clear any active find highlights before rebuilding chat DOM
     this._findMatches = [];
     this._findCurrentIdx = -1;
+    this._historyPage = null;
     this.chatDisplay.clear();
 
     // Load conversation state
@@ -2164,31 +2168,110 @@ class AlpacaApp {
     }
 
     const chatState = state.chat_state;
-    // History is replayed synchronously. Avoid forcing layout for every
-    // question/token update; scroll once after the whole DOM is populated.
+    const total = chatState.graph
+      ? this._renderConversationGraph(chatState.graph, 0, 0, true)
+      : (chatState.questions || []).length;
+    const render = chatState.graph
+      ? (start, end) =>
+          this._renderConversationGraph(chatState.graph, start, end)
+      : (start, end) => this._renderLegacyChatState(chatState, start, end);
+    const page = { start: Math.max(0, total - 30), render };
+    this._historyPage = page;
+    // Keep original answer indices: live updates still address the complete
+    // conversation, even when only its tail is mounted.
     this.chatDisplay.isRestoringHistory = true;
     try {
-      if (chatState.graph) {
-        this._renderConversationGraph(chatState.graph);
-      } else if (chatState.questions && chatState.answers) {
-        this._renderLegacyChatState(chatState);
-      } else {
-        console.warn(
-          "[DEBUG] Unknown chat state format:",
-          Object.keys(chatState),
-        );
-      }
+      render(page.start, total);
+      this._updateHistoryControl(page);
     } finally {
       this.chatDisplay.isRestoringHistory = false;
       this.chatDisplay.scrollToBottom();
     }
   }
 
+  _updateHistoryControl(page) {
+    if (!page.control && page.start > 0) {
+      page.control = document.createElement("div");
+      page.control.className = "history-loader";
+      page.control.contentEditable = "false";
+      page.button = document.createElement("button");
+      page.button.type = "button";
+      page.button.addEventListener("click", () =>
+        this._loadEarlierMessages(page),
+      );
+      page.label = document.createElement("span");
+      page.label.setAttribute("role", "status");
+      page.control.append(page.button, page.label);
+      this.chatDisplay.container.prepend(page.control);
+    }
+    if (!page.control) return;
+    page.button.disabled = !!page.loading;
+    page.button.textContent = page.loading
+      ? "Loading earlier messages…"
+      : "Load earlier messages";
+    page.button.hidden = page.start === 0;
+    page.label.textContent =
+      page.start === 0
+        ? "All earlier messages loaded"
+        : `${page.start} earlier turns not shown · Find searches loaded messages only`;
+    this._updateFindCount();
+  }
+
+  async _loadEarlierMessages(page) {
+    if (page !== this._historyPage || page.loading || page.start === 0) return;
+    page.loading = true;
+    this._updateHistoryControl(page);
+    const end = page.start;
+    const start = Math.max(0, end - 30);
+    const container = this.chatDisplay.container;
+    const anchor = page.control.nextSibling;
+    try {
+      for (let index = start; index < end; index++) {
+        // Yield between turns so typing, streaming and tab switches can run.
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        if (page !== this._historyPage || !page.control.isConnected) return;
+        const scrollTop = container.scrollTop;
+        const scrollHeight = container.scrollHeight;
+        const last = container.lastChild;
+        const currentAnswerIndex = this.chatDisplay.currentAnswerIndex;
+        const previousEnd = this._lastTurnEnd;
+        this.chatDisplay.isRestoringHistory = true;
+        try {
+          page.render(index, index + 1);
+          // Existing live messages remain mounted. Move only this older turn
+          // ahead of the original first message, in chronological order.
+          while (last.nextSibling)
+            container.insertBefore(last.nextSibling, anchor);
+        } finally {
+          this.chatDisplay.isRestoringHistory = false;
+          this.chatDisplay.currentAnswerIndex = currentAnswerIndex;
+          this._lastTurnEnd = previousEnd;
+          container.scrollTop =
+            scrollTop + container.scrollHeight - scrollHeight;
+        }
+      }
+      page.start = start;
+    } finally {
+      page.loading = false;
+      if (page === this._historyPage && page.control.isConnected) {
+        const scrollTop = container.scrollTop;
+        const height = container.scrollHeight;
+        this._updateHistoryControl(page);
+        container.scrollTop = scrollTop + container.scrollHeight - height;
+      }
+    }
+  }
+
   /**
    * Render ConversationGraph format using the active path only.
    */
-  _renderConversationGraph(graph) {
-    if (!graph.nodes || !graph.active_node_id) return;
+  _renderConversationGraph(
+    graph,
+    start = 0,
+    end = Infinity,
+    countOnly = false,
+  ) {
+    if (!graph.nodes || !graph.active_node_id) return 0;
 
     // Reconstruct active path by walking parent_id links from active_node_id
     const activePath = [];
@@ -2216,6 +2299,14 @@ class AlpacaApp {
         pendingUserId = id;
       } else if (node.role === "assistant" && pendingUserId !== null) {
         const userNode = graph.nodes[pendingUserId];
+        if (countOnly || answerIndex < start || answerIndex >= end) {
+          previousEnd =
+            node.timing?.completed_at ??
+            window.TimeFormat.toEpoch(node.created_at);
+          answerIndex++;
+          pendingUserId = null;
+          continue;
+        }
 
         // Render question
         const images = (userNode.images || []).map((b64) =>
@@ -2268,6 +2359,7 @@ class AlpacaApp {
     // reopening an old conversation gets its divider immediately, rather than
     // only once the conversation is reloaded from disk again.
     this._lastTurnEnd = previousEnd;
+    return answerIndex;
   }
 
   /**
@@ -2407,14 +2499,18 @@ class AlpacaApp {
   /**
    * Render legacy ChatState format
    */
-  _renderLegacyChatState(chatState) {
+  _renderLegacyChatState(chatState, start = 0, end = Infinity) {
     const questions = chatState.questions || [];
     const answers = chatState.answers || [];
     const questionTimes = chatState.question_times || [];
     const turnTimings = chatState.turn_timings || [];
-    let previousEnd = null;
+    let previousEnd =
+      start > 0
+        ? turnTimings[start - 1]?.completed_at ??
+          window.TimeFormat.toEpoch(questionTimes[start - 1])
+        : null;
 
-    for (let i = 0; i < questions.length; i++) {
+    for (let i = start; i < Math.min(questions.length, end); i++) {
       // Render question
       const questionImages = (chatState.question_images?.[i] || []).map((b64) =>
         this._base64ToDataUri(b64),

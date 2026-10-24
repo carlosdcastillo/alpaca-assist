@@ -134,6 +134,99 @@ describe("ChatDisplay", () => {
     },
   );
 
+  it.each(["legacy", "graph"])(
+    "pages %s history without replacing live answers or blocking new messages",
+    async (format) => {
+      jest.useFakeTimers();
+      try {
+        const app = Object.create(window.AlpacaApp.prototype);
+        app.chatDisplay = chatDisplay;
+        const questions = Array.from({ length: 65 }, (_, i) => `Question ${i}`);
+        const answers = questions.map((_, i) => `Answer ${i}`);
+        const nodes = {};
+        questions.forEach((content, i) => {
+          nodes[`q${i}`] = {
+            role: "user",
+            content,
+            parent_id: i ? `a${i - 1}` : null,
+          };
+          nodes[`a${i}`] = {
+            role: "assistant",
+            content: answers[i],
+            parent_id: `q${i}`,
+          };
+        });
+        nodes.inactive = {
+          role: "assistant",
+          content: "Not on active path",
+          parent_id: "q0",
+        };
+        Object.defineProperty(container, "scrollHeight", {
+          get: () => container.children.length * 100,
+        });
+        app._renderConversationState({
+          chat_state:
+            format === "legacy"
+              ? { questions, answers }
+              : { graph: { nodes, active_node_id: "a64" } },
+        });
+        const visibleQuestions = () =>
+          [...container.querySelectorAll(".question")].map(
+            (el) => el.dataset.rawText,
+          );
+        expect(visibleQuestions()).toEqual(questions.slice(35));
+        const latest = container.querySelector(".answer-64");
+        container.scrollTop = 125;
+        container.querySelector(".history-loader button").click();
+        expect(
+          container.querySelector(".history-loader button"),
+        ).toBeDisabled();
+
+        // A new question and streaming answer can arrive between history batches.
+        chatDisplay.addQuestion("A new message");
+        chatDisplay.appendContent({
+          type: "content",
+          content: "Live\n\n",
+          answer_index: 65,
+        });
+        container.scrollTop = 125;
+        const height = container.scrollHeight;
+        await jest.runAllTimersAsync();
+        expect(visibleQuestions()).toEqual([
+          ...questions.slice(5),
+          "A new message",
+        ]);
+        expect(container.querySelector(".answer-64")).toBe(latest);
+        expect(container.querySelector(".answer-65")).toHaveTextContent("Live");
+        expect(container.scrollTop).toBe(125 + container.scrollHeight - height);
+        expect(chatDisplay.currentAnswerIndex).toBe(65);
+
+        container.querySelector(".history-loader button").click();
+        await jest.runAllTimersAsync();
+        expect(visibleQuestions()).toEqual([...questions, "A new message"]);
+        expect(
+          container.querySelector(".history-loader button"),
+        ).not.toBeVisible();
+        expect(container.querySelector(".history-loader")).toHaveTextContent(
+          "All earlier messages loaded",
+        );
+
+        // A pending batch must not write into a replacement conversation.
+        chatDisplay.clear();
+        app._renderConversationState({ chat_state: { questions, answers } });
+        container.querySelector(".history-loader button").click();
+        chatDisplay.clear();
+        app._renderConversationState({
+          chat_state: { questions: ["Other tab"], answers: ["Other answer"] },
+        });
+        await jest.runAllTimersAsync();
+        expect(visibleQuestions()).toEqual(["Other tab"]);
+      } finally {
+        jest.useRealTimers();
+      }
+    },
+  );
+
   describe("initialization", () => {
     it("should store container reference", () => {
       expect(chatDisplay.container).toBe(container);
