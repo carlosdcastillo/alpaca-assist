@@ -487,6 +487,24 @@ button {
     width: 0;
 }
 
+.tab-group-divider {
+    display: flex;
+    align-items: center;
+    flex-shrink: 0;
+    gap: 8px;
+    margin: 8px 10px;
+    color: var(--text-muted);
+    font-size: 11px;
+    line-height: 14px;
+}
+
+.tab-group-divider::after {
+    content: '';
+    flex: 1;
+    height: 1px;
+    background: var(--border-color);
+}
+
 .tabs-scrollbar {
     position: absolute;
     top: 40px;

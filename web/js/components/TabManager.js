@@ -175,6 +175,7 @@ class TabManager {
     roots.sort((a, b) => Number(b.pinned) - Number(a.pinned));
     for (const tab of roots) visit(tab);
     for (const tab of tabs) visit(tab);
+    this.container.querySelector(".tab-group-divider")?.remove();
     this.tabs.clear();
     ordered.forEach((tab, index) => {
       this.tabs.set(tab.id, tab);
@@ -185,6 +186,15 @@ class TabManager {
         );
       }
     });
+    const firstUnpinned = roots.find((tab) => !tab.pinned);
+    if (roots.some((tab) => tab.pinned) && firstUnpinned) {
+      const divider = document.createElement("div");
+      divider.className = "tab-group-divider";
+      divider.setAttribute("role", "separator");
+      divider.setAttribute("aria-label", "Other tasks");
+      divider.textContent = "Other tasks";
+      this.container.insertBefore(divider, firstUnpinned.button);
+    }
   }
 
   /**

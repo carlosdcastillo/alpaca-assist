@@ -122,6 +122,28 @@ describe("TabManager", () => {
       expect(tabManager.getAllTabIds().at(-1)).toBe("fresh");
     });
 
+    it("separates mixed groups after pinned children and removes empty boundaries", async () => {
+      const divider = () => container.querySelector('[role="separator"]');
+      expect(divider()).toBeNull();
+      tabManager.setTabPinned("b", true);
+      expect(divider().textContent).toBe("Other tasks");
+      expect(divider().previousElementSibling.dataset.tabId).toBe("child");
+      expect(divider().nextElementSibling.dataset.tabId).toBe("a");
+
+      tabManager.moveTab("c", -1);
+      expect(container.querySelectorAll('[role="separator"]')).toHaveLength(1);
+      expect(divider().nextElementSibling.dataset.tabId).toBe("c");
+      tabManager.setTabPinned("b", false);
+      expect(divider()).toBeNull();
+
+      for (const id of ["a", "b", "c"]) tabManager.setTabPinned(id, true);
+      expect(divider()).toBeNull();
+      tabManager.createTabUI("other", "Other", false);
+      expect(divider().nextElementSibling.dataset.tabId).toBe("other");
+      await tabManager.closeTab("other");
+      expect(divider()).toBeNull();
+    });
+
     it("reorders multiple pins and siblings without detaching children", () => {
       tabManager.createTabUI("sibling", "Sibling", false);
       tabManager.setConversationId("sibling", 107);
