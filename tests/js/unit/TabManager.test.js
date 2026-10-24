@@ -182,20 +182,27 @@ describe("TabManager", () => {
       expect(tabManager.reorderTab("child", "a")).toBe(false);
     });
 
-    it("exposes keyboard-operable actions, color clearing, and focus restoration", () => {
-      const actions = tabManager
-        .getTab("a")
-        .button.querySelector(".tab-actions");
-      actions.click();
+    it("opens actions on right-click and keyboard, clears color, and restores tab focus", () => {
+      const button = tabManager.getTab("a").button;
+      expect(button.querySelector(".tab-actions")).toBeNull();
+      button.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true }));
       const menu = document.querySelector('[role="dialog"]');
       [...menu.querySelectorAll("button")]
         .find((b) => b.textContent === "Blue")
         .click();
-      expect(tabManager.getTab("a").button.dataset.color).toBe("blue");
-      expect(document.activeElement).toBe(actions);
-      actions.click();
+      expect(button.dataset.color).toBe("blue");
+      expect(document.activeElement).toBe(button);
+      expect(mockApi.switch_tab).not.toHaveBeenCalled();
+      button.dispatchEvent(
+        new KeyboardEvent("keydown", {
+          key: "F10",
+          shiftKey: true,
+          bubbles: true,
+        }),
+      );
       document.querySelector('.tab-layout-menu [data-color="none"]').click();
-      expect(tabManager.getTab("a").button.dataset.color).toBe("none");
+      expect(button.dataset.color).toBe("none");
+      expect(document.activeElement).toBe(button);
     });
   });
 

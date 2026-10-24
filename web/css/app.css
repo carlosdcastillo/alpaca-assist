@@ -555,36 +555,24 @@ button {
 [data-color="amber"] { --tab-color: #dba635; }
 [data-color="purple"] { --tab-color: #b28ae8; }
 .tab-marker {
+    display: none;
+}
+.tab.pinned .tab-marker {
     display: inline-block;
+    width: 14px;
+    height: 14px;
+    margin-right: 6px;
+    vertical-align: middle;
+    color: var(--text-primary);
+}
+.tab-color {
+    flex-shrink: 0;
     width: 9px;
     height: 9px;
-    margin-right: 6px;
     border-radius: 50%;
     background: var(--tab-color, transparent);
-    vertical-align: middle;
 }
-.tab[data-color="none"]:not(.pinned) .tab-marker { display: none; }
-.tab.pinned .tab-marker {
-    width: 14px;
-    height: auto;
-    border-radius: 0;
-    background: transparent;
-    color: var(--tab-color, var(--text-primary));
-    font-size: 18px;
-}
-.tab-actions {
-    flex-shrink: 0;
-    padding: 0 3px;
-    border: 0;
-    border-radius: 3px;
-    color: var(--text-secondary);
-    background: transparent;
-    cursor: pointer;
-    font-size: 18px;
-    line-height: 20px;
-}
-.tab-actions:hover { background: var(--bg-tertiary); color: var(--text-primary); }
-.tab:focus-visible, .tab-actions:focus-visible, .tab-layout-menu button:focus-visible {
+.tab:focus-visible, .tab-layout-menu button:focus-visible {
     outline: 2px solid var(--accent-primary);
     outline-offset: 2px;
 }

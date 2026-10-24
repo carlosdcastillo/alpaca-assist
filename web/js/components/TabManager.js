@@ -14,11 +14,7 @@ class TabManager {
     this.layout = {};
     this._saveLayoutQueue = Promise.resolve();
     this._dismissTabMenu = (event) => {
-      if (
-        this.tabMenu &&
-        !this.tabMenu.contains(event.target) &&
-        !event.target.closest(".tab-actions")
-      )
+      if (this.tabMenu && !this.tabMenu.contains(event.target))
         this._closeTabMenu();
     };
     document.addEventListener("pointerdown", this._dismissTabMenu);
@@ -263,8 +259,9 @@ class TabManager {
     button.draggable = true;
     button.setAttribute(
       "aria-keyshortcuts",
-      "Alt+Shift+ArrowUp Alt+Shift+ArrowDown",
+      "Alt+Shift+ArrowUp Alt+Shift+ArrowDown Shift+F10",
     );
+    button.setAttribute("aria-haspopup", "dialog");
     button.addEventListener("keydown", (event) => {
       if (event.target !== button) return;
       if (
@@ -366,18 +363,12 @@ class TabManager {
     marker.className = "tab-marker";
     marker.setAttribute("aria-hidden", "true");
     titleSpan.prepend(marker);
-    const actions = document.createElement("button");
-    actions.className = "tab-actions";
-    actions.type = "button";
-    actions.textContent = "⋯";
-    actions.setAttribute("aria-label", "Tab actions");
-    actions.setAttribute("aria-haspopup", "dialog");
-    actions.addEventListener("click", (event) => {
-      event.stopPropagation();
-      this._openTabMenu(tabId);
-    });
+    const color = document.createElement("span");
+    color.className = "tab-color";
+    color.setAttribute("aria-hidden", "true");
+    color.title = "Right-click tab for pin, color, and reorder options";
     button.appendChild(titleSpan);
-    button.appendChild(actions);
+    button.appendChild(color);
     button.appendChild(closeBtn);
     if (workspaceMeta) button.appendChild(workspaceMeta);
 
@@ -744,7 +735,7 @@ class TabManager {
     marker.innerHTML = tab.pinned
       ? '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 3l5 5-4 1-3 5v3l-2 2-7-7 2-2h3l5-3zM9 15l-6 6"/></svg>'
       : "";
-    marker.title = `${tab.pinned ? "Pinned · " : ""}${tab.color}`;
+    marker.title = tab.pinned ? "Pinned" : "";
   }
 
   _saveLayout() {
@@ -852,7 +843,7 @@ class TabManager {
     const owner = this.tabs.get(this.tabMenu.dataset.tabId);
     this.tabMenu.remove();
     this.tabMenu = null;
-    if (restoreFocus) owner?.button.querySelector(".tab-actions").focus();
+    if (restoreFocus) owner?.button.focus();
   }
 
   _openTabMenu(tabId) {
