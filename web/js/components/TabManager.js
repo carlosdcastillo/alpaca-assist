@@ -767,21 +767,8 @@ class TabManager {
       })
       .catch((error) => {
         console.error("Tab layout not saved:", error);
-        this._announce(
-          "Tab layout could not be saved. Changes may be lost on restart.",
-        );
       });
     return this._saveLayoutQueue;
-  }
-
-  _announce(message) {
-    if (!this.layoutStatus) {
-      this.layoutStatus = document.createElement("div");
-      this.layoutStatus.className = "tab-layout-status";
-      this.layoutStatus.setAttribute("role", "status");
-      this.container.parentElement.appendChild(this.layoutStatus);
-    }
-    this.layoutStatus.textContent = message;
   }
 
   setTabPinned(tabId, pinned) {
@@ -791,7 +778,6 @@ class TabManager {
     this._refreshSubagents();
     this._saveLayout();
     this._applyTabLayout(tab);
-    this._announce(`${tab.title} ${pinned ? "pinned" : "unpinned"}.`);
   }
 
   setTabColor(tabId, color) {
@@ -801,7 +787,6 @@ class TabManager {
     tab.color = color;
     this._saveLayout();
     this._applyTabLayout(tab);
-    this._announce(`${tab.title}: color ${color}.`);
   }
 
   _canMoveTab(sourceId, targetId) {
@@ -838,7 +823,6 @@ class TabManager {
     this._refreshSubagents();
     this._saveLayout();
     this.tabs.get(sourceId).button.focus();
-    this._announce(`${this.tabs.get(sourceId).title} moved.`);
     return true;
   }
 
@@ -1001,7 +985,6 @@ class TabManager {
   destroy() {
     document.removeEventListener("pointerdown", this._dismissTabMenu);
     this._closeTabMenu(false);
-    this.layoutStatus?.remove();
     this._resizeObserver.disconnect();
     this._mutationObserver.disconnect();
   }

@@ -77,6 +77,7 @@ describe("TabManager", () => {
       tabManager.moveTab("c", -1);
       expect(tabManager.getAllTabIds()).toEqual(["b", "child", "c", "a"]);
       await tabManager._saveLayoutQueue;
+      expect(document.querySelector(".tab-layout-status")).toBeNull();
       const saved = mockApi.save_preferences.mock.calls.at(-1)[0].tab_layout;
       tabManager.destroy();
       container.replaceChildren();

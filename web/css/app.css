@@ -636,7 +636,6 @@ button {
 .tab-layout-menu button:hover:not(:disabled) { background: var(--bg-hover); }
 .tab-layout-menu button:disabled { opacity: 0.45; cursor: default; }
 .tab-layout-menu p { margin: 6px 8px; color: var(--text-secondary); font-size: 11px; }
-.tab-layout-status { font-size: 11px; color: var(--text-secondary); padding: 4px; overflow-wrap: anywhere; }
 
 .tab.active {
     background: var(--bg-active);
