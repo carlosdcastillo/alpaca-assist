@@ -149,6 +149,10 @@ class PackTab:
         transport.on_notification("on_error", self._on_error)
         transport.on_notification("update_tab_title", self._on_update_tab_title)
         transport.on_notification("inject_tool_fold", self._on_inject_tool_fold)
+        transport.on_notification(
+            "on_pack_schedule_event",
+            self._on_pack_schedule_event,
+        )
         transport.on_disconnect(self._on_disconnect)
         return transport
 
@@ -448,6 +452,12 @@ class PackTab:
     # independent AppCore._alloc_tab_id() and meaningless locally. Forwarding
     # it instead of self.tab_id would silently never match any tab the
     # frontend knows about.
+
+    def _on_pack_schedule_event(self, params: dict[str, Any]) -> None:
+        # Conversation IDs belong to the scheduling controller, not this desktop.
+        api = self._app_core.api
+        if api is not None:
+            api.on_pack_schedule_event({**params, "controller_host": self.host})
 
     def _on_streaming_start(self, params: dict[str, Any]) -> None:
         self.is_streaming = True

@@ -206,12 +206,64 @@ Los Angeles time:
 ```
 
 Other `when` forms: `{"kind":"delay","seconds":600}`,
+`{"kind":"interval","seconds":3600}`,
 `{"kind":"once","at":"2026-12-01T09:00:00-08:00"}`, or daily with `time`
 and `timezone` but no `weekday`. Weekdays are Monday=0 through Sunday=6.
 One-shot times must be in the future and include an offset; delays become a
 fixed UTC timestamp at creation. Recurrence uses an explicit IANA timezone,
 skips nonexistent DST times, and runs repeated local times only once (the first
 occurrence). Returned `next_run`, `due_at`, and `claimed_at` are Unix UTC seconds.
+
+Intervals are elapsed seconds (minimum 60, maximum 366 days), independent of
+daylight saving time. The first run is one interval after creation; subsequent
+runs keep that original cadence, even after a late tick or restart. Missed
+slots coalesce rather than generating a backlog.
+
+For example, "check build 917 every hour until it succeeds, through tomorrow":
+
+```json
+{
+  "request_id": "watch-build-917",
+  "host": "build-host",
+  "project": "my-project",
+  "model": "claude-code/sonnet",
+  "prompt": "Read the CI status for build 917 in this project's repository. Do not modify files or trigger builds.",
+  "when": {"kind": "interval", "seconds": 3600},
+  "stop_when": "Build 917 has completed successfully",
+  "expires_at": "2026-12-02T08:00:00-08:00",
+  "origin_conversation_id": 42
+}
+```
+
+`prompt` must contain all necessary context: a fresh session does not remember
+what "check that" meant. The model receives the current conversation ID in its
+system context and can include it as `origin_conversation_id`. Source and result
+conversation IDs belong to the **scheduling controller**, not necessarily the
+desktop displaying a remote notification. No scheduled results are inserted into
+an active chat or used to restart its model.
+
+`stop_when` makes each occurrence a single check, not a sleeping polling loop.
+The runner is instructed to end with an `ALPACA_SCHEDULE_RESULT=` JSON line
+containing boolean `condition_met`, boolean `failed`, and string `summary`.
+A negative recurring check continues quietly; a positive finding ends the schedule
+and notifies. One-shot checks always report their result. This is the model's
+reported finding, not independent verification of the external condition.
+A missing/malformed result or `failed: true` blocks
+further runs as `needs_inspection`, rather than guessing or silently retrying.
+Without `stop_when`, each finished turn produces a notification.
+
+Optional `expires_at` must include a UTC offset and be after the first run.
+At or after that deadline, no new occurrence starts, including catch-up runs.
+The schedule becomes `expired`; already active work is not interrupted.
+Finished/expired schedules can be updated with a new specification to rearm them.
+Omitted optional fields on update are cleared. Paused schedules stay paused.
+
+Recent run history retains summaries (up to 4,000 characters), source IDs, and
+launch details identifying the result conversation/session/workspace. Live
+notifications use the existing non-modal toast for completion, inspection-needed
+failures, and expiration. Remote daemon notifications are forwarded while attached.
+Toasts are best effort and not replayed after disconnection or restart; use
+`list_pack_schedules` to inspect durable state and results after reconnecting.
 
 Schedules and occurrence history persist in `pack_schedules.db` alongside the
 controller's session files. Request-ID deduplication for schedule creation
@@ -226,6 +278,10 @@ whole remote turn ends, including tool continuations. Different schedules may
 run concurrently. Missed recurring slots coalesce into one immediate catch-up
 run; overdue one-shots run once on reopening. There is no host wakeup, OS
 service, autostart, or execution while the owning process is stopped.
+Creating a schedule from a desktop conversation does not transfer its ownership
+to a remote daemon. For unattended operation, create it from an already-running
+Pack daemon conversation and keep that daemon running. Execution still uses a
+configured SSH host/project/model; ordinary local-chat execution is not supported.
 
 Use `control_pack_schedule` with `schedule_id` and `action` set to `pause`,
 `resume`, or `cancel`. These affect future launches, not an already claimed

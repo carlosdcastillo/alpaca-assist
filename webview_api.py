@@ -110,6 +110,28 @@ class WebViewAPI:
             f"{tab.conversation_id});",
         )
 
+    def on_pack_schedule_event(self, event: dict[str, Any]) -> None:
+        """Use the existing non-modal toast; history remains available through tools."""
+        status = event["status"]
+        message = {
+            "needs_inspection": "Scheduled task needs inspection",
+            "expired": "Schedule expired; no further runs will start",
+        }.get(status, "Scheduled task turn finished")
+        if event.get("summary"):
+            message += f": {event['summary'][:500]}"
+        hint = f"Schedule {event['schedule_id']} · {event.get('controller_host', 'local controller')}"
+        if event.get("origin_conversation_id"):
+            hint += f" · source #{event['origin_conversation_id']}"
+        if event.get("conversation_id"):
+            hint += f" · result #{event['conversation_id']}"
+        options = {
+            "type": "error" if status == "needs_inspection" else "info",
+            "tabHint": hint,
+        }
+        self._safe_evaluate_js(
+            f"app._showToast({json.dumps(message)}, {json.dumps(options)});",
+        )
+
     # =======================================================================
     # JavaScript-callable API methods
     # =======================================================================

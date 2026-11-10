@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import sqlite3
 import threading
 import time
@@ -23,13 +24,31 @@ logger = logging.getLogger(__name__)
 STORE = "pack_schedules.db"
 TASK_FIELDS = ("host", "project", "model", "prompt")
 TASK_SCHEMA = {key: {"type": "string", "minLength": 1} for key in TASK_FIELDS}
+OPTIONS_SCHEMA = {
+    "origin_conversation_id": {
+        "type": "integer",
+        "minimum": 1,
+        "description": "Source conversation ID on this controller, for linking run history.",
+    },
+    "stop_when": {
+        "type": "string",
+        "minLength": 1,
+        "description": "Condition to check each run. Stop and notify when met; otherwise stay quiet.",
+    },
+    "expires_at": {
+        "type": "string",
+        "description": "Future ISO8601 timestamp with offset. Never launch at or after this deadline; does not stop active work.",
+    },
+}
 WHEN_SCHEMA = {
     "type": "object",
     "description": (
         'One of {"kind":"once","at":"ISO8601 with UTC offset"}, '
-        '{"kind":"delay","seconds":60}, or '
+        '{"kind":"delay","seconds":60}, '
+        '{"kind":"interval","seconds":3600}, or '
         '{"kind":"daily"|"weekly","time":"HH:MM",'
         '"timezone":"America/Los_Angeles","weekday":0}. '
+        "Intervals start after one interval and retain their original cadence. "
         "weekday is required only for weekly: Monday=0, Sunday=6. "
         "DST: skip nonexistent local times; repeated times fire once, at the first occurrence."
     ),
@@ -42,12 +61,16 @@ TOOLS = [
             "Only when explicitly authorized by the user. Persisted, best effort while "
             "this owning app/daemon runs; no wake/autostart. No overlapping runs per "
             "schedule. Missed recurring slots coalesce into one run. Reuse request_id "
-            "for safe retries. Models: claude-code/sonnet, codex/<model>, or regular ID."
+            "for safe retries. Save self-contained instructions and all relevant context "
+            "in prompt: the new session has no source chat memory. Use stop_when for "
+            "checks that stop when satisfied, and expires_at to bound polling. "
+            "Models: claude-code/sonnet, codex/<model>, or regular ID."
         ),
         "inputSchema": {
             "type": "object",
             "properties": {
                 **TASK_SCHEMA,
+                **OPTIONS_SCHEMA,
                 "request_id": {"type": "string", "minLength": 1},
                 "when": WHEN_SCHEMA,
             },
@@ -72,12 +95,14 @@ TOOLS = [
         "name": "update_pack_schedule",
         "description": (
             "Replace a schedule's full task specification and time. Refused while an "
-            "occurrence is active or needs inspection. Paused schedules stay paused."
+            "occurrence is active or needs inspection. Paused schedules stay paused. "
+            "Omitted stop_when, expires_at, and origin_conversation_id are cleared."
         ),
         "inputSchema": {
             "type": "object",
             "properties": {
                 **TASK_SCHEMA,
+                **OPTIONS_SCHEMA,
                 "schedule_id": {"type": "string"},
                 "when": WHEN_SCHEMA,
             },
@@ -109,12 +134,16 @@ TOOLS = [
 
 def normalize_when(when: dict[str, Any], now: float) -> dict[str, Any]:
     kind = when.get("kind")
-    if kind == "delay" and set(when) == {"kind", "seconds"}:
+    if kind in {"delay", "interval"} and set(when) == {"kind", "seconds"}:
         seconds = when["seconds"]
         if isinstance(seconds, bool) or not isinstance(seconds, (int, float)):
             raise ValueError("seconds must be a number")
         if not 0 < seconds <= 366 * 86400:
-            raise ValueError("delay must be positive and at most 366 days")
+            raise ValueError("seconds must be positive and at most 366 days")
+        if kind == "interval":
+            if seconds < 60:
+                raise ValueError("interval must be at least 60 seconds")
+            return {"kind": "interval", "seconds": seconds, "anchor": now}
         return {
             "kind": "once",
             "at": datetime.fromtimestamp(now + seconds, UTC).isoformat(),
@@ -144,6 +173,9 @@ def next_after(when: dict[str, Any], now: float) -> float | None:
     if when["kind"] == "once":
         at = datetime.fromisoformat(when["at"]).timestamp()
         return at if at > now else None
+    if when["kind"] == "interval":
+        steps = max(1, math.floor((now - when["anchor"]) / when["seconds"]) + 1)
+        return float(when["anchor"] + steps * when["seconds"])
     zone = ZoneInfo(when["timezone"])
     today = datetime.fromtimestamp(now, zone).date()
     hour, minute = map(int, when["time"].split(":"))
@@ -298,12 +330,27 @@ class PackScheduler:
                 self.service.validate_task({key: params[key] for key in TASK_FIELDS})
                 now = time.time()
                 when = normalize_when(params["when"], now)
+                first_run = next_after(when, now)
+                assert first_run is not None  # Normalization requires a future run.
+                expires_at = params.get("expires_at")
+                if expires_at is not None:
+                    expires_at = normalize_when(
+                        {"kind": "once", "at": expires_at},
+                        now,
+                    )["at"]
+                    if datetime.fromisoformat(expires_at).timestamp() <= first_run:
+                        raise ValueError("expires_at must be after the first run")
+                if "stop_when" in params and not params["stop_when"].strip():
+                    raise ValueError("stop_when must not be blank")
                 schedule.update(
                     task={key: params[key] for key in TASK_FIELDS},
                     when=when,
-                    next_run=next_after(when, now),
+                    next_run=first_run,
+                    origin_conversation_id=params.get("origin_conversation_id"),
+                    stop_when=params.get("stop_when"),
+                    expires_at=expires_at,
                 )
-                if schedule["state"] == "finished":
+                if schedule["state"] in {"finished", "expired"}:
                     schedule["state"] = "scheduled"
                 if method == "create_pack_schedule":
                     self._db.execute(
@@ -337,7 +384,10 @@ class PackScheduler:
                 run["status"] = "acknowledged"
                 self._save_run(run)
                 schedule["active_occurrence"] = None
-                if schedule["next_run"] is None and schedule["state"] != "cancelled":
+                if schedule["next_run"] is None and schedule["state"] in {
+                    "scheduled",
+                    "paused",
+                }:
                     schedule["state"] = "finished"
             elif action == "cancel":
                 schedule["state"] = "cancelled"
@@ -362,9 +412,19 @@ class PackScheduler:
                 if self._stop.is_set():
                     return
                 newly_claimed = False
+                expired_now = False
                 with self._lock, self._db:
                     schedule = self._schedule(schedule_id)
                     active = schedule["active_occurrence"]
+                    deadline = schedule.get("expires_at")
+                    if (
+                        deadline is not None
+                        and now >= datetime.fromisoformat(deadline).timestamp()
+                        and schedule["state"] in {"scheduled", "paused"}
+                    ):
+                        schedule.update(state="expired", next_run=None)
+                        self._save(schedule)
+                        expired_now = True
                     if active:
                         run = json.loads(
                             self._db.execute(
@@ -377,7 +437,9 @@ class PackScheduler:
                         or schedule["next_run"] is None
                         or schedule["next_run"] > now
                     ):
-                        continue
+                        if not expired_now:
+                            continue
+                        run = {"status": "expired"}
                     else:
                         newly_claimed = True
                         active = uuid.uuid4().hex
@@ -388,6 +450,9 @@ class PackScheduler:
                             "status": "claiming",
                             "due_at": schedule["next_run"],
                             "claimed_at": now,
+                            "origin_conversation_id": schedule.get(
+                                "origin_conversation_id",
+                            ),
                         }
                         schedule.update(
                             active_occurrence=active,
@@ -395,6 +460,10 @@ class PackScheduler:
                         )
                         self._save(schedule)
                         self._save_run(run)
+                if expired_now:
+                    self.service.notify_schedule(schedule, {"status": "expired"})
+                if run["status"] == "expired":
+                    continue
                 if run["status"] == "needs_inspection":
                     continue
                 try:
@@ -405,7 +474,11 @@ class PackScheduler:
                             )
                         task = self.service.call(
                             "start_pack_task",
-                            {**schedule["task"], "request_id": active},
+                            {
+                                **schedule["task"],
+                                "prompt": self._prompt(schedule),
+                                "request_id": active,
+                            },
                             task_id=active,
                         )
                         run.update(status="running", task_id=task["task_id"])
@@ -418,10 +491,37 @@ class PackScheduler:
                             tab = self.service.core.tabs[task["tab_id"]]
                             status = tab.get_task_status(task["answer_index"])
                             if status["status"] == "finished":
+                                text = status.get("answer_text", "")
+                                result: dict[str, Any] = {"summary": text[-4000:]}
+                                if schedule.get("stop_when"):
+                                    # Only the final, explicit result may end a check.
+                                    # Tool output and narrated plans cannot end polling.
+                                    marker = "ALPACA_SCHEDULE_RESULT="
+                                    line = text.rstrip().split("\n")[-1]
+                                    if not line.startswith(marker):
+                                        raise ValueError(
+                                            "Check ended without a structured schedule result",
+                                        )
+                                    result = json.loads(line[len(marker) :])
+                                    if (
+                                        not isinstance(result, dict)
+                                        or type(result.get("condition_met")) is not bool
+                                        or type(result.get("failed")) is not bool
+                                        or not isinstance(result.get("summary"), str)
+                                    ):
+                                        raise ValueError(
+                                            "Invalid structured schedule result",
+                                        )
+                                    if result["failed"]:
+                                        raise ValueError(
+                                            f"Scheduled check failed: {result['summary']}",
+                                        )
+                                    result["summary"] = result["summary"][:4000]
                                 run.update(
                                     status="finished",
                                     finished_at=now,
                                     timing=status["timing"],
+                                    result=result,
                                 )
                 except Exception as exc:
                     run.update(status="needs_inspection", error=str(exc))
@@ -430,9 +530,37 @@ class PackScheduler:
                     schedule = self._schedule(schedule_id)
                     if run["status"] == "finished":
                         schedule["active_occurrence"] = None
-                        if (
-                            schedule["next_run"] is None
-                            and schedule["state"] != "cancelled"
-                        ):
+                        if run["result"].get("condition_met"):
+                            schedule["next_run"] = None
+                        if schedule["next_run"] is None and schedule["state"] in {
+                            "scheduled",
+                            "paused",
+                        }:
                             schedule["state"] = "finished"
                         self._save(schedule)
+                if run["status"] == "needs_inspection" or (
+                    run["status"] == "finished"
+                    and (
+                        not schedule.get("stop_when")
+                        or run["result"].get("condition_met")
+                        or schedule["when"]["kind"] == "once"
+                    )
+                ):
+                    self.service.notify_schedule(schedule, run)
+
+    @staticmethod
+    def _prompt(schedule: dict[str, Any]) -> str:
+        prompt: str = schedule["task"]["prompt"]
+        if schedule.get("origin_conversation_id"):
+            prompt += f"\n\nSource Alpaca conversation on the scheduling controller: #{schedule['origin_conversation_id']}."
+        if schedule.get("stop_when"):
+            prompt += (
+                "\n\nThis is one scheduled check, not a polling loop. Check once and finish. "
+                f"Condition to evaluate: {schedule['stop_when']}\n"
+                "Do not sleep, reschedule, or wait for the condition. On your final line, "
+                "return ALPACA_SCHEDULE_RESULT= followed by a JSON object with boolean "
+                "condition_met, boolean failed, and string summary. Only set condition_met "
+                "true when verified. If unable to check, set failed true, not a negative finding. "
+                "Do not wrap the final line in Markdown."
+            )
+        return prompt

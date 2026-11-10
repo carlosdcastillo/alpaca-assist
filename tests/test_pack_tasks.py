@@ -344,9 +344,14 @@ def schedule_state(service, schedule_id):
     ][0]
 
 
-def test_scheduled_launch_boundary_and_whole_turn_completion(scheduling):
+@pytest.mark.parametrize("check_condition", [False, True])
+def test_scheduled_launch_boundary_and_whole_turn_completion(
+    scheduling,
+    check_condition,
+):
     service, scheduler, targets, now = scheduling
-    created = service.call("create_pack_schedule", scheduled_spec())
+    options = {"stop_when": "Build finished"} if check_condition else {}
+    created = service.call("create_pack_schedule", scheduled_spec(**options))
     sid = created["schedule_id"]
     scheduler.tick(now + 9.999)
     assert not targets
@@ -360,6 +365,11 @@ def test_scheduled_launch_boundary_and_whole_turn_completion(scheduling):
     # The peer is not streaming, but there is no whole-turn end record yet.
     assert not targets[0].is_streaming
     assert schedule_state(service, sid)["recent_runs"][0]["status"] == "running"
+    if check_condition:
+        targets[0].chat_state.append_to_answer(
+            0,
+            'ALPACA_SCHEDULE_RESULT={"condition_met":false,"failed":false,"summary":"Still building"}',
+        )
     targets[0].chat_state.set_turn_timing(0, {"wall_ms": 23, "tool_count": 2})
     # Stop/error can write timing before an outstanding tool has returned.
     targets[0]._tool_handler._pending_count = 1
@@ -371,6 +381,7 @@ def test_scheduled_launch_boundary_and_whole_turn_completion(scheduling):
     assert state["state"] == "finished"
     assert state["active_occurrence"] is None
     assert state["recent_runs"][0]["timing"]["tool_count"] == 2
+    assert any("_showToast" in js for js in service.core.api.get_pending_js())
     scheduler.tick(now + 864000)
     assert len(targets) == 1
 
@@ -398,6 +409,193 @@ def test_recurring_missed_runs_coalesce_without_overlap(scheduling):
     assert len(targets) == 2
     scheduler.tick(overdue + 3 * 86400)
     assert len(targets) == 2
+
+
+def test_interval_keeps_cadence_across_restart_and_missed_slots(scheduling):
+    service, scheduler, targets, now = scheduling
+    spec = scheduled_spec(when={"kind": "interval", "seconds": 3600})
+    sid = service.call("create_pack_schedule", spec)["schedule_id"]
+    scheduler.tick(now + 3599.999)
+    assert not targets
+    scheduler.close()
+    service._scheduler = None
+    scheduler = service.scheduler()
+    scheduler.tick(now + 3 * 3600 + 17)
+    state = schedule_state(service, sid)
+    assert state["next_run"] == now + 4 * 3600
+    first = state["active_occurrence"]
+    assert wait_for_launch(service, first)["status"] == "started"
+    scheduler.tick(now + 5 * 3600)
+    assert len(targets) == 1  # Still running; no overlap.
+    targets[0].chat_state.append_to_answer(0, "Report updated.")
+    targets[0].chat_state.set_turn_timing(0, {"wall_ms": 42})
+    scheduler.tick(now + 5 * 3600)
+    state = schedule_state(service, sid)
+    assert state["recent_runs"][0]["result"]["summary"] == "Report updated."
+    assert state["recent_runs"][0]["launch"]["conversation_id"] is not None
+    scheduler.tick(now + 5 * 3600)
+    state = schedule_state(service, sid)
+    assert state["active_occurrence"] != first
+    assert state["next_run"] == now + 6 * 3600
+
+
+def test_condition_check_is_quiet_until_met_and_retains_source(scheduling):
+    service, scheduler, targets, now = scheduling
+    api = service.core.api
+    spec = scheduled_spec(
+        when={"kind": "interval", "seconds": 60},
+        stop_when="Build 917 has finished successfully",
+        origin_conversation_id=37,
+    )
+    sid = service.call("create_pack_schedule", spec)["schedule_id"]
+    for index, condition_met in enumerate([False, True]):
+        due = now + 60 * (index + 1)
+        scheduler.tick(due)
+        occurrence = schedule_state(service, sid)["active_occurrence"]
+        assert wait_for_launch(service, occurrence)["status"] == "started"
+        assert "Build 917" in targets[index].chat_state.questions[0]
+        summary = "Still building" if not condition_met else "Build succeeded"
+        targets[index].chat_state.append_to_answer(
+            0,
+            "ALPACA_SCHEDULE_RESULT="
+            + json.dumps(
+                {
+                    "condition_met": condition_met,
+                    "failed": False,
+                    "summary": summary,
+                },
+            ),
+        )
+        targets[index].chat_state.set_turn_timing(0, {"wall_ms": 12})
+        api.get_pending_js()
+        scheduler.tick(due + 1)
+        notifications = [js for js in api.get_pending_js() if "_showToast" in js]
+        assert bool(notifications) == condition_met
+    state = schedule_state(service, sid)
+    assert state["state"] == "finished"
+    assert state["next_run"] is None
+    assert state["recent_runs"][0]["origin_conversation_id"] == 37
+    assert state["recent_runs"][0]["result"]["summary"] == "Build succeeded"
+    scheduler.tick(now + 100000)
+    assert len(targets) == 2
+    assert "source #37" in notifications[0]
+
+
+@pytest.mark.parametrize(
+    "answer",
+    [
+        "The build has finished",  # Narration alone must not stop or silently continue.
+        'ALPACA_SCHEDULE_RESULT={"condition_met":"false","failed":false,"summary":"x"}',
+        'ALPACA_SCHEDULE_RESULT={"condition_met":false,"failed":true,"summary":"Access denied"}',
+    ],
+)
+def test_invalid_or_failed_check_blocks_recurrence_and_notifies(scheduling, answer):
+    service, scheduler, targets, now = scheduling
+    sid = service.call(
+        "create_pack_schedule",
+        scheduled_spec(
+            when={"kind": "interval", "seconds": 60},
+            stop_when="Build finished",
+        ),
+    )["schedule_id"]
+    scheduler.tick(now + 60)
+    occurrence = schedule_state(service, sid)["active_occurrence"]
+    assert wait_for_launch(service, occurrence)["status"] == "started"
+    targets[0].chat_state.append_to_answer(0, answer)
+    targets[0].chat_state.set_turn_timing(0, {"wall_ms": 12})
+    service.core.api.get_pending_js()
+    scheduler.tick(now + 61)
+    state = schedule_state(service, sid)
+    assert state["recent_runs"][0]["status"] == "needs_inspection"
+    assert state["active_occurrence"] == occurrence
+    assert any("needs inspection" in js for js in service.core.api.get_pending_js())
+    scheduler.tick(now + 1000)
+    assert len(targets) == 1
+    assert not service.core.api.get_pending_js()  # No repeated failure toasts.
+
+
+@pytest.mark.parametrize("active", [False, True])
+def test_expiration_prevents_catchup_but_does_not_interrupt_active_work(
+    scheduling,
+    active,
+):
+    from datetime import UTC
+    from datetime import datetime
+
+    service, scheduler, targets, now = scheduling
+    sid = service.call(
+        "create_pack_schedule",
+        scheduled_spec(
+            when={"kind": "interval", "seconds": 60},
+            expires_at=datetime.fromtimestamp(now + 120, UTC).isoformat(),
+        ),
+    )["schedule_id"]
+    if active:
+        scheduler.tick(now + 60)
+        occurrence = schedule_state(service, sid)["active_occurrence"]
+        assert wait_for_launch(service, occurrence)["status"] == "started"
+    scheduler.tick(now + 120)
+    assert schedule_state(service, sid)["state"] == "expired"
+    assert any("Schedule expired" in js for js in service.core.api.get_pending_js())
+    assert len(targets) == int(active)
+    if active:
+        targets[0].chat_state.set_turn_timing(0, {"wall_ms": 12})
+        scheduler.tick(now + 121)
+        assert schedule_state(service, sid)["active_occurrence"] is None
+        assert schedule_state(service, sid)["state"] == "expired"
+    scheduler.tick(now + 1000)
+    assert len(targets) == int(active)
+    updated = {k: v for k, v in scheduled_spec().items() if k != "request_id"}
+    state = service.call("update_pack_schedule", {**updated, "schedule_id": sid})
+    assert state["state"] == "scheduled"
+    assert state["expires_at"] is None
+
+
+@pytest.mark.parametrize(
+    "options",
+    [
+        {"expires_at": "2026-10-17T12:00:10+00:00"},  # Exactly the first run.
+        {"expires_at": "2026-10-17T12:00:11"},  # No timezone.
+        {"expires_at": "2026-10-17T11:00:00+00:00"},
+        {"stop_when": "   "},
+    ],
+)
+def test_invalid_schedule_options_are_not_saved(scheduling, options):
+    service, _, _, _ = scheduling
+    with pytest.raises(ValueError):
+        service.call("create_pack_schedule", scheduled_spec(**options))
+    assert service.call("list_pack_schedules", {}) == {"schedules": []}
+
+
+def test_remote_schedule_notification_uses_remote_controller_ids(scheduling):
+    service, scheduler, _, now = scheduling
+    sid = service.call("create_pack_schedule", scheduled_spec())["schedule_id"]
+    scheduler.tick(now + 10)
+    occurrence = schedule_state(service, sid)["active_occurrence"]
+    task = wait_for_launch(service, occurrence)
+    tab = service.core.tabs[task["tab_id"]]
+    adapter = PackDaemonAdapter()
+
+    def receive(method, event):
+        assert method == "on_pack_schedule_event"
+        tab._on_pack_schedule_event(event)
+
+    adapter.set_connection(SimpleNamespace(send_notification=receive))
+    service.core.api.get_pending_js()
+    adapter.on_pack_schedule_event(
+        {
+            "schedule_id": "remote-schedule",
+            "status": "finished",
+            "origin_conversation_id": 73,
+            "conversation_id": 84,
+            "summary": "Report ready <script>not markup</script>",
+        },
+    )
+    updates = service.core.api.get_pending_js()
+    assert len(updates) == 1
+    assert "builder" in updates[0]
+    assert "source #73" in updates[0]
+    assert "result #84" in updates[0]
 
 
 def test_schedule_controls_update_and_durable_idempotency(scheduling):
@@ -506,24 +704,35 @@ async def test_scheduling_through_real_mcp(scheduling, model):
             await session.initialize()
             result = await session.call_tool(
                 "create_pack_schedule",
-                scheduled_spec(model=model),
+                scheduled_spec(
+                    model=model,
+                    when={"kind": "interval", "seconds": 60},
+                    stop_when="The requested report exists",
+                    origin_conversation_id=37,
+                ),
             )
             assert not result.isError
             sid = json.loads(result.content[0].text)["schedule_id"]
-            scheduler.tick(now + 10)
+            scheduler.tick(now + 60)
             occurrence = schedule_state(service, sid)["active_occurrence"]
             assert (await asyncio.to_thread(wait_for_launch, service, occurrence))[
                 "status"
             ] == "started"
             assert targets[-1].preferences["model"] == model
+            targets[-1].chat_state.append_to_answer(
+                0,
+                'ALPACA_SCHEDULE_RESULT={"condition_met":true,"failed":false,"summary":"Report exists"}',
+            )
+            targets[-1].chat_state.set_turn_timing(0, {"wall_ms": 12})
+            scheduler.tick(now + 61)
             result = await session.call_tool(
                 "list_pack_schedules",
                 {"schedule_id": sid},
             )
-            assert (
-                json.loads(result.content[0].text)["schedules"][0]["active_occurrence"]
-                == occurrence
-            )
+            state = json.loads(result.content[0].text)["schedules"][0]
+            assert state["state"] == "finished"
+            assert state["active_occurrence"] is None
+            assert state["recent_runs"][0]["result"]["summary"] == "Report exists"
 
 
 @pytest.mark.parametrize(
@@ -587,6 +796,11 @@ def test_schedule_calendar_contract(scheduling, monkeypatch, now, when, expected
         {"kind": "once", "at": "2026-10-17T11:00:00Z"},
         {"kind": "delay", "seconds": -1},
         {"kind": "delay", "seconds": True},
+        {"kind": "interval", "seconds": 59},
+        {"kind": "interval", "seconds": True},
+        {"kind": "interval", "seconds": float("nan")},
+        {"kind": "interval", "seconds": float("inf")},
+        {"kind": "interval", "seconds": 3600, "anchor": 0},
         {"kind": "daily", "time": "9:00", "timezone": "UTC"},
         {"kind": "daily", "time": "09:00", "timezone": "not-a-zone"},
         {"kind": "weekly", "time": "09:00", "timezone": "UTC", "weekday": 7},

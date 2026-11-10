@@ -7,6 +7,7 @@ Immediate launch records are memory-only; schedules use a separate durable store
 from __future__ import annotations
 
 import json
+import logging
 import secrets
 import tempfile
 import threading
@@ -142,6 +143,24 @@ class PackTaskService:
                 self._scheduler = PackScheduler(self)
                 self._scheduler.start()
             return self._scheduler
+
+    def notify_schedule(self, schedule: dict[str, Any], run: dict[str, Any]) -> None:
+        """Best-effort live notification; durable results remain in schedule history."""
+        event = {
+            "schedule_id": schedule["schedule_id"],
+            "origin_conversation_id": schedule.get("origin_conversation_id"),
+            "status": run["status"],
+            "conversation_id": run.get("launch", {}).get("conversation_id"),
+            "summary": run.get("error") or run.get("result", {}).get("summary", ""),
+        }
+        try:
+            api = self.core.api
+            if api is not None and hasattr(api, "on_pack_schedule_event"):
+                api.on_pack_schedule_event(event)
+        except Exception:
+            logging.getLogger(__name__).exception(
+                "Could not deliver schedule notification",
+            )
 
     @staticmethod
     def validate_task(params: dict[str, str]) -> Any:

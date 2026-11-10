@@ -159,6 +159,21 @@ class AppCore:
         a live timestamp costs nothing extra here.
         """
         sections = [self.get_skills_xml()]
+        conversation_id = getattr(tab, "conversation_id", None)
+        if conversation_id is not None:
+            sections.append(
+                "<scheduling_context>\n"
+                f"Current conversation ID on this controller: {conversation_id}.\n"
+                "When scheduling a future task, include this origin_conversation_id "
+                "and save self-contained instructions and relevant context in prompt. "
+                "Scheduled tasks run in fresh remote Pack sessions, not this chat. "
+                "Resolve the host, project, model, and timezone before creating a schedule. "
+                "Daily times follow the named timezone; intervals are elapsed time. "
+                "Use stop_when for checks that should stop once satisfied, and expires_at "
+                "when the user gives a deadline. Explain that the owning app or daemon "
+                "must remain running; scheduling here does not move it to another owner.\n"
+                "</scheduling_context>",
+            )
         project_name = getattr(tab, "project_name", None)
         workspace_path = getattr(tab, "workspace_path", None)
         if project_name and workspace_path:

@@ -98,6 +98,9 @@ class PackDaemonAdapter:
         if conn is not None:
             conn.send_notification(method, params)
 
+    def on_pack_schedule_event(self, event: dict[str, Any]) -> None:
+        self._notify("on_pack_schedule_event", event)
+
     def _token_stats(self) -> dict[str, Any]:
         tab = self._tab
         if tab is None:
@@ -343,9 +346,17 @@ def make_dispatcher(
                 )
             thread = tab._streaming_handler._current_thread
             busy = busy or (thread is not None and thread.is_alive())
+            finished = timing is not None and not busy
             return {
-                "status": "finished" if timing is not None and not busy else "running",
+                "status": "finished" if finished else "running",
                 "timing": timing,
+                "answer_text": (
+                    tab.chat_state.answers[
+                        params["answer_index"]
+                    ].get_text_only_content()
+                    if finished
+                    else ""
+                ),
             }
         if method == "configure_project":
             if tab.is_streaming:
