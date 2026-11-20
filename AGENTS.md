@@ -219,3 +219,16 @@ A `<surface-panel>` shows a live, interactive remote GUI app (Xvfb + x11vnc, tun
 **Profiles are a curated shortcut, not a security boundary.** `surface_mcp_server.py`'s `surface_open` tool takes either `profile` (looked up in `surface_profiles.json`) or a raw `argv`, same as the human-driven panel path. Refusing a model-supplied argv was considered and dropped: the model already has unrestricted shell execution on this host via `internal_run_shell_command`, and `xterm` is itself a permitted profile, so gating `surface_open`'s argv specifically wasn't preventing anything — it was only making this one path more annoying than the other two ways to the same result.
 
 **Model input carries a `seq` and gets refused when stale.** `surface_snapshot` returns the surface's current `seq`; `surface_click`/`surface_type`/`surface_key` are refused if the `seq` they were called with doesn't match (`Surface.check_seq` in `core/surface_supervisor.py`). This is what stops the model from clicking blind coordinates against a screen that has since changed. Human input, by contrast, never goes through this check at all — it goes noVNC → x11vnc directly, bypassing the supervisor entirely, so it can never be refused or lag behind a lease check.
+
+---
+
+## Commit Hooks Need a Repo `.venv` on Windows
+
+The pytest pre-commit hook runs `.venv\Scripts\python.exe` when it exists and otherwise falls back to whatever `python` is on PATH. On Windows that is often the Microsoft Store Python, which has no `tzdata`: `zoneinfo` then cannot load any time zone and the Pack scheduler tests fail for reasons unrelated to the change being committed. Create the venv on the same Python minor version the app runs on (3.11), so the hook tests the interpreter that actually ships. Some bugs only reproduce there: the `view_image` PDF deadlock in `cli_media_mcp_server.py` hangs on 3.11 and does not on 3.13.
+
+```
+py -3.11 -m venv .venv
+.venv\Scripts\python.exe -m pip install -r requirements.txt
+```
+
+`.venv` is gitignored.
