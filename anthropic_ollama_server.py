@@ -1913,6 +1913,39 @@ def _prepare_cli_images(
 _CLI_HEARTBEAT_INTERVAL_SECS = 20
 
 
+# How long a CLI gets to exit on its own once its stdout has closed, and to die
+# after being killed, before this thread stops waiting on it.
+_CLI_EXIT_GRACE_SECS = 10
+_CLI_STDERR_KEEP_CHARS = 20000
+
+
+def _kill_cli_process_tree(proc: subprocess.Popen[str]) -> None:
+    """Kill a CLI subprocess together with its MCP servers and tool children."""
+    if proc.poll() is not None:
+        return
+    if sys.platform == "win32":
+        # proc.kill() alone would orphan the MCP servers (and the venv
+        # launcher's real python.exe beneath each of them).
+        subprocess.run(
+            ["taskkill", "/PID", str(proc.pid), "/T", "/F"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=False,
+        )
+    else:
+        import signal
+
+        try:
+            os.killpg(proc.pid, signal.SIGKILL)
+        except (ProcessLookupError, PermissionError):
+            pass
+    if proc.poll() is None:
+        try:
+            proc.kill()
+        except OSError:
+            pass
+
+
 def _run_cli_jsonl(
     cmd: list[str],
     prompt: str,
@@ -1948,7 +1981,26 @@ def _run_cli_jsonl(
         encoding="utf-8",
         cwd=working_directory,
         env=child_env,
+        # Own process group on POSIX so _kill_cli_process_tree can take the
+        # CLI's MCP servers and tool subprocesses down with it.
+        start_new_session=sys.platform != "win32",
     )
+    # Drained continuously, never only at exit: a CLI that writes more to
+    # stderr than the OS pipe buffer holds would otherwise block on that write
+    # and look exactly like a hang.
+    stderr_chunks: list[str] = []
+
+    def _read_stderr() -> None:
+        assert proc.stderr is not None
+        total = 0
+        for chunk in proc.stderr:
+            if total < _CLI_STDERR_KEEP_CHARS:
+                stderr_chunks.append(chunk)
+                total += len(chunk)
+
+    stderr_thread = threading.Thread(target=_read_stderr, daemon=True)
+    stderr_thread.start()
+    completed = False
     try:
         assert proc.stdin is not None and proc.stdout is not None
 
@@ -2027,10 +2079,29 @@ def _run_cli_jsonl(
             except json.JSONDecodeError:
                 print(f"[warn] Non-JSON line from {cmd[0]}: {line[:200]}")
         yield from read_media_events()
+        completed = True
     finally:
-        stderr_output = proc.stderr.read() if proc.stderr else ""
-        returncode = proc.wait()
-        if returncode != 0:
+        # Not completed means the consumer closed this generator: the user
+        # pressed Stop or the client connection dropped. The CLI must die
+        # with the turn; merely waiting on it (the old behaviour) left it
+        # running in the background, still holding this thread, possibly for
+        # ever if one of its tools had hung. A completed run closed stdout,
+        # so it is exiting; the grace period only covers MCP shutdown.
+        returncode: int | None = None
+        if completed:
+            try:
+                returncode = proc.wait(timeout=_CLI_EXIT_GRACE_SECS)
+            except subprocess.TimeoutExpired:
+                pass
+        if returncode is None:
+            _kill_cli_process_tree(proc)
+            try:
+                returncode = proc.wait(timeout=_CLI_EXIT_GRACE_SECS)
+            except subprocess.TimeoutExpired:
+                returncode = -1
+        stderr_thread.join(timeout=1)
+        stderr_output = "".join(stderr_chunks)
+        if returncode != 0 and completed:
             msg = f"[warn] {cmd[0]} exited {returncode}: {stderr_output[:2000]}"
             try:
                 print(msg)

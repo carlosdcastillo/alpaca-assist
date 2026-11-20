@@ -13,6 +13,15 @@ import os
 import uuid
 from typing import Any
 
+# Imported eagerly, before stdio_server() starts, even though only the PDF
+# branch of internal_tools.view_image uses it. On Windows, loading numpy's
+# extension DLL (pulled in by pypdfium2) while the MCP stdio reader thread
+# has a blocking read pending on stdin deadlocks the import: view_image on
+# any PDF never returned, and `claude -p` waited on that tool call forever.
+try:
+    import pypdfium2  # noqa: F401
+except ImportError:
+    pass
 from mcp.server import Server
 from mcp.server.stdio import stdio_server
 from mcp.types import ImageContent

@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import json
+import subprocess
 import sys
 import threading
+import time
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -994,3 +996,43 @@ def test_claude_cli_tool_folds_are_bounded_and_never_empty() -> None:
         )
         == "[image result omitted]"
     )
+
+
+def test_cli_jsonl_kills_the_cli_when_the_consumer_stops_early() -> None:
+    # Stop (or a dropped client) closes the generator mid-run. The CLI must
+    # die with it; the old finally block only waited, so a CLI stuck on a
+    # hung tool call kept running, holding the server thread, indefinitely.
+    command = [
+        sys.executable,
+        "-c",
+        "import json, time; print(json.dumps({'type': 'started'}), flush=True); time.sleep(600)",
+    ]
+    real_popen = subprocess.Popen
+    spawned: list[subprocess.Popen[str]] = []
+
+    def recording_popen(*args: Any, **kwargs: Any) -> subprocess.Popen[str]:
+        spawned.append(real_popen(*args, **kwargs))
+        return spawned[-1]
+
+    with patch("anthropic_ollama_server.subprocess.Popen", side_effect=recording_popen):
+        stream = _run_cli_jsonl(command, "")
+        assert next(stream) == {"type": "started"}
+        started = time.monotonic()
+        stream.close()
+    assert time.monotonic() - started < 15
+    assert spawned[0].poll() is not None
+
+
+def test_cli_jsonl_survives_a_cli_that_floods_stderr() -> None:
+    # stderr used to be read only after exit, so a CLI writing more than the
+    # pipe buffer to it blocked on that write before it could finish.
+    command = [
+        sys.executable,
+        "-c",
+        "import json, sys; sys.stderr.write('x' * 2_000_000); sys.stderr.flush(); "
+        "print(json.dumps({'type': 'result'}))",
+    ]
+
+    output = list(_run_cli_jsonl(command, ""))
+
+    assert output == [{"type": "result"}]
