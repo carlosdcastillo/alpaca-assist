@@ -6,7 +6,7 @@ cd "$repo_root"
 
 system_packages=(
   python3-venv
-  libpython3.11
+  "libpython$(/usr/bin/python3 -c 'import sys; print(f"{sys.version_info[0]}.{sys.version_info[1]}")')"
   python3-gi
   gir1.2-gtk-3.0
   gir1.2-webkit2-4.1
